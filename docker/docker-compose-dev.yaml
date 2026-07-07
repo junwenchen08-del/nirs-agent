@@ -141,6 +141,9 @@ services:
       - ../config.yaml:/app/config.yaml
       - ../extensions_config.json:/app/extensions_config.json
       - ../skills:/app/skills
+      # NIR agent: mount nir_core so community tools (@tool functions in
+      # backend/packages/harness/deerflow/community/nir/) can import it.
+      - ../nir_core:/app/nir_core
       - ../logs:/app/logs
       # Use a Docker-managed uv cache volume instead of a host bind mount.
       # On macOS/Docker Desktop, uv may fail to create symlinks inside shared

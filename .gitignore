@@ -16,6 +16,12 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Build artifacts
+nir_core.egg-info/
+*.egg-info/
+dist/
+build/
+
 # Virtual environments
 .venv
 venv/
@@ -38,6 +44,7 @@ coverage/
 .deer-flow/
 .claude/
 skills/custom/*
+!skills/custom/nir-*/
 logs/
 log/
 debug.log
