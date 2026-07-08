@@ -216,8 +216,15 @@ def nir_preprocess_tool(
     try:
         import json as _json
 
-        from nir_core.preprocess.pipeline import PRESTEP_METHODS, PreprocessingPipeline
-        from nir_core.models import PreprocessingStep
+        try:
+            from nir_core.preprocess.pipeline import PRESTEP_METHODS, PreprocessingPipeline
+            from nir_core.models import PreprocessingStep
+        except ImportError:
+            return _err(
+                "nir_core V3 features (PreprocessingPipeline / PreprocessingStep) are not "
+                "available in the current sandbox. Please rebuild the Docker image so the "
+                "editable install of ../nir_core picks up the latest sources, then re-run."
+            )
 
         # Resolve which mode: multi-step pipeline or single method.
         steps_list: list[str] = []
@@ -355,13 +362,17 @@ def nir_train_model_tool(
             compute_metrics,
             split_dataset,
         )
-        from nir_core.model.pls import (
-            compute_vip,
-            get_regression_coefficients,
-            predict_pls,
-            train_pls,
-        )
+        from nir_core.model.pls import predict_pls, train_pls
         from nir_core.utils.metrics import evaluate_quality
+
+        # Defensive: newer nir_core exposes compute_vip / get_regression_coefficients;
+        # older sandboxes may not. Import lazily and tolerate ImportError so the
+        # tool still runs end-to-end on the older wheel.
+        try:
+            from nir_core.model.pls import compute_vip, get_regression_coefficients
+        except ImportError:
+            compute_vip = None
+            get_regression_coefficients = None
 
         real_in = _resolve(runtime, input_path, read_only=True)
         data_dict = dict(np.load(real_in, allow_pickle=True))
@@ -380,8 +391,15 @@ def nir_train_model_tool(
         best_pipe = None
         preprocessing_desc = "none"
         if pipeline_steps is not None:
-            from nir_core.models import PreprocessingStep
-            from nir_core.preprocess.pipeline import PreprocessingPipeline
+            try:
+                from nir_core.models import PreprocessingStep
+                from nir_core.preprocess.pipeline import PreprocessingPipeline
+            except ImportError:
+                return _err(
+                    "nir_core V3 features (PreprocessingPipeline) are not available in the "
+                    "current sandbox. Please rebuild the Docker image to refresh nir_core, "
+                    "or remove pipeline_steps and train without inline preprocessing."
+                )
 
             try:
                 steps_list = _json.loads(pipeline_steps) if isinstance(pipeline_steps, str) else pipeline_steps
@@ -1198,15 +1216,22 @@ def nir_compare_tool(
         import json as _json
 
         from nir_core.io.loaders import auto_detect_and_load
-        from nir_core.models import ModelResult, PreprocessingStep
         from nir_core.model.evaluation import (
             compute_metrics,
             split_dataset,
         )
         from nir_core.model.pls import predict_pls, train_pls
         from nir_core.plotting.gallery import generate_comparison_gallery
-        from nir_core.preprocess.pipeline import PreprocessingPipeline
         from nir_core.utils.metrics import evaluate_quality
+
+        try:
+            from nir_core.models import ModelResult, PreprocessingStep
+            from nir_core.preprocess.pipeline import PreprocessingPipeline
+        except ImportError:
+            return _err(
+                "nir_core V3 features (PreprocessingPipeline) are not available in the "
+                "current sandbox. Please rebuild the Docker image to refresh nir_core."
+            )
 
         # Parse pipelines.
         try:
@@ -1439,7 +1464,13 @@ def nir_register_model_tool(
         import hashlib
         import json as _json
 
-        from nir_core.utils.registry import ModelRegistry
+        try:
+            from nir_core.utils.registry import ModelRegistry
+        except ImportError:
+            return _err(
+                "nir_core V3 features (ModelRegistry) are not available in the current "
+                "sandbox. Please rebuild the Docker image to refresh nir_core."
+            )
 
         # Resolve paths.
         real_model = _resolve(runtime, model_path, read_only=True)

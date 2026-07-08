@@ -44,6 +44,10 @@ WORKDIR /app
 
 # Copy backend source code
 COPY backend ./backend
+# Copy nir_core (uv workspace member) so the editable install picks up
+# the latest sources at image build time. Without this, the sandbox would
+# be stuck on whatever nir_core wheel was last baked into the base image.
+COPY nir_core ./nir_core
 
 # Install dependencies with cache mount
 # When UV_EXTRAS is set (comma- or whitespace-separated), installs optional dependencies.
