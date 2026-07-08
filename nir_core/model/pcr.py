@@ -14,8 +14,9 @@ from dataclasses import dataclass
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, LeaveOneOut
 
+from nir_core.model.pls import _resolve_cv_splitter
 from nir_core.utils.metrics import rmse
 
 
@@ -60,6 +61,7 @@ def train_pcr(
     n_components: int | None = None,
     max_components: int = 20,
     cv_folds: int = 10,
+    cv_strategy: str = "auto",
     random_state: int = 42,
 ) -> tuple[object, int, dict]:
     """Train a PCR model, optionally auto-selecting components.
@@ -72,8 +74,9 @@ def train_pcr(
             minimises mean RMSECV.
         max_components: Upper bound for the search, clamped for stability.
         cv_folds: K-fold splits for the CV search.
-        random_state: Seed for KFold shuffling and PCA ``svd_solver`` (when
-            relevant).
+        cv_strategy: CV strategy: ``"auto"`` adapts to sample size,
+            ``"loocv"`` forces Leave-One-Out, ``"fixed"`` uses cv_folds.
+        random_state: Seed for KFold shuffling and PCA ``svd_solver``.
 
     Returns:
         Tuple ``(model, best_n_components, cv_results)``:
@@ -118,15 +121,16 @@ def train_pcr(
     upper = _safe_max_components(n_samples, n_wavelengths, max_components)
     n_comp_list = list(range(1, upper + 1))
 
-    eff_folds = max(2, min(int(cv_folds), n_samples - 1))
-    kf = KFold(n_splits=eff_folds, shuffle=True, random_state=random_state)
+    splitter, strategy_label = _resolve_cv_splitter(
+        cv_strategy, cv_folds, n_samples, random_state
+    )
 
     mean_rmse: list[float] = []
     std_rmse: list[float] = []
 
     for nc in n_comp_list:
         fold_rmse: list[float] = []
-        for train_idx, val_idx in kf.split(X_train):
+        for train_idx, val_idx in splitter.split(X_train):
             X_tr, X_val = X_train[train_idx], X_train[val_idx]
             y_tr, y_val = y_train[train_idx], y_train[val_idx]
             if X_tr.shape[0] <= nc:
@@ -171,6 +175,7 @@ def train_pcr(
         "mean_rmse_cv": mean_rmse,
         "std_rmse_cv": std_rmse,
         "best_n_components": best_n,
+        "cv_strategy": strategy_label,
     }
     return model, best_n, cv_results
 

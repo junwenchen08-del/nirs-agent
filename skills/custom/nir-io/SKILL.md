@@ -4,7 +4,6 @@ description: >-
   Load and inspect NIR spectral data from .mat / .csv / .txt files. Auto-detects
   format and structure, standardizes to .npz. Activates via /nir-io.
 allowed-tools:
-  - bash
   - read_file
   - write_file
   - ls

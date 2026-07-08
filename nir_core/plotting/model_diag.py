@@ -276,3 +276,119 @@ def plot_drift_heatmap(
     ax.legend(loc="best", fontsize=9)
 
     return _fig_to_base64(fig)
+
+
+def plot_vip(
+    vip_scores: np.ndarray,
+    wv: np.ndarray | None = None,
+    threshold: float = 1.0,
+    top_n: int = 20,
+) -> str:
+    """Plot Variable Importance in Projection (VIP) scores vs wavelength.
+
+    VIP scores > 1.0 indicate above-average contribution to the PLS model.
+    The top-N most important wavelengths are highlighted.
+
+    Args:
+        vip_scores: 1-D array of VIP scores (n_wavelengths,).
+        wv: Optional wavelength axis. If None, column indices are used.
+        threshold: VIP threshold line (default 1.0).
+        top_n: Number of top wavelengths to highlight with markers.
+
+    Returns:
+        Base64-encoded PNG string.
+    """
+    vip_scores = np.asarray(vip_scores, dtype=float).ravel()
+    n_wv = vip_scores.size
+
+    if wv is not None:
+        x = np.asarray(wv, dtype=float).ravel()
+        if x.size != n_wv:
+            x = np.arange(n_wv, dtype=float)
+        x_label = "Wavelength (nm)"
+    else:
+        x = np.arange(n_wv, dtype=float)
+        x_label = "Variable index"
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    # VIP curve.
+    ax.plot(x, vip_scores, color="steelblue", linewidth=1.0, alpha=0.8)
+
+    # Fill above threshold.
+    above = np.where(vip_scores >= threshold, vip_scores, threshold)
+    ax.fill_between(x, threshold, above, color="steelblue", alpha=0.2)
+
+    # Threshold line.
+    ax.axhline(
+        threshold,
+        color="crimson",
+        linestyle="--",
+        linewidth=1.2,
+        label=f"Threshold = {threshold}",
+    )
+
+    # Highlight top-N variables.
+    top_n = min(top_n, n_wv)
+    if top_n > 0:
+        top_idx = np.argsort(vip_scores)[-top_n:]
+        ax.scatter(
+            x[top_idx],
+            vip_scores[top_idx],
+            color="crimson",
+            s=30,
+            zorder=5,
+            label=f"Top {top_n} variables",
+        )
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("VIP score")
+    ax.set_title("Variable Importance in Projection (VIP)", fontsize=13)
+    ax.legend(loc="best", fontsize=9)
+    ax.grid(True, linestyle="--", alpha=0.4)
+
+    return _fig_to_base64(fig)
+
+
+def plot_regression_coefficients(
+    coefficients: np.ndarray,
+    wv: np.ndarray | None = None,
+) -> str:
+    """Plot PLS regression coefficients vs wavelength.
+
+    Positive coefficients indicate a positive contribution to the prediction;
+    negative coefficients indicate a negative contribution.
+
+    Args:
+        coefficients: 1-D array of regression coefficients (n_wavelengths,).
+        wv: Optional wavelength axis. If None, column indices are used.
+
+    Returns:
+        Base64-encoded PNG string.
+    """
+    coef = np.asarray(coefficients, dtype=float).ravel()
+    n_wv = coef.size
+
+    if wv is not None:
+        x = np.asarray(wv, dtype=float).ravel()
+        if x.size != n_wv:
+            x = np.arange(n_wv, dtype=float)
+        x_label = "Wavelength (nm)"
+    else:
+        x = np.arange(n_wv, dtype=float)
+        x_label = "Variable index"
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    # Positive coefficients in blue, negative in red.
+    ax.bar(x, coef, color=np.where(coef >= 0, "steelblue", "crimson"),
+           edgecolor="none", width=(x[1] - x[0]) if n_wv > 1 else 1.0, alpha=0.8)
+
+    ax.axhline(0.0, color="k", linewidth=0.8)
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("Regression coefficient")
+    ax.set_title("PLS Regression Coefficients", fontsize=13)
+    ax.grid(True, linestyle="--", alpha=0.4, axis="y")
+
+    return _fig_to_base64(fig)

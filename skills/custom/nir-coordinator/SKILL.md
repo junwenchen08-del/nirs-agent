@@ -5,7 +5,6 @@ description: >-
   包含反思闭环机制——当模型质量不达标时自动尝试不同的预处理组合。
   通过 /nir-coordinator 命令激活。
 allowed-tools:
-  - bash
   - read_file
   - write_file
   - ls
@@ -19,24 +18,36 @@ allowed-tools:
   - nir_analyze
   - nir_reflect
   - nir_compare
+  - nir_register_model
 ---
 
 # NIR 光谱分析协调器
 
-## 绝对规则（违反会导致错误和低效）
+## ⛔ 绝对禁止（违反会得到错误结果，必须严格执行）
 
-1. **禁止自己写 Python/MATLAB/R 脚本处理光谱数据**。所有光谱加载、预处理、建模、评估、绘图必须通过本 Skill 提供的 `nir_*` 工具完成。
-2. **禁止在 bash 中调用 `python` 自己读 .mat/.csv 文件**。文件读取由 `nir_load_data` 或 `nir_inspect` 完成。
-3. **禁止自己用 matplotlib 画图**。`nir_analyze` 和 `nir_train_model` 会自动生成图和报告。
-4. **禁止调用 `pip install` 安装依赖**。NIR 工具运行在已配置好的环境中，不需要也不应该安装任何包。
+**❌ 禁止调用 `bash` 工具执行任何 Python/scipy/sklearn 代码**——本 Skill 不在 allowed-tools 中包含 bash。
+**❌ 禁止写 `python -c "import ..."`、`python << EOF`、`.py` 脚本**——所有数据处理必须通过 `nir_*` 工具。
+**❌ 禁止用 `write_file` 创建任何分析脚本**（如 `analyze.py`、`train.py`）——工具会自动完成。
+**❌ 禁止手动 import `scipy.io.loadmat`、`sklearn.cross_decomposition.PLSRegression` 等**——由 `nir_*` 工具内部处理。
+**❌ 禁止自己用 matplotlib 画图**——`nir_analyze` / `nir_train_model` 自动生成 PNG。
+**❌ 禁止自己编造预处理流水线组合**——必须调用 `nir_reflect` 获得确定性的下一步。
+**❌ 禁止自己实现 snv/sg_smooth/derivative1 等算法**——`nir_preprocess` 已提供。
 
-> 如果看到自己想写 `python -c "..."`、`import scipy`、`pip install` 的冲动，请立即停止并调用对应的 NIR 工具。
+> ⚠️ **反例警告**：曾经在 LLM 自己写完整 Python 脚本（手写 SNV/SG/MSC 算法 + 三集分离 + 嵌套CV + PLS建模 + 反射闭环）时失败，因为：
+> 1. 沙箱中 `nir_core` 未安装 → `import nir_core` 失败
+> 2. 自己实现的算法与标准化学计量学实践不一致
+> 3. 错误地全量预处理后再划分 → 数据泄露
+> 4. 浪费 token 写长代码而不是专注于决策
+>
+> **任何 NIR 任务的第一选择都是调用 `nir_analyze` 或 `nir_train_model` 工具**。
 
 ## 你能做什么
 
 - 调用 `nir_analyze`：一键完成完整分析（推荐 90% 场景）
 - 调用 `nir_load_data` / `nir_inspect`：加载或预览数据
 - 调用 `nir_preprocess` / `nir_train_model`：分步执行（用于反思闭环）
+- 调用 `nir_reflect`：获取下一步重试策略（防幻觉）
+- 调用 `nir_register_model`：注册最佳模型到版本库（反思闭环后串行调用）
 - 调用 `read_file` 读取工具生成的 `report.md`、`metrics.json` 或 PNG 图片
 - 调用 `ls` 查看目录
 - 调用 `task` 委托 `nir-preprocessor` / `nir-modeler` 并行处理
@@ -47,6 +58,17 @@ allowed-tools:
 2. **强制三集分离**——训练集、验证集、测试集在建模时自动分离
 3. **验证集绝不参与任何参数选择**——只有训练集用于 CV 和搜索
 4. **测试集只在最终评估时使用一次**
+5. ★ v3 **防泄露预处理**——使用 `nir_train_model(pipeline_steps=...)` 时预处理参数仅在训练集拟合
+
+## ★ v3 按需知识加载
+
+不要在开始时读取全部知识库文档。按需读取：
+
+- 如果用户提到 **土壤** / **soil** / **有机碳** / **SOC**：读取 `/mnt/skills/custom/nir-knowledge/docs/soil-tips.md`
+- 如果用户提到 **食品** / **玉米** / **小麦** / **谷物** / **food**：读取 `/mnt/skills/custom/nir-knowledge/docs/food-tips.md`
+- 如果模型出现 **过拟合** (RMSEP > 2×RMSECV)：读取 `/mnt/skills/custom/nir-knowledge/docs/troubleshooting.md`
+- 如果需要 **指标解读** 参考：读取 `/mnt/skills/custom/nir-knowledge/docs/metrics-interpretation.md`
+- 化学计量学硬规则始终生效（已内联在本 SKILL 中），无需额外读取
 
 ## 开始分析前
 

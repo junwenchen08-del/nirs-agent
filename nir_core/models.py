@@ -8,7 +8,7 @@ import from nir_core.
 from __future__ import annotations
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SpectralData(BaseModel):
@@ -31,6 +31,19 @@ class SpectralData(BaseModel):
     sample_names: list[str] = Field(default_factory=list)
     source_file: str = ""
     original_format: str = ""
+
+    @field_validator("X", mode="before")
+    @classmethod
+    def _ensure_X_2d(cls, v):
+        """Ensure X is a 2D array; reshape 1D input to (1, n)."""
+        arr = np.asarray(v, dtype=float)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.ndim != 2:
+            raise ValueError(
+                f"X must be 1D or 2D, got {arr.ndim}D with shape {arr.shape}"
+            )
+        return arr
 
     def summary(self) -> dict:
         """Return a compact summary dict suitable for LLM context."""

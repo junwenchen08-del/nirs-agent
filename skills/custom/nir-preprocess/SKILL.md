@@ -4,7 +4,6 @@ description: >-
   Apply NIR preprocessing methods (SNV, MSC, SG smoothing, derivatives, airPLS,
   asLS, detrend, scaling, normalization) to spectral .npz data. Activates via /nir-preprocess.
 allowed-tools:
-  - bash
   - read_file
   - write_file
   - ls
@@ -32,11 +31,22 @@ allowed-tools:
 | normalize | 归一化 | norm=l2 |
 
 ## 调用示例
+
+单方法（向后兼容）：
 ```
 nir_preprocess(
   input_path="/mnt/user-data/workspace/data.npz",
   method="snv",
   output_path="/mnt/user-data/workspace/data_snv.npz"
+)
+```
+
+★ v3 多步流水线（原子执行，推荐）：
+```
+nir_preprocess(
+  input_path="/mnt/user-data/workspace/data.npz",
+  pipeline_steps='["snv","sg_smooth","mean_center"]',
+  output_path="/mnt/user-data/workspace/data_preprocessed.npz"
 )
 ```
 

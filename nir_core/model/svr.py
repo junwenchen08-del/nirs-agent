@@ -9,10 +9,12 @@ returned model is fully self-contained (caller passes raw spectra).
 from __future__ import annotations
 
 import numpy as np
-from sklearn.model_selection import GridSearchCV, KFold
+from sklearn.model_selection import GridSearchCV, KFold, LeaveOneOut
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
+
+from nir_core.model.pls import _resolve_cv_splitter
 
 # Default search grids (kept as module constants so tests can inspect them).
 DEFAULT_C_GRID: list[float] = [0.1, 1.0, 10.0, 100.0]
@@ -23,6 +25,7 @@ def train_svr(
     X_train: np.ndarray,
     y_train: np.ndarray,
     cv_folds: int = 5,
+    cv_strategy: str = "auto",
     random_state: int = 42,
 ) -> tuple[object, dict]:
     """Train an SVR (RBF) model with grid-searched hyper-parameters.
@@ -36,6 +39,8 @@ def train_svr(
         X_train: Training spectra, shape (n_samples, n_wavelengths).
         y_train: Reference values, shape (n_samples,).
         cv_folds: Number of CV folds for the grid search.
+        cv_strategy: CV strategy: ``"auto"`` adapts to sample size,
+            ``"loocv"`` forces Leave-One-Out, ``"fixed"`` uses cv_folds.
         random_state: Seed for the KFold splitter used by GridSearchCV.
 
     Returns:
@@ -72,12 +77,14 @@ def train_svr(
     }
 
     eff_folds = max(2, min(int(cv_folds), n_samples - 1))
-    kf = KFold(n_splits=eff_folds, shuffle=True, random_state=random_state)
+    splitter, strategy_label = _resolve_cv_splitter(
+        cv_strategy, cv_folds, n_samples, random_state
+    )
 
     grid = GridSearchCV(
         estimator=pipe,
         param_grid=param_grid,
-        cv=kf,
+        cv=splitter,
         scoring="neg_mean_squared_error",
         n_jobs=1,
         refit=True,
@@ -92,6 +99,7 @@ def train_svr(
         "best_score": best_score,
         "best_rmse": best_rmse,
         "cv_folds": eff_folds,
+        "cv_strategy": strategy_label,
         "param_grid": {
             "C": list(DEFAULT_C_GRID),
             "gamma": list(DEFAULT_GAMMA_GRID),

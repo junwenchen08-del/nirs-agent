@@ -152,39 +152,66 @@ def inspect_file(filepath: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _inspect_csv_like(filepath: str) -> dict:
-    """Inspect a CSV/TXT file by parsing it with numpy (header-sniffed)."""
+    """Inspect a CSV/TXT file by parsing it with numpy (header-sniffed).
+
+    Only the first 200 data rows are loaded for statistics; total row count
+    is obtained by line-counting to avoid loading very large files entirely.
+    """
     delimiter = _sniff_delimiter(filepath)
     has_header = _sniff_header(filepath, delimiter)
-    arr = np.genfromtxt(
-        filepath,
-        delimiter=delimiter,
-        skip_header=1 if has_header else 0,
-        dtype=float,
-    )
-    if arr.ndim == 1:
-        arr = arr.reshape(1, -1)
-    elif arr.ndim == 0:
+
+    # Count total data rows without parsing floats (cheap line scan).
+    with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+        total_rows = sum(1 for line in fh if line.strip())
+    if has_header:
+        total_rows -= 1
+    if total_rows < 0:
+        total_rows = 0
+
+    # Load at most 200 rows for shape/statistics preview.
+    try:
+        preview = np.genfromtxt(
+            filepath,
+            delimiter=delimiter,
+            skip_header=1 if has_header else 0,
+            dtype=float,
+            max_rows=200,
+        )
+    except TypeError:
+        # Older numpy without max_rows — fall back to full load.
+        preview = np.genfromtxt(
+            filepath,
+            delimiter=delimiter,
+            skip_header=1 if has_header else 0,
+            dtype=float,
+        )
+    if preview.ndim == 1:
+        preview = preview.reshape(1, -1)
+    elif preview.ndim == 0:
         raise ValueError(f"Could not parse a 2D data block from {filepath!r}")
 
-    structure = detect_structure(arr)
-    if structure == "samples_in_rows":
-        n_samples, n_wavelengths = arr.shape
-    else:
-        n_wavelengths, n_samples = arr.shape
+    n_cols = preview.shape[1]
+    n_data_rows = total_rows if total_rows > 0 else preview.shape[0]
 
-    finite = arr[np.isfinite(arr)]
+    structure = detect_structure(preview)
+    if structure == "samples_in_rows":
+        n_samples, n_wavelengths = n_data_rows, n_cols
+    else:
+        n_wavelengths, n_samples = n_cols, n_data_rows
+
+    finite = preview[np.isfinite(preview)]
     if finite.size == 0:
         value_range: list[float] | None = None
     else:
         value_range = [float(finite.min()), float(finite.max())]
 
     return {
-        "shape": [int(arr.shape[0]), int(arr.shape[1])],
+        "shape": [int(n_data_rows), int(n_cols)],
         "estimated_samples": int(n_samples),
         "estimated_wavelengths": int(n_wavelengths),
         "structure": structure,
         "value_range": value_range,
-        "has_nan": bool(np.isnan(arr).any()),
+        "has_nan": bool(np.isnan(preview).any()),
     }
 
 

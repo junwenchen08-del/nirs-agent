@@ -172,45 +172,82 @@ def nir_inspect_tool(
 def nir_preprocess_tool(
     runtime: Runtime,
     input_path: str,
-    method: str,
     output_path: str,
+    method: str | None = None,
+    pipeline_steps: str | None = None,
     window: int = 11,
     order: int = 2,
-    lambda_: float = 1e7,
+    lambda_: float | None = None,
     p: float = 0.001,
     norm: str = "l2",
     tool_call_id: Annotated[str, InjectedToolCallId] = "",  # noqa: ARG001
 ) -> str:
-    """Apply a single preprocessing method to a spectral .npz file.
+    """Apply preprocessing to a spectral .npz file (single method or multi-step pipeline).
 
-    The input .npz must contain at least an ``X`` array (produced by
-    ``nir_load_data``). The method is applied to all spectra and the result
-    is saved to ``output_path``.
+    Two modes:
+    - **Single method** (backward-compatible): pass ``method="snv"`` etc.
+    - **Multi-step pipeline** (★ v3): pass ``pipeline_steps`` as a JSON array
+      of method names, e.g. ``'["snv","sg_smooth","mean_center"]'``. All
+      steps execute atomically in one call, reducing LLM round-trips.
+
+    The input .npz must contain at least an ``X`` array. The result is saved
+    to ``output_path``.
 
     Args:
         input_path: Virtual path to the input .npz file.
-        method: Preprocessing method. One of: ``snv``, ``msc``, ``sg_smooth``,
-            ``derivative1``, ``derivative2``, ``airpls``, ``asls``,
-            ``detrend``, ``mean_center``, ``autoscale``, ``normalize``.
         output_path: Virtual path for the output .npz file.
-        window: Savitzky-Golay window (odd, > order). Used by sg_smooth /
-            derivative1 / derivative2.
-        order: Savitzky-Golay polynomial order. Used by sg_smooth / derivatives.
-        lambda_: Smoothness penalty for airpls / asls.
+        method: Single preprocessing method (backward-compatible). One of:
+            snv, msc, sg_smooth, derivative1, derivative2, airpls, asls,
+            detrend, mean_center, autoscale, normalize.
+        pipeline_steps: JSON array of method names for multi-step atomic
+            execution. Takes precedence over ``method`` if both given.
+            For example ``'["snv","sg_smooth","mean_center"]'``.
+        window: Savitzky-Golay window (odd, > order).
+        order: Savitzky-Golay polynomial order.
+        lambda_: Smoothness penalty for airpls / asls. If None, each method
+            uses its own default (airpls=1e7, asls=1e5).
         p: Asymmetry parameter for asls.
-        norm: Normalisation norm for ``normalize``: ``l1`` / ``l2`` / ``max``.
+        norm: Normalisation norm for ``normalize``: l1 / l2 / max.
 
     Returns:
-        JSON status with the method applied and output path.
+        JSON status with the method(s) applied, input/output shapes, and
+        output path.
     """
     try:
-        from nir_core.preprocess.pipeline import PRESTEP_METHODS
+        import json as _json
 
-        if method not in PRESTEP_METHODS:
-            return _err(
-                f"Unknown method {method!r}. Available: "
-                f"{sorted(PRESTEP_METHODS.keys())}"
-            )
+        from nir_core.preprocess.pipeline import PRESTEP_METHODS, PreprocessingPipeline
+        from nir_core.models import PreprocessingStep
+
+        # Resolve which mode: multi-step pipeline or single method.
+        steps_list: list[str] = []
+        if pipeline_steps is not None:
+            try:
+                steps_list = _json.loads(pipeline_steps) if isinstance(pipeline_steps, str) else pipeline_steps
+            except (ValueError, TypeError):
+                return _err(f"Invalid pipeline_steps JSON: {pipeline_steps!r}")
+            if not isinstance(steps_list, list) or not steps_list:
+                return _err("pipeline_steps must be a non-empty JSON array of method names")
+        elif method is not None:
+            steps_list = [method]
+        else:
+            return _err("Either 'method' or 'pipeline_steps' must be provided")
+
+        # Validate all methods exist.
+        for m in steps_list:
+            if m not in PRESTEP_METHODS:
+                return _err(
+                    f"Unknown method {m!r}. Available: "
+                    f"{sorted(PRESTEP_METHODS.keys())}"
+                )
+
+        # Validate Savitzky-Golay parameters.
+        sg_methods = {"sg_smooth", "derivative1", "derivative2"}
+        if sg_methods & set(steps_list):
+            if window % 2 == 0:
+                return _err(f"window must be odd, got {window}")
+            if window <= order:
+                return _err(f"window ({window}) must be > order ({order})")
 
         real_in = _resolve(runtime, input_path, read_only=True)
         real_out = _resolve(runtime, output_path, read_only=False)
@@ -219,26 +256,38 @@ def nir_preprocess_tool(
         data_dict = dict(np.load(real_in, allow_pickle=True))
         X = np.asarray(data_dict["X"], dtype=float)
 
-        fn = PRESTEP_METHODS[method]
-        # Build kwargs relevant to the chosen method.
-        kwargs: dict = {}
-        if method in ("sg_smooth", "derivative1", "derivative2"):
-            kwargs["window"] = window
-            kwargs["order"] = order
-        elif method in ("airpls",):
-            kwargs["lambda_"] = lambda_
-        elif method in ("asls",):
-            kwargs["lambda_"] = lambda_
-            kwargs["p"] = p
-        elif method == "normalize":
-            kwargs["norm"] = norm
+        # Build and apply pipeline atomically.
+        steps = []
+        for m in steps_list:
+            params: dict = {}
+            if m in sg_methods:
+                params["window"] = window
+                params["order"] = order
+            elif m == "airpls":
+                if lambda_ is not None:
+                    params["lambda_"] = lambda_
+            elif m == "asls":
+                if lambda_ is not None:
+                    params["lambda_"] = lambda_
+                params["p"] = p
+            elif m == "normalize":
+                params["norm"] = norm
+            steps.append(PreprocessingStep(method=m, params=params))
 
-        X_processed = fn(X, **kwargs)
+        pipe = PreprocessingPipeline(steps=steps)
+        X_processed = pipe.apply(X, wv=(np.asarray(data_dict["wv"]).ravel()
+                                        if data_dict.get("wv") is not None else None))
         data_dict["X"] = X_processed
+        # Sync wavelength vector if preprocessing changed the wavelength count.
+        if "wv" in data_dict and data_dict["wv"] is not None:
+            wv_arr = np.asarray(data_dict["wv"]).ravel()
+            if wv_arr.shape[0] > X_processed.shape[1]:
+                data_dict["wv"] = wv_arr[: X_processed.shape[1]]
         np.savez(real_out, **data_dict)
         return _ok({
             "status": "ok",
-            "method": method,
+            "pipeline": steps_list,
+            "description": pipe.description(),
             "input_shape": list(X.shape),
             "output_shape": list(X_processed.shape),
             "output_path": output_path,
@@ -252,10 +301,12 @@ def nir_train_model_tool(
     runtime: Runtime,
     input_path: str,
     method: str = "pls",
+    pipeline_steps: str | None = None,
     test_ratio: float = 0.20,
     val_ratio: float = 0.10,
     max_components: int = 20,
     cv_folds: int = 10,
+    cv_strategy: str = "auto",
     model_output: str = "/mnt/user-data/outputs/model.pkl",
     metrics_output: str = "/mnt/user-data/outputs/metrics.json",
     domain: str = "default",
@@ -263,46 +314,61 @@ def nir_train_model_tool(
 ) -> str:
     """Train a chemometric calibration model (PLS / PCR / SVR).
 
-    Automatically performs: three-way split (train/val/test, no leakage) →
-    inner CV to pick the component count → full-metric evaluation
-    (RMSEC/RMSECV/RMSEP, R^2, RPD, bias, slope) → model serialisation
-    (joblib) → metrics JSON. This tool does NOT run the reflection loop;
-    the coordinator Skill decides whether to retry with a different
-    preprocessing pipeline.
+    ★ v3 改进: 接受可选的 ``pipeline_steps`` JSON 参数实现防泄露预处理。
+    当提供 ``pipeline_steps`` 时，工具内部执行：划分数据 → 仅在训练集
+    拟合预处理参数 → 变换全部集合 → 建模。避免了分步模式中先全局预处理
+    后划分导致的数据泄露问题。
+
+    自动执行: 三集分离（可选内置防泄露预处理）→ 内部CV选成分数 →
+    全指标评估（RMSEC/RMSECV/RMSEP, R², RPD, bias, slope）→ VIP
+    可解释性输出 → 模型序列化 → 指标JSON。
 
     Args:
-        input_path: Virtual path to the preprocessed .npz file (must contain
-            ``X`` and ``y``).
+        input_path: Virtual path to the .npz file (must contain ``X`` and
+            ``y``). Can be raw data or pre-preprocessed data.
         method: Modelling method: ``pls`` / ``pcr`` / ``svr``.
+        pipeline_steps: ★ v3: JSON array of preprocessing method names.
+            When provided, the tool internally splits data first, then fits
+            the pipeline on train only (leakage-safe), then transforms all
+            sets. For example ``'["snv","sg_smooth","mean_center"]'``.
+            If None, assumes input is already preprocessed.
         test_ratio: Fraction of data reserved as the independent test set.
-        val_ratio: Fraction reserved as validation (used for val_r2 only;
-            never touches inner CV).
+        val_ratio: Fraction reserved as validation.
         max_components: Upper bound for the PLS/PCR component search.
         cv_folds: Number of CV folds for component selection.
+        cv_strategy: ★ v3: ``"auto"`` (default, adapts to sample size),
+            ``"loocv"`` (Leave-One-Out), or ``"fixed"`` (use cv_folds).
         model_output: Virtual path for the serialised model (.pkl).
         metrics_output: Virtual path for the metrics JSON file.
-        domain: Application domain for quality-gate thresholds. One of
-            ``food_protein`` / ``food_moisture`` / ``soil`` / ``feed`` /
-            ``pharma`` / ``default``.
+        domain: Application domain for quality-gate thresholds.
 
     Returns:
         JSON with method, n_components, R2_val, RPD, RMSEC, RMSECV, RMSEP,
-        model_path, metrics_path, and a quality assessment.
+        VIP summary, model_path, metrics_path, and quality assessment.
     """
     try:
+        import json as _json
         import joblib
 
+        from nir_core.io.loaders import auto_detect_and_load
         from nir_core.model.evaluation import (
             compute_metrics,
             split_dataset,
         )
-        from nir_core.model.pls import predict_pls, train_pls
+        from nir_core.model.pls import (
+            compute_vip,
+            get_regression_coefficients,
+            predict_pls,
+            train_pls,
+        )
         from nir_core.utils.metrics import evaluate_quality
 
         real_in = _resolve(runtime, input_path, read_only=True)
         data_dict = dict(np.load(real_in, allow_pickle=True))
         X = np.asarray(data_dict["X"], dtype=float)
         y = np.asarray(data_dict["y"], dtype=float).ravel()
+        wv = (np.asarray(data_dict["wv"], dtype=float).ravel()
+              if data_dict.get("wv") is not None and data_dict["wv"].size else None)
         if X.shape[0] != y.shape[0]:
             return _err(f"X rows ({X.shape[0]}) != y length ({y.shape[0]})")
 
@@ -310,31 +376,75 @@ def nir_train_model_tool(
             X, y, test_ratio=test_ratio, val_ratio=val_ratio, random_state=42,
         )
 
+        # ★ v3: Leakage-safe inline preprocessing when pipeline_steps given.
+        best_pipe = None
+        preprocessing_desc = "none"
+        if pipeline_steps is not None:
+            from nir_core.models import PreprocessingStep
+            from nir_core.preprocess.pipeline import PreprocessingPipeline
+
+            try:
+                steps_list = _json.loads(pipeline_steps) if isinstance(pipeline_steps, str) else pipeline_steps
+            except (ValueError, TypeError):
+                return _err(f"Invalid pipeline_steps JSON: {pipeline_steps!r}")
+
+            steps = [PreprocessingStep(method=str(m)) for m in steps_list]
+            best_pipe = PreprocessingPipeline(steps=steps) if steps else None
+            if best_pipe is not None:
+                # Fit on TRAIN ONLY, then transform all sets.
+                best_pipe.fit(X_tr, wv)
+                X_tr = best_pipe.transform(X_tr, wv)
+                X_val = best_pipe.transform(X_val, wv)
+                X_te = best_pipe.transform(X_te, wv)
+                preprocessing_desc = best_pipe.description()
+
         if method == "pls":
-            model, best_n, cv_results = train_pls(
-                X_tr, y_tr, n_components=None,
-                max_components=max_components, cv_folds=cv_folds,
-                random_state=42,
-            )
+            # Defensive: older nir_core versions do not accept cv_strategy.
+            try:
+                model, best_n, cv_results = train_pls(
+                    X_tr, y_tr, n_components=None,
+                    max_components=max_components, cv_folds=cv_folds,
+                    cv_strategy=cv_strategy, random_state=42,
+                )
+            except TypeError:
+                model, best_n, cv_results = train_pls(
+                    X_tr, y_tr, n_components=None,
+                    max_components=max_components, cv_folds=cv_folds,
+                    random_state=42,
+                )
             y_pred_tr = predict_pls(model, X_tr)
             y_pred_val = predict_pls(model, X_val)
             y_pred_te = predict_pls(model, X_te)
         elif method == "pcr":
             from nir_core.model.pcr import predict_pcr, train_pcr
 
-            model, best_n, cv_results = train_pcr(
-                X_tr, y_tr, n_components=None,
-                max_components=max_components, cv_folds=cv_folds,
-                random_state=42,
-            )
+            try:
+                model, best_n, cv_results = train_pcr(
+                    X_tr, y_tr, n_components=None,
+                    max_components=max_components, cv_folds=cv_folds,
+                    cv_strategy=cv_strategy, random_state=42,
+                )
+            except TypeError:
+                model, best_n, cv_results = train_pcr(
+                    X_tr, y_tr, n_components=None,
+                    max_components=max_components, cv_folds=cv_folds,
+                    random_state=42,
+                )
             y_pred_tr = predict_pcr(model, X_tr)
             y_pred_val = predict_pcr(model, X_val)
             y_pred_te = predict_pcr(model, X_te)
         elif method == "svr":
             from nir_core.model.svr import predict_svr, train_svr
 
-            model, cv_results = train_svr(X_tr, y_tr, cv_folds=cv_folds,
-                                          random_state=42)
+            try:
+                model, cv_results = train_svr(
+                    X_tr, y_tr, cv_folds=cv_folds,
+                    cv_strategy=cv_strategy, random_state=42,
+                )
+            except TypeError:
+                model, cv_results = train_svr(
+                    X_tr, y_tr, cv_folds=cv_folds, random_state=42,
+                )
             best_n = None
             y_pred_tr = predict_svr(model, X_tr)
             y_pred_val = predict_svr(model, X_val)
@@ -347,6 +457,7 @@ def nir_train_model_tool(
             "n_components": best_n,
             "domain": domain,
             "n_samples": int(X.shape[0]),
+            "preprocessing": preprocessing_desc,
             "train": compute_metrics(y_tr, y_pred_tr),
             "val": compute_metrics(y_val, y_pred_val),
             "test": compute_metrics(y_te, y_pred_te),
@@ -355,8 +466,6 @@ def nir_train_model_tool(
         metrics["R2_val"] = metrics["val"]["R2"]
         metrics["RPD"] = metrics["test"]["RPD"]
         metrics["RMSEC"] = metrics["train"]["RMSE"]
-        # cv_results["mean_rmse_cv"] is a list; extract the value at the
-        # chosen component count (or the min) so RMSECV is a scalar.
         _rmse_cv = cv_results.get("mean_rmse_cv") if isinstance(cv_results, dict) else None
         if isinstance(_rmse_cv, list) and _rmse_cv:
             _nc_list = cv_results.get("n_components", [])
@@ -370,7 +479,29 @@ def nir_train_model_tool(
             metrics["RMSECV"] = None
         metrics["RMSEP"] = metrics["test"]["RMSE"]
 
-        # Quality assessment (dynamic thresholds by domain + sample size).
+        # ★ v3: Interpretability — VIP and regression coefficients (PLS only).
+        vip_summary = None
+        coef_summary = None
+        if method == "pls":
+            try:
+                vip_scores = compute_vip(model, X_tr, y_tr)
+                vip_summary = {
+                    "max": float(np.max(vip_scores)),
+                    "mean": float(np.mean(vip_scores)),
+                    "n_above_1": int(np.sum(vip_scores > 1.0)),
+                    "top_10_indices": [int(i) for i in np.argsort(vip_scores)[-10:][::-1]],
+                }
+                coef = get_regression_coefficients(model)
+                coef_summary = {
+                    "max_abs": float(np.max(np.abs(coef))),
+                    "mean_abs": float(np.mean(np.abs(coef))),
+                }
+                metrics["vip_summary"] = vip_summary
+                metrics["coef_summary"] = coef_summary
+            except Exception:
+                pass  # VIP computation failure is non-fatal.
+
+        # Quality assessment.
         quality = evaluate_quality(metrics, domain=domain,
                                    n_samples=int(X.shape[0]))
         metrics["quality"] = quality
@@ -385,7 +516,7 @@ def nir_train_model_tool(
         with open(real_metrics, "w", encoding="utf-8") as f:
             json.dump(metrics, f, ensure_ascii=False, indent=2, default=_json_default)
 
-        # Generate plots + report (same as nir_analyze).
+        # Generate plots + report.
         import base64
 
         from nir_core.plotting.model_diag import (
@@ -395,10 +526,8 @@ def nir_train_model_tool(
         )
         from nir_core.plotting.spectra import plot_raw_spectra
 
-        # Build a SpectralData-like object for plot_raw_spectra.
         from nir_core.models import SpectralData
-        spec_data = SpectralData(X=X, y=y, wv=(data_dict.get("wv")
-                                               if data_dict.get("wv") is not None else None))
+        spec_data = SpectralData(X=X, y=y, wv=wv)
 
         out_dir = os.path.dirname(real_model)
         pred_b64 = plot_predicted_vs_reference(y_te, y_pred_te)
@@ -424,10 +553,29 @@ def nir_train_model_tool(
                 with open(os.path.join(out_dir, fname), "wb") as f:
                     f.write(base64.b64decode(b64))
 
+        # ★ v3: VIP and regression coefficient plots (PLS only).
+        vip_b64 = ""
+        coef_b64 = ""
+        if method == "pls":
+            try:
+                from nir_core.model.pls import compute_vip, get_regression_coefficients
+                from nir_core.plotting.model_diag import plot_vip, plot_regression_coefficients
+
+                vip_scores = compute_vip(model, X_tr, y_tr)
+                vip_b64 = plot_vip(vip_scores, wv=wv)
+                coef = get_regression_coefficients(model)
+                coef_b64 = plot_regression_coefficients(coef, wv=wv)
+                for fname, b64 in [("vip_scores.png", vip_b64),
+                                   ("regression_coefficients.png", coef_b64)]:
+                    if b64:
+                        with open(os.path.join(out_dir, fname), "wb") as f:
+                            f.write(base64.b64decode(b64))
+            except Exception:
+                pass  # VIP plot failure is non-fatal.
+
         # Markdown report with embedded plots.
-        from nir_core.models import PreprocessingStep as _PS
         report = _build_report(
-            spec_data, metrics, quality, None,
+            spec_data, metrics, quality, best_pipe,
             raw_spectra_b64=raw_b64,
             predicted_vs_reference_b64=pred_b64,
             residuals_b64=resid_b64,
@@ -437,19 +585,22 @@ def nir_train_model_tool(
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(report)
 
-        # Derive virtual paths for the output directory.
         out_virtual = os.path.dirname(model_output)
 
         return _ok({
             "status": "ok",
             "method": method,
             "n_components": best_n,
+            "preprocessing": preprocessing_desc,
             "R2_val": round(metrics["R2_val"], 4),
             "RPD": round(metrics["RPD"], 4),
             "RMSEC": round(metrics["RMSEC"], 4),
             "RMSECV": (round(metrics["RMSECV"], 4)
                        if metrics["RMSECV"] is not None else None),
             "RMSEP": round(metrics["RMSEP"], 4),
+            "vip_summary": vip_summary,
+            "coef_summary": coef_summary,
+            "cv_strategy": cv_results.get("cv_strategy", "unknown"),
             "grade": quality["grade"],
             "passed": quality["passed"],
             "action": quality["action"],
@@ -462,6 +613,8 @@ def nir_train_model_tool(
                 "predicted_vs_reference": out_virtual + "/predicted_vs_reference.png",
                 "residuals": out_virtual + "/residuals.png",
                 "cv_curve": (out_virtual + "/cv_curve.png") if cv_b64 else None,
+                "vip_scores": (out_virtual + "/vip_scores.png") if vip_b64 else None,
+                "regression_coefficients": (out_virtual + "/regression_coefficients.png") if coef_b64 else None,
             },
         })
     except Exception as exc:  # noqa: BLE001
@@ -638,28 +791,46 @@ def nir_analyze_tool(
         # Train (method-aware; nested_cv_preprocessing always uses PLS for
         # the inner component search, but the final model honours `method`).
         if method == "pls":
-            model, best_n, cv_results = train_pls(
-                X_tr, y_tr, n_components=None, max_components=10,
-                cv_folds=5, random_state=42,
-            )
+            try:
+                model, best_n, cv_results = train_pls(
+                    X_tr, y_tr, n_components=None, max_components=10,
+                    cv_folds=5, cv_strategy="auto", random_state=42,
+                )
+            except TypeError:
+                model, best_n, cv_results = train_pls(
+                    X_tr, y_tr, n_components=None, max_components=10,
+                    cv_folds=5, random_state=42,
+                )
             y_pred_te = predict_pls(model, X_te)
             y_pred_val = predict_pls(model, X_val)
             y_pred_tr = predict_pls(model, X_tr)
         elif method == "pcr":
             from nir_core.model.pcr import predict_pcr, train_pcr
 
-            model, best_n, cv_results = train_pcr(
-                X_tr, y_tr, n_components=None, max_components=10,
-                cv_folds=5, random_state=42,
-            )
+            try:
+                model, best_n, cv_results = train_pcr(
+                    X_tr, y_tr, n_components=None, max_components=10,
+                    cv_folds=5, cv_strategy="auto", random_state=42,
+                )
+            except TypeError:
+                model, best_n, cv_results = train_pcr(
+                    X_tr, y_tr, n_components=None, max_components=10,
+                    cv_folds=5, random_state=42,
+                )
             y_pred_te = predict_pcr(model, X_te)
             y_pred_val = predict_pcr(model, X_val)
             y_pred_tr = predict_pcr(model, X_tr)
         elif method == "svr":
             from nir_core.model.svr import predict_svr, train_svr
 
-            model, cv_results = train_svr(X_tr, y_tr, cv_folds=5,
-                                          random_state=42)
+            try:
+                model, cv_results = train_svr(
+                    X_tr, y_tr, cv_folds=5, cv_strategy="auto", random_state=42,
+                )
+            except TypeError:
+                model, cv_results = train_svr(
+                    X_tr, y_tr, cv_folds=5, random_state=42,
+                )
             best_n = None
             y_pred_te = predict_svr(model, X_te)
             y_pred_val = predict_svr(model, X_val)
@@ -1227,6 +1398,91 @@ def nir_compare_tool(
             "gallery": output_dir + "/comparison_gallery.html",
             "summary": output_dir + "/comparison_summary.md",
             "all_metrics": output_dir + "/all_metrics.json",
+        })
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"{type(exc).__name__}: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 (v3): Model registration tool (anti-parallel-write-conflict)
+# ---------------------------------------------------------------------------
+
+@tool("nir_register_model", parse_docstring=True)
+def nir_register_model_tool(
+    runtime: Runtime,
+    model_id: str,
+    model_path: str,
+    metrics_path: str,
+    registry_path: str = "/mnt/user-data/outputs/registry.json",
+    domain: str = "default",
+    tool_call_id: Annotated[str, InjectedToolCallId] = "",  # noqa: ARG001
+) -> str:
+    """Register a trained model into the versioned model registry.
+
+    ★ v3: This tool is designed to be called by the coordinator agent
+    *after* the reflection loop finishes, in a serial (non-parallel) manner.
+    Sub-agents (nir-modeler) never call this — they only produce .pkl and
+    metrics.json files. The coordinator collects all results, picks the best,
+    and calls this tool once to register it.
+
+    Args:
+        model_id: Logical model identifier (e.g. ``"corn_protein_pls"``).
+        model_path: Virtual path to the serialized model (.pkl).
+        metrics_path: Virtual path to the metrics JSON file.
+        registry_path: Virtual path to the registry JSON file.
+        domain: Application domain tag for the registry record.
+
+    Returns:
+        JSON with the assigned version tag and registry summary.
+    """
+    try:
+        import hashlib
+        import json as _json
+
+        from nir_core.utils.registry import ModelRegistry
+
+        # Resolve paths.
+        real_model = _resolve(runtime, model_path, read_only=True)
+        real_metrics = _resolve(runtime, metrics_path, read_only=True)
+        real_registry = _resolve(runtime, registry_path, read_only=False)
+        os.makedirs(os.path.dirname(real_registry), exist_ok=True)
+
+        # Load metrics from file.
+        with open(real_metrics, "r", encoding="utf-8") as f:
+            metrics = _json.load(f)
+
+        # Compute a data hash from the model file (best-effort fingerprint).
+        with open(real_model, "rb") as f:
+            model_bytes = f.read()
+        data_hash = hashlib.md5(model_bytes).hexdigest()
+
+        # Extract preprocessing steps from metrics if available.
+        pp_steps = []
+        if isinstance(metrics.get("preprocessing"), str):
+            pp_steps = [{"method": metrics["preprocessing"]}]
+        elif isinstance(metrics.get("preprocessing"), list):
+            pp_steps = metrics["preprocessing"]
+
+        # Register.
+        registry = ModelRegistry(registry_path=real_registry)
+        version = registry.register(
+            model_id=model_id,
+            method=metrics.get("method", "unknown"),
+            metrics=metrics,
+            preprocessing_steps=pp_steps,
+            data_hash=data_hash,
+            model_path=model_path,
+        )
+
+        # Return a summary (no matrix data).
+        all_versions = registry.list_versions(model_id)
+        return _ok({
+            "status": "registered",
+            "model_id": model_id,
+            "version": version,
+            "n_versions": len(all_versions),
+            "domain": domain,
+            "registry_path": registry_path,
         })
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")

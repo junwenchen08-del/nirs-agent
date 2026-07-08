@@ -4,7 +4,6 @@ description: >-
   Generate visualization plots for NIR analysis results (spectra, predicted vs
   reference, residuals, drift heatmap, comparison gallery). Activates via /nir-gallery.
 allowed-tools:
-  - bash
   - read_file
   - write_file
   - ls

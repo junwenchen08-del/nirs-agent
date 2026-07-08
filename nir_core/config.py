@@ -100,12 +100,17 @@ class NirConfig:
         with open(p, encoding="utf-8") as f:
             data = json.load(f)
         quality = QualityThresholds(**data.get("quality", {}))
+        # Merge JSON overrides onto built-in defaults so missing keys are
+        # preserved (data.get("key", {}) would replace the entire default).
+        base = cls()
         return cls(
             quality=quality,
-            defaults=data.get("defaults", {}),
-            candidate_pipelines=data.get("candidate_pipelines", []),
-            registry_path=data.get("registry_path", "artifacts/registry.json"),
-            drift=data.get("drift", {}),
+            defaults={**base.defaults, **data.get("defaults", {})},
+            candidate_pipelines=data.get(
+                "candidate_pipelines", base.candidate_pipelines
+            ),
+            registry_path=data.get("registry_path", base.registry_path),
+            drift={**base.drift, **data.get("drift", {})},
         )
 
     def to_dict(self) -> dict:

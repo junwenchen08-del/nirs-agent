@@ -915,6 +915,10 @@ tools:
     group: bash
     use: deerflow.community.nir.tools:nir_compare_tool
 
+  - name: nir_register_model
+    group: bash
+    use: deerflow.community.nir.tools:nir_register_model_tool
+
 # ============================================================================
 # Tool Search Configuration (Deferred Tool Loading)
 # ============================================================================
@@ -939,14 +943,15 @@ subagents:
       description: "近红外光谱预处理专家。对光谱数据应用单一预处理方法并返回结果。"
       system_prompt: |
         你是近红外光谱预处理专家。
+        ⛔ 绝对禁止：禁止自己写 Python/scipy 代码或调用 bash 执行数据处理。所有预处理必须通过调用 nir_preprocess 工具完成。
         职责：对 /mnt/user-data/workspace/ 下的 .npz 光谱数据应用指定预处理方法。
         步骤：
-        1. 确认输入文件存在
-        2. 调用 nir_preprocess 工具，传入 input_path、method、output_path
+        1. 用 read_file 读取 SKILL.md（如未读取）确认可用方法
+        2. 调用 nir_preprocess 工具，传入 input_path、method（或 pipeline_steps JSON）、output_path
         3. 返回输出文件路径和预处理描述
-        限制：只做预处理，不要建模。
+        限制：只做预处理，不要建模。禁止自己实现任何算法。
         可用方法：snv, msc, sg_smooth, derivative1, derivative2, airpls, asls, detrend, mean_center, autoscale, normalize
-      tools: [bash, read_file, write_file, ls, nir_preprocess]
+      tools: [read_file, write_file, ls, nir_preprocess]
       skills: []
       model: inherit
       max_turns: 60
@@ -956,13 +961,14 @@ subagents:
       description: "化学计量学建模专家。建立并评估 PLS/PCR/SVR 校准模型。"
       system_prompt: |
         你是化学计量学建模专家。
+        ⛔ 绝对禁止：禁止自己写 Python/scipy/sklearn 代码或调用 bash 执行建模。所有建模必须通过调用 nir_train_model 工具完成。
         职责：对预处理后的 .npz 数据建立回归模型并返回完整评估指标。
         步骤：
-        1. 确认输入文件存在
-        2. 调用 nir_train_model 工具，传入 input_path、method、model_output、metrics_output、domain
+        1. 用 read_file 读取 SKILL.md（如未读取）确认方法
+        2. 调用 nir_train_model 工具，传入 input_path、method（或 pipeline_steps 防泄露）、model_output、metrics_output、domain
         3. 读取返回的 metrics，报告 R²_val、RPD、RMSEP
-        限制：只建模，不做预处理。不判断质量是否达标，只返回指标。
-      tools: [bash, read_file, write_file, ls, nir_train_model]
+        限制：只建模，不做预处理。不判断质量是否达标，只返回指标。禁止自己写 PLS/PCR/SVR 代码。
+      tools: [read_file, write_file, ls, nir_train_model]
       skills: []
       model: inherit
       max_turns: 80

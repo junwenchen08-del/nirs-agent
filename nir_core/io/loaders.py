@@ -362,5 +362,14 @@ def _split_csv_block(
             wv = wv[finite_mask]
         if wv.shape[0] > X.shape[1]:
             wv = wv[: X.shape[1]]
+        elif wv.shape[0] < X.shape[1]:
+            import warnings
+
+            warnings.warn(
+                f"Wavelength vector length ({wv.shape[0]}) < X columns "
+                f"({X.shape[1]}); wavelength labels may be incomplete.",
+                UserWarning,
+                stacklevel=2,
+            )
 
     return X, y, wv

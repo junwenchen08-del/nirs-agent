@@ -4,7 +4,6 @@ description: >-
   Predict reference values for new NIR spectra using a trained model. Supports
   optional drift detection. Activates via /nir-predict.
 allowed-tools:
-  - bash
   - read_file
   - write_file
   - ls
