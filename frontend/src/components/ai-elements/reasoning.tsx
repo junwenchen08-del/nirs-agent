@@ -42,7 +42,6 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   onTurnDurationChange?: (duration: number | undefined) => void;
 };
 
-const AUTO_CLOSE_DELAY = 1000;
 const MS_IN_S = 1000;
 
 export const Reasoning = memo(
@@ -69,7 +68,6 @@ export const Reasoning = memo(
       onChange: onTurnDurationChange,
     });
 
-    const [hasAutoClosed, setHasAutoClosed] = useState(false);
     const [startTime, setStartTime] = useState<number | null>(
       () => startTimeProp ?? (isStreaming ? Date.now() : null),
     );
@@ -89,18 +87,15 @@ export const Reasoning = memo(
       }
     }, [isStreaming, startTimeProp, startTime, setDuration]);
 
-    // Auto-open when streaming starts, auto-close when streaming ends (once only)
+    // Auto-open when streaming starts. Keep the reasoning panel open after
+    // streaming ends so users can always review the full thought process —
+    // previously this auto-collapsed after 1s, hiding the content behind a
+    // "Thought for X seconds" trigger.
     useEffect(() => {
-      if (defaultOpen && !isStreaming && isOpen && !hasAutoClosed) {
-        // Add a small delay before closing to allow user to see the content
-        const timer = setTimeout(() => {
-          setIsOpen(false);
-          setHasAutoClosed(true);
-        }, AUTO_CLOSE_DELAY);
-
-        return () => clearTimeout(timer);
+      if (defaultOpen && isStreaming && !isOpen) {
+        setIsOpen(true);
       }
-    }, [isStreaming, isOpen, defaultOpen, setIsOpen, hasAutoClosed]);
+    }, [defaultOpen, isStreaming, isOpen, setIsOpen]);
 
     const handleOpenChange = (newOpen: boolean) => {
       setIsOpen(newOpen);
