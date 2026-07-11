@@ -35,9 +35,7 @@ def test_load_csv_roundtrip_no_y_no_wv(tmp_path: Path, synthetic_data: SpectralD
     np.testing.assert_allclose(loaded.X, data.X)
 
 
-def test_load_csv_roundtrip_with_y_and_wv(
-    tmp_path: Path, synthetic_data: SpectralData
-) -> None:
+def test_load_csv_roundtrip_with_y_and_wv(tmp_path: Path, synthetic_data: SpectralData) -> None:
     """Round-trip a full CSV (y + wv) and verify all three arrays."""
     src = synthetic_data
     data = SpectralData(
@@ -77,3 +75,233 @@ def test_load_csv_auto_delimiter_tab(tmp_path: Path) -> None:
     loaded = load_csv(str(fp))
     assert loaded.X.shape == (3, 4)
     np.testing.assert_allclose(loaded.X, X)
+
+
+def test_load_csv_auto_detects_nir_style_labeled_layout(tmp_path: Path) -> None:
+    """A CSV with empty corner, wavelength header row, and y column should
+    auto-split into X / y / wv without explicit y_col / wv_row.
+
+    Mirrors the corn_moisture.csv layout:
+        ,1100,1102,...,2500
+        12.5,0.31,0.30,...,0.42
+        ...
+    """
+    wv = np.linspace(1100, 2500, 51)
+    rng = np.random.default_rng(42)
+    y = np.linspace(5, 25, 20)  # moisture percentages, 5-25%
+    X = rng.uniform(0.1, 1.5, size=(20, 51))  # absorbance 0.1-1.5
+
+    fp = tmp_path / "nir_style.csv"
+    with open(fp, "w", encoding="utf-8") as fh:
+        # Header row: empty corner + wavelengths.
+        fh.write("," + ",".join(f"{w:g}" for w in wv) + "\n")
+        for yi, row in zip(y, X):
+            fh.write(f"{yi:g}," + ",".join(f"{v:g}" for v in row) + "\n")
+
+    loaded = load_csv(str(fp))
+    assert loaded.X.shape == (20, 51)
+    assert loaded.y is not None and loaded.y.shape == (20,)
+    assert loaded.wv is not None and loaded.wv.shape == (51,)
+    # ``:g`` formatting in the writer trims to 6 significant digits, so the
+    # round-trip precision is bounded by the file format rather than FP64.
+    np.testing.assert_allclose(loaded.wv, wv, rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(loaded.y, y, rtol=1e-5, atol=1e-4)
+    np.testing.assert_allclose(loaded.X, X, rtol=1e-5, atol=1e-5)
+
+
+def test_load_csv_auto_layout_disabled(tmp_path: Path) -> None:
+    """auto_layout=False keeps prior behaviour: whole block is X, no y/wv."""
+    wv = np.linspace(1100, 2500, 51)
+    rng = np.random.default_rng(42)
+    y = np.linspace(5, 25, 20)
+    X = rng.uniform(0.1, 1.5, size=(20, 51))
+
+    fp = tmp_path / "nir_style.csv"
+    with open(fp, "w", encoding="utf-8") as fh:
+        fh.write("," + ",".join(f"{w:g}" for w in wv) + "\n")
+        for yi, row in zip(y, X):
+            fh.write(f"{yi:g}," + ",".join(f"{v:g}" for v in row) + "\n")
+
+    loaded = load_csv(str(fp), auto_layout=False)
+    # Block has 21 rows (header + 20) and 52 cols (y col + 51 wv).
+    # With auto_layout=False, nothing is split out.
+    assert loaded.y is None
+    assert loaded.wv is None
+    assert loaded.X.shape == (21, 52)
+
+
+def test_load_csv_auto_layout_rejects_non_nir_first_row(tmp_path: Path) -> None:
+    """A first row with values outside the NIR wavelength range should NOT
+    trigger auto-layout — protects against false positives on plain
+    numeric tables that happen to have an empty corner cell.
+    """
+    # First row is small integers (0..10), not wavelengths.
+    arr = np.arange(11, dtype=float).reshape(1, 11)
+    arr[0, 0] = np.nan
+    fp = tmp_path / "not_nir.csv"
+    with open(fp, "w", encoding="utf-8") as fh:
+        for row in arr:
+            fh.write(",".join("" if np.isnan(v) else f"{v:g}" for v in row) + "\n")
+        # Add a second row so the loader produces 2D.
+        fh.write("1," + ",".join("0.5" for _ in range(10)) + "\n")
+
+    loaded = load_csv(str(fp))
+    # Auto-layout must refuse; the block stays intact.
+    assert loaded.y is None
+    assert loaded.wv is None
+
+
+def test_load_csv_auto_layout_accepts_similar_scale_y_and_spectra(tmp_path: Path) -> None:
+    """Reference values and absorbances with similar numeric ranges must
+    still be auto-separated when signals 1 (corner NaN) and 2 (NIR
+    wavelength row) are confident.
+
+    Regression: the previous range-ratio heuristic rejected layouts where
+    ``y_range / inner_range`` fell in [0.3, 3.0]. pH 6–8 (range 2.0) vs
+    absorbance 0.2–1.5 (range 1.3) gives ratio ≈ 1.54 and was silently
+    misclassified, leaving ``data.y = None`` and y merged into X.
+    """
+    wv = np.linspace(1100, 2500, 51)
+    rng = np.random.default_rng(7)
+    y = np.linspace(6.0, 8.0, 20)  # pH, range 2.0
+    X = rng.uniform(0.2, 1.5, size=(20, 51))  # absorbance, range 1.3
+
+    fp = tmp_path / "ph_absorbance.csv"
+    with open(fp, "w", encoding="utf-8") as fh:
+        fh.write("," + ",".join(f"{w:g}" for w in wv) + "\n")
+        for yi, row in zip(y, X):
+            fh.write(f"{yi:g}," + ",".join(f"{v:g}" for v in row) + "\n")
+
+    loaded = load_csv(str(fp))
+    assert loaded.y is not None and loaded.y.shape == (20,)
+    assert loaded.wv is not None and loaded.wv.shape == (51,)
+    assert loaded.X.shape == (20, 51)
+    np.testing.assert_allclose(loaded.y, y, rtol=1e-5, atol=1e-4)
+
+
+def test_load_csv_auto_layout_rejects_wavelength_first_column(tmp_path: Path) -> None:
+    """When the first column's values fall in the NIR wavelength band
+    themselves, the column is treated as wavelengths (samples-in-columns
+    layout) rather than reference values, so auto-layout refuses.
+    """
+    wv = np.linspace(1100, 2500, 51)
+    # First column also holds NIR-range values → looks like wavelengths.
+    first_col = np.linspace(1200, 2400, 20)
+    rng = np.random.default_rng(3)
+    X = rng.uniform(0.1, 1.0, size=(20, 51))
+
+    fp = tmp_path / "wavelength_col.csv"
+    with open(fp, "w", encoding="utf-8") as fh:
+        fh.write("," + ",".join(f"{w:g}" for w in wv) + "\n")
+        for yi, row in zip(first_col, X):
+            fh.write(f"{yi:g}," + ",".join(f"{v:g}" for v in row) + "\n")
+
+    loaded = load_csv(str(fp))
+    # First column is in the NIR band → not treated as reference values.
+    assert loaded.y is None
+
+
+# ---------------------------------------------------------------------------
+# Explicit y_col / wv_row override
+# ---------------------------------------------------------------------------
+
+
+def test_load_csv_explicit_y_col_and_wv_row_on_canonical_layout(tmp_path: Path) -> None:
+    """Explicit y_col=0, wv_row=0 produces the same result as auto-detection
+    on a canonical NIR CSV (empty corner + wavelength header + y column).
+    """
+    wv = np.linspace(1100, 2500, 51)
+    rng = np.random.default_rng(42)
+    y = np.linspace(5, 25, 20)
+    X = rng.uniform(0.1, 1.5, size=(20, 51))
+
+    fp = tmp_path / "nir_style.csv"
+    with open(fp, "w", encoding="utf-8") as fh:
+        fh.write("," + ",".join(f"{w:g}" for w in wv) + "\n")
+        for yi, row in zip(y, X):
+            fh.write(f"{yi:g}," + ",".join(f"{v:g}" for v in row) + "\n")
+
+    loaded = load_csv(str(fp), y_col=0, wv_row=0)
+    assert loaded.X.shape == (20, 51)
+    assert loaded.y is not None and loaded.y.shape == (20,)
+    assert loaded.wv is not None and loaded.wv.shape == (51,)
+    np.testing.assert_allclose(loaded.wv, wv, rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(loaded.y, y, rtol=1e-5, atol=1e-4)
+
+
+def test_load_csv_explicit_y_col_only(tmp_path: Path) -> None:
+    """Passing only y_col (no wv_row) splits y but leaves wv=None."""
+    rng = np.random.default_rng(7)
+    y = np.linspace(10, 50, 15)
+    X = rng.uniform(0, 1, size=(15, 30))
+
+    fp = tmp_path / "plain.csv"
+    with open(fp, "w", encoding="utf-8") as fh:
+        for yi, row in zip(y, X):
+            fh.write(f"{yi:g}," + ",".join(f"{v:g}" for v in row) + "\n")
+
+    loaded = load_csv(str(fp), y_col=0)
+    assert loaded.X.shape == (15, 30)
+    assert loaded.y is not None and loaded.y.shape == (15,)
+    assert loaded.wv is None
+    np.testing.assert_allclose(loaded.y, y, rtol=1e-5, atol=1e-4)
+
+
+def test_load_csv_explicit_wv_row_only(tmp_path: Path) -> None:
+    """Passing only wv_row (no y_col) splits wv but leaves y=None."""
+    wv = np.linspace(1000, 2500, 30)
+    rng = np.random.default_rng(7)
+    X = rng.uniform(0, 1, size=(15, 30))
+
+    fp = tmp_path / "plain.csv"
+    with open(fp, "w", encoding="utf-8") as fh:
+        fh.write(",".join(f"{w:g}" for w in wv) + "\n")
+        for row in X:
+            fh.write(",".join(f"{v:g}" for v in row) + "\n")
+
+    loaded = load_csv(str(fp), wv_row=0)
+    assert loaded.X.shape == (15, 30)
+    assert loaded.y is None
+    assert loaded.wv is not None and loaded.wv.shape == (30,)
+    # ``:g`` formatting trims to 6 significant digits — relax tolerance.
+    np.testing.assert_allclose(loaded.wv, wv, rtol=1e-5, atol=1e-2)
+
+
+def test_load_csv_explicit_override_bypasses_auto_detection(tmp_path: Path) -> None:
+    """When explicit y_col/wv_row are given, auto-detection is skipped even
+    if the first column would normally be rejected (e.g. NIR-range values).
+    This gives the agent an escape hatch for edge cases.
+    """
+    wv = np.linspace(1100, 2500, 51)
+    # First column holds NIR-range values — auto-detection would reject.
+    first_col = np.linspace(1200, 2400, 20)
+    rng = np.random.default_rng(3)
+    X = rng.uniform(0.1, 1.0, size=(20, 51))
+
+    fp = tmp_path / "wavelength_col.csv"
+    with open(fp, "w", encoding="utf-8") as fh:
+        fh.write("," + ",".join(f"{w:g}" for w in wv) + "\n")
+        for yi, row in zip(first_col, X):
+            fh.write(f"{yi:g}," + ",".join(f"{v:g}" for v in row) + "\n")
+
+    # Auto-detection rejects (first col in NIR band).
+    auto_loaded = load_csv(str(fp))
+    assert auto_loaded.y is None
+
+    # Explicit override forces y_col=0 despite the NIR-band values.
+    override_loaded = load_csv(str(fp), y_col=0, wv_row=0)
+    assert override_loaded.y is not None
+    assert override_loaded.y.shape == (20,)
+    assert override_loaded.wv is not None
+    assert override_loaded.X.shape == (20, 51)
+
+
+def test_load_csv_explicit_y_col_out_of_range_raises(tmp_path: Path) -> None:
+    """An out-of-range y_col raises ValueError (not silently ignored)."""
+    rng = np.random.default_rng(1)
+    X = rng.uniform(0, 1, size=(5, 3))
+    fp = tmp_path / "small.csv"
+    np.savetxt(str(fp), X, delimiter=",")
+
+    with pytest.raises(ValueError, match="y_col.*out of range"):
+        load_csv(str(fp), y_col=10)

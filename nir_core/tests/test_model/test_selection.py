@@ -7,7 +7,6 @@ import pytest
 
 from nir_core.model.selection import cars_wavelength_selection, spa_wavelength_selection
 
-
 # ---------------------------------------------------------------------------
 # CARS
 # ---------------------------------------------------------------------------
@@ -16,9 +15,7 @@ from nir_core.model.selection import cars_wavelength_selection, spa_wavelength_s
 def test_cars_returns_nonempty_subset(synthetic_data):
     """CARS must return a non-empty subset smaller than n_wavelengths."""
     X, y = synthetic_data.X, synthetic_data.y
-    X_sel, indices = cars_wavelength_selection(
-        X, y, n_mc_samples=10, n_folds=3, random_state=42
-    )
+    X_sel, indices = cars_wavelength_selection(X, y, n_mc_samples=10, n_folds=3, random_state=42)
     assert len(indices) > 0
     assert len(indices) < X.shape[1]
     # X_sel has the right shape.
@@ -33,24 +30,16 @@ def test_cars_returns_nonempty_subset(synthetic_data):
 def test_cars_reproducible(synthetic_data):
     """Same random_state -> identical selected indices."""
     X, y = synthetic_data.X, synthetic_data.y
-    _, i1 = cars_wavelength_selection(
-        X, y, n_mc_samples=10, n_folds=3, random_state=42
-    )
-    _, i2 = cars_wavelength_selection(
-        X, y, n_mc_samples=10, n_folds=3, random_state=42
-    )
+    _, i1 = cars_wavelength_selection(X, y, n_mc_samples=10, n_folds=3, random_state=42)
+    _, i2 = cars_wavelength_selection(X, y, n_mc_samples=10, n_folds=3, random_state=42)
     assert i1 == i2
 
 
 def test_cars_different_seeds_differ(synthetic_data):
     """Different seeds generally produce different subsets (statistical)."""
     X, y = synthetic_data.X, synthetic_data.y
-    _, i1 = cars_wavelength_selection(
-        X, y, n_mc_samples=10, n_folds=3, random_state=1
-    )
-    _, i2 = cars_wavelength_selection(
-        X, y, n_mc_samples=10, n_folds=3, random_state=999
-    )
+    _, i1 = cars_wavelength_selection(X, y, n_mc_samples=10, n_folds=3, random_state=1)
+    _, i2 = cars_wavelength_selection(X, y, n_mc_samples=10, n_folds=3, random_state=999)
     # They *could* be equal by chance, but with 500 wavelengths and
     # stochastic sampling it's very unlikely. Use a soft assertion.
     assert (i1 != i2) or (len(i1) < X.shape[1])
@@ -72,9 +61,7 @@ def test_cars_shape_mismatch_raises(synthetic_data):
 def test_cars_on_small_data(small_synthetic_data):
     """CARS should work on smaller datasets without crashing."""
     X, y = small_synthetic_data.X, small_synthetic_data.y
-    X_sel, indices = cars_wavelength_selection(
-        X, y, n_mc_samples=8, n_folds=3, random_state=7
-    )
+    X_sel, indices = cars_wavelength_selection(X, y, n_mc_samples=8, n_folds=3, random_state=7)
     assert len(indices) > 0
     assert X_sel.shape[0] == X.shape[0]
 
@@ -104,11 +91,28 @@ def test_spa_reproducible(synthetic_data):
 
 
 def test_spa_default_n_max(synthetic_data):
-    """n_max defaults to min(10, n_wavelengths // 10)."""
+    """n_max defaults to min(10, max(3, n_wavelengths // 3))."""
     X, y = synthetic_data.X, synthetic_data.y
-    expected = min(10, X.shape[1] // 10)
+    expected = min(10, max(3, X.shape[1] // 3))
     _, indices = spa_wavelength_selection(X, y)  # use defaults
     assert len(indices) <= expected
+
+
+def test_spa_small_wavelength_count():
+    """SPA should search a reasonable range even for small wavelength counts.
+
+    Old formula gave n_max=1 for 15 wavelengths, which made the search
+    trivially small.  New formula gives n_max=5, so the algorithm has room
+    to explore multi-wavelength subsets.
+    """
+    from nir_core.tests.generators import generate_synthetic_spectra
+
+    data = generate_synthetic_spectra(n_samples=40, n_wavelengths=15, n_components=3, random_state=42)
+    X, y = data.X, data.y
+    # With the fix, n_max=min(10, max(3, 15//3))=5.
+    # With real signal (3 latent components), multiple wavelengths should help.
+    _, indices = spa_wavelength_selection(X, y, n_min=3)
+    assert len(indices) >= 3, f"Expected >= 3 selected wavelengths, got {len(indices)}"
 
 
 def test_spa_n_min_greater_than_one(synthetic_data):

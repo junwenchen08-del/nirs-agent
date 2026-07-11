@@ -13,12 +13,43 @@ from langgraph.runtime import Runtime
 from deerflow.agents.middlewares.dynamic_context_middleware import is_dynamic_context_reminder
 from deerflow.config.title_config import get_title_config
 from deerflow.models import create_chat_model
+from deerflow.utils.llm_text import strip_think_blocks
 
 if TYPE_CHECKING:
     from deerflow.config.app_config import AppConfig
     from deerflow.config.title_config import TitleConfig
 
 logger = logging.getLogger(__name__)
+
+# Tag names injected by upstream middlewares that must be stripped from user
+# text before it is used for title generation. Kept in sync with
+# input_sanitization_middleware._BLOCKED_TAG_NAMES and the tag list in
+# frontend/src/core/messages/utils.ts.
+_INTERNAL_TAG_NAMES = (
+    "uploaded_files",
+    "slash_skill_activation",
+    "system-reminder",
+    "memory",
+    "current_date",
+    "think",
+    "analysis",
+)
+# Pattern: <tag ...> ... </tag>  (non-greedy, multiline, case-insensitive).
+# Group 1 captures the opening tag name so the closing tag is matched via
+# backreference, ensuring only paired open/close tags are removed.
+_INTERNAL_TAG_RE = re.compile(
+    r"<\s*(" + "|".join(_INTERNAL_TAG_NAMES) + r")\b[^>]*>[\s\S]*?<\s*/\s*\1\s*>",
+    re.IGNORECASE,
+)
+# Orphan tags that survive the paired-tag regex: self-closing <tag/>, a
+# dangling opening <tag> whose close was truncated at context-window
+# limits, or an orphan closing </tag>. Requires a closing ">" so a
+# truncated "<tag" with no ">" (very rare, mid-stream truncation) is
+# left untouched rather than eating arbitrary trailing content.
+_INTERNAL_TAG_ORPHAN_RE = re.compile(
+    r"<\s*/?\s*(" + "|".join(_INTERNAL_TAG_NAMES) + r")\b[^>]*>",
+    re.IGNORECASE,
+)
 
 
 class TitleMiddlewareState(AgentState):
@@ -95,8 +126,67 @@ class TitleMiddleware(AgentMiddleware[TitleMiddlewareState]):
 
     def _get_title_user_message(self, state: TitleMiddlewareState) -> str:
         messages = state.get("messages") or []
-        user_msg_content = next((self._message_content(m) for m in messages if self._is_user_message_for_title(m)), "")
-        return self._normalize_content(user_msg_content)
+        for m in messages:
+            if not self._is_user_message_for_title(m):
+                continue
+            cleaned = self._strip_internal_tags(self._normalize_content(self._message_content(m)))
+            if cleaned:
+                return cleaned
+            # User submitted a message with only an attachment (no text). Use
+            # the filename(s) from additional_kwargs.files as the title seed
+            # so the sidebar shows something more useful than "New Conversation".
+            filenames = self._get_uploaded_filenames(m)
+            if filenames:
+                return ", ".join(filenames)
+        return ""
+
+    @staticmethod
+    def _get_uploaded_filenames(message: object) -> list[str]:
+        """Extract uploaded filenames from a message's additional_kwargs.files.
+
+        Tolerates both dict-shape and object-shape messages, and skips entries
+        that do not look like files (no ``name`` field).
+        """
+        if isinstance(message, dict):
+            additional = message.get("additional_kwargs") or {}
+        else:
+            additional = getattr(message, "additional_kwargs", None) or {}
+        if not isinstance(additional, dict):
+            return []
+        files = additional.get("files")
+        if not isinstance(files, list):
+            return []
+        names: list[str] = []
+        for f in files:
+            if isinstance(f, dict):
+                name = f.get("name") or f.get("filename")
+            else:
+                name = getattr(f, "name", None) or getattr(f, "filename", None)
+            if isinstance(name, str) and name.strip():
+                names.append(name.strip())
+        return names
+
+    @staticmethod
+    def _strip_internal_tags(text: str) -> str:
+        """Remove framework-injected context blocks from user text before using it for title generation.
+
+        Upstream middlewares prepend XML-like blocks to HumanMessage content
+        (uploaded_files, slash_skill_activation, system-reminder, etc.). If we
+        pass that raw text to the title model or the local fallback, the
+        resulting thread title becomes a truncated tag prefix and is useless
+        in the sidebar.
+        """
+        if not text:
+            return ""
+        cleaned = _INTERNAL_TAG_RE.sub("", text)
+        # Second pass: strip any remaining opening/closing/self-closing
+        # tags from the known list that survived the paired-tag regex
+        # (self-closing <tag/>, or a dangling <tag> whose close was
+        # truncated upstream).
+        cleaned = _INTERNAL_TAG_ORPHAN_RE.sub("", cleaned)
+        # Collapse leftover blank lines and trim.
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
 
     def _should_generate_title(self, state: TitleMiddlewareState, *, allow_partial_exchange: bool = False) -> bool:
         """Check if we should generate a title for this thread."""
@@ -137,7 +227,7 @@ class TitleMiddleware(AgentMiddleware[TitleMiddlewareState]):
         assistant_msg_content = next((self._message_content(m) for m in messages if self._message_type(m) == "ai"), "")
 
         user_msg = self._get_title_user_message(state)
-        assistant_msg = self._strip_think_tags(self._normalize_content(assistant_msg_content))
+        assistant_msg = strip_think_blocks(self._normalize_content(assistant_msg_content))
 
         prompt = config.prompt_template.format(
             max_words=config.max_words,
@@ -146,15 +236,11 @@ class TitleMiddleware(AgentMiddleware[TitleMiddlewareState]):
         )
         return prompt, user_msg
 
-    def _strip_think_tags(self, text: str) -> str:
-        """Remove <think>...</think> blocks emitted by reasoning models (e.g. minimax, DeepSeek-R1)."""
-        return re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
-
     def _parse_title(self, content: object) -> str:
         """Normalize model output into a clean title string."""
         config = self._get_title_config()
         title_content = self._normalize_content(content)
-        title_content = self._strip_think_tags(title_content)
+        title_content = strip_think_blocks(title_content)
         title = title_content.strip().strip('"').strip("'")
         return title[: config.max_chars] if len(title) > config.max_chars else title
 

@@ -18,6 +18,8 @@ Both functions return ``(X_selected, selected_indices)`` where
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.model_selection import KFold
@@ -25,9 +27,7 @@ from sklearn.model_selection import KFold
 from nir_core.utils.metrics import rmse
 
 
-def _safe_n_components(
-    X: np.ndarray, y: np.ndarray, max_components: int
-) -> int:
+def _safe_n_components(X: np.ndarray, y: np.ndarray, max_components: int) -> int:
     """Pick a safe PLS component count for the given data shape."""
     n_samples, n_wavelengths = X.shape
     if n_wavelengths < 1:
@@ -63,7 +63,11 @@ def _pls_cv_rmse(
             m.fit(X_tr, y_tr)
             pred = m.predict(X_val).ravel()
             rmses.append(rmse(y_val, pred))
-        except Exception:
+        except Exception as exc:
+            warnings.warn(
+                f"CARS CV fold skipped (n_components={nc}): {exc}",
+                stacklevel=2,
+            )
             continue
     if not rmses:
         return float("inf")
@@ -119,9 +123,7 @@ def cars_wavelength_selection(
         raise ValueError(f"X must be 2-D, got shape {X.shape}")
     n_samples, n_wavelengths = X.shape
     if n_samples != y.shape[0]:
-        raise ValueError(
-            f"X rows ({n_samples}) != y length ({y.shape[0]})"
-        )
+        raise ValueError(f"X rows ({n_samples}) != y length ({y.shape[0]})")
     if n_mc_samples < 2:
         raise ValueError(f"n_mc_samples must be >= 2, got {n_mc_samples}")
 
@@ -135,17 +137,14 @@ def cars_wavelength_selection(
         init_coef = np.abs(np.asarray(init_pls.coef_).ravel())
     except Exception:
         # Fallback: use correlation with y as importance.
-        init_coef = np.abs(
-            np.array([np.corrcoef(X[:, j], y)[0, 1] for j in range(n_wavelengths)])
-        )
+        init_coef = np.abs(np.array([np.corrcoef(X[:, j], y)[0, 1] for j in range(n_wavelengths)]))
     init_coef = np.nan_to_num(init_coef, nan=0.0, posinf=0.0, neginf=0.0)
 
     # Step 2: Monte Carlo sampling to accumulate weights.
     weights = np.zeros(n_wavelengths, dtype=float)
     n_sub = max(n_samples - 1, int(round(0.8 * n_samples)))
     n_sub = min(n_sub, n_samples)
-    mc_nc = _safe_n_components(
-        X[:n_sub], y[:n_sub], max_components=min(10, n_wavelengths))
+    mc_nc = _safe_n_components(X[:n_sub], y[:n_sub], max_components=min(10, n_wavelengths))
     for _ in range(n_mc_samples):
         idx = rng.choice(n_samples, size=n_sub, replace=False)
         Xs, ys = X[idx], y[idx]
@@ -153,7 +152,11 @@ def cars_wavelength_selection(
             m = PLSRegression(n_components=mc_nc, scale=False)
             m.fit(Xs, ys)
             coef = np.abs(np.asarray(m.coef_).ravel())
-        except Exception:
+        except Exception as exc:
+            warnings.warn(
+                f"CARS MC sample skipped (n_components={mc_nc}): {exc}",
+                stacklevel=2,
+            )
             continue
         weights += coef
 
@@ -198,7 +201,7 @@ def cars_wavelength_selection(
 
         # ARS: re-sample among retained with probability ~ weight^2.
         w_ret = total_weights[retained]
-        w2 = w_ret ** 2
+        w2 = w_ret**2
         s = float(np.sum(w2))
         if s <= 0:
             probs = np.ones(len(retained)) / len(retained)
@@ -209,9 +212,7 @@ def cars_wavelength_selection(
         # 1, at most n_keep. Use n_keep (already shrunk by EDF) to keep
         # the subset size roughly equal to the retention ratio.
         n_final = max(1, n_keep)
-        chosen_pos = rng.choice(
-            len(retained), size=n_final, replace=False, p=probs
-        )
+        chosen_pos = rng.choice(len(retained), size=n_final, replace=False, p=probs)
         chosen = np.sort(retained[chosen_pos])
 
         key = tuple(int(c) for c in chosen)
@@ -238,9 +239,7 @@ def cars_wavelength_selection(
     return X_selected, best_indices
 
 
-def _spa_forward(
-    X: np.ndarray, start: int, n_select: int
-) -> list[int]:
+def _spa_forward(X: np.ndarray, start: int, n_select: int) -> list[int]:
     """Run the SPA forward selection starting at column ``start``.
 
     At each step, pick the unselected column whose projection onto the
@@ -324,14 +323,12 @@ def spa_wavelength_selection(
         raise ValueError(f"X must be 2-D, got shape {X.shape}")
     n_samples, n_wavelengths = X.shape
     if n_samples != y.shape[0]:
-        raise ValueError(
-            f"X rows ({n_samples}) != y length ({y.shape[0]})"
-        )
+        raise ValueError(f"X rows ({n_samples}) != y length ({y.shape[0]})")
     if n_min < 1:
         raise ValueError(f"n_min must be >= 1, got {n_min}")
 
     if n_max is None:
-        n_max = min(10, max(1, n_wavelengths // 10))
+        n_max = min(10, max(3, n_wavelengths // 3))
     n_max = int(n_max)
     n_min = int(n_min)
     if n_max < n_min:
@@ -378,7 +375,11 @@ def spa_wavelength_selection(
                 denom = np.where(np.abs(1.0 - H_diag) < 1e-10, 1e-10, 1.0 - H_diag)
                 press = np.sum((resid / denom) ** 2)
                 rmse_loo = float(np.sqrt(press / n_samples))
-            except Exception:
+            except Exception as exc:
+                warnings.warn(
+                    f"SPA evaluation skipped (n_sel={n_sel}): {exc}",
+                    stacklevel=2,
+                )
                 continue
             if rmse_loo < best_rmse:
                 best_rmse = rmse_loo

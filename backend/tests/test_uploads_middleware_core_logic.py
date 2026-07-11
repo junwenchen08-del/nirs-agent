@@ -203,6 +203,57 @@ class TestCreateFilesMessage:
         assert "<uploaded_files>" in msg
         assert "</uploaded_files>" in msg
 
+    # -- spectral-data hint ------------------------------------------------
+
+    def test_spectral_hint_present_for_csv_new_file(self, tmp_path):
+        mw = _middleware(tmp_path)
+        msg = mw._create_files_message([self._new_file(filename="spectra.csv")], [])
+        assert "Spectral data files detected" in msg
+        assert "nir_load_data" in msg
+        assert "nir_inspect" in msg
+        assert "nir_analyze" in msg
+        assert "DO NOT write Python scripts with `bash`" in msg
+
+    def test_spectral_hint_present_for_mat_new_file(self, tmp_path):
+        mw = _middleware(tmp_path)
+        msg = mw._create_files_message([self._new_file(filename="data.mat")], [])
+        assert "Spectral data files detected" in msg
+
+    def test_spectral_hint_present_for_csv_historical_file(self, tmp_path):
+        mw = _middleware(tmp_path)
+        msg = mw._create_files_message([], [self._new_file(filename="old.csv")])
+        assert "Spectral data files detected" in msg
+        assert "nir_load_data" in msg
+
+    def test_spectral_hint_absent_for_non_spectral_file(self, tmp_path):
+        mw = _middleware(tmp_path)
+        msg = mw._create_files_message([self._new_file(filename="report.pdf")], [])
+        assert "Spectral data files detected" not in msg
+        assert "nir_load_data" not in msg
+
+    def test_spectral_hint_absent_when_no_files(self, tmp_path):
+        mw = _middleware(tmp_path)
+        msg = mw._create_files_message([], [])
+        assert "Spectral data files detected" not in msg
+
+    def test_spectral_hint_present_when_mixed_extensions(self, tmp_path):
+        """A single spectral file among non-spectral ones still triggers the hint."""
+        mw = _middleware(tmp_path)
+        new = [self._new_file(filename="readme.md"), self._new_file(filename="sample.csv", size=500)]
+        msg = mw._create_files_message(new, [])
+        assert "Spectral data files detected" in msg
+        assert "nir_load_data" in msg
+
+    def test_spectral_hint_case_insensitive_extension(self, tmp_path):
+        mw = _middleware(tmp_path)
+        msg = mw._create_files_message([self._new_file(filename="DATA.CSV")], [])
+        assert "Spectral data files detected" in msg
+
+    def test_spectral_hint_blocks_bash_scripting_instruction(self, tmp_path):
+        mw = _middleware(tmp_path)
+        msg = mw._create_files_message([self._new_file(filename="x.txt")], [])
+        assert "DO NOT write Python scripts with `bash`" in msg
+
 
 # ---------------------------------------------------------------------------
 # before_agent

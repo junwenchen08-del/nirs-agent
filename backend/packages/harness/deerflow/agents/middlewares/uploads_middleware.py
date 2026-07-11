@@ -18,6 +18,11 @@ from deerflow.utils.messages import ORIGINAL_USER_CONTENT_KEY, message_content_t
 
 logger = logging.getLogger(__name__)
 
+# File extensions that typically contain NIR/UV-Vis spectral data.
+# When these are uploaded, the agent should prefer the dedicated `nir_*`
+# tools over writing ad-hoc Python scripts with `bash`.
+_SPECTRAL_FILE_EXTENSIONS = frozenset({".csv", ".mat", ".npz", ".txt", ".parquet"})
+
 
 _OUTLINE_PREVIEW_LINES = 5
 
@@ -145,6 +150,22 @@ class UploadsMiddleware(AgentMiddleware[UploadsMiddlewareState]):
         lines.append("- Use `glob` to find files by name pattern")
         lines.append("  (e.g. `glob(pattern='**/*.md', path='/mnt/user-data/uploads/')`).")
         lines.append("- Only fall back to web search if the file content is clearly insufficient to answer the question.")
+
+        # When spectral data files are uploaded, prefer the dedicated `nir_*`
+        # tools over writing ad-hoc Python scripts with `bash`. The `nir_*`
+        # tools handle CSV/MAT/NPZ auto-layout, wavelength/reference-column
+        # detection, preprocessing, modelling and analysis — writing custom
+        # scripts is slower, error-prone and bypasses the validated pipeline.
+        all_files = (new_files or []) + (historical_files or [])
+        if any(Path(f["filename"]).suffix.lower() in _SPECTRAL_FILE_EXTENSIONS for f in all_files):
+            lines.append("")
+            lines.append("Spectral data files detected (CSV/MAT/NPZ/TXT/Parquet). For NIR/UV-Vis data:")
+            lines.append("- DO NOT write Python scripts with `bash` to load, parse or analyse the data.")
+            lines.append("- Use `nir_load_data` to load the file (auto-detects wavelength row and reference-value column).")
+            lines.append("- Use `nir_inspect` to inspect the structure before loading if unsure.")
+            lines.append("- Use `nir_preprocess` / `nir_train_model` / `nir_analyze` for downstream analysis.")
+            lines.append("- Only use `read_file`/`grep` for a quick peek at headers; never to load the full dataset.")
+
         lines.append("</uploaded_files>")
 
         return "\n".join(lines)
