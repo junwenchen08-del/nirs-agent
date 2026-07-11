@@ -8,6 +8,8 @@ set using the best component count.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.model_selection import KFold, LeaveOneOut
@@ -39,9 +41,7 @@ def _resolve_cv_splitter(
     return KFold(n_splits=eff_folds, shuffle=True, random_state=random_state), f"{eff_folds}-fold"
 
 
-def _safe_max_components(
-    n_samples: int, n_wavelengths: int, max_components: int
-) -> int:
+def _safe_max_components(n_samples: int, n_wavelengths: int, max_components: int) -> int:
     """Clamp ``max_components`` to ``min(n_samples-1, n_wavelengths)``.
 
     PLS requires at least one sample more than components and cannot use
@@ -97,9 +97,7 @@ def train_pls(
     X_train = np.asarray(X_train, dtype=float)
     y_train = np.asarray(y_train, dtype=float).ravel()
     if X_train.shape[0] != y_train.shape[0]:
-        raise ValueError(
-            f"X_train rows ({X_train.shape[0]}) != y_train length ({y_train.shape[0]})"
-        )
+        raise ValueError(f"X_train rows ({X_train.shape[0]}) != y_train length ({y_train.shape[0]})")
     n_samples, n_wavelengths = X_train.shape
 
     # ---- Fixed component count: train directly. -----------------------
@@ -123,9 +121,7 @@ def train_pls(
     upper = _safe_max_components(n_samples, n_wavelengths, max_components)
     n_comp_list = list(range(1, upper + 1))
 
-    splitter, strategy_label = _resolve_cv_splitter(
-        cv_strategy, cv_folds, n_samples, random_state
-    )
+    splitter, strategy_label = _resolve_cv_splitter(cv_strategy, cv_folds, n_samples, random_state)
 
     mean_rmse: list[float] = []
     std_rmse: list[float] = []
@@ -143,8 +139,12 @@ def train_pls(
                 m.fit(X_tr, y_tr)
                 pred = m.predict(X_val).ravel()
                 fold_rmse.append(rmse(y_val, pred))
-            except Exception:
+            except Exception as exc:
                 # Numerical failure on this fold/component combination.
+                warnings.warn(
+                    f"PLS CV fold skipped (n_components={nc}): {exc}",
+                    stacklevel=2,
+                )
                 continue
         if not fold_rmse:
             # No fold succeeded -> treat as worst.
@@ -237,7 +237,7 @@ def compute_vip(model: PLSRegression, X: np.ndarray, y: np.ndarray) -> np.ndarra
         return np.ones(X.shape[1])
 
     # W^2 normalized per component (column-wise).
-    w2 = W ** 2
+    w2 = W**2
     w2_sum = w2.sum(axis=0)  # (n_comp,)
     w2_sum_safe = np.where(w2_sum > 0, w2_sum, 1.0)
     w2_norm = w2 / w2_sum_safe  # (n_features, n_comp)

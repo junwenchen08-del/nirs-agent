@@ -63,6 +63,7 @@ def load_csv(
     x_cols: str | None = None,
     y_col: int | None = None,
     wv_row: int | None = None,
+    auto_layout: bool = True,
 ) -> SpectralData:
     """Load a CSV/TXT spectral file into :class:`SpectralData`.
 
@@ -76,6 +77,29 @@ def load_csv(
       - Reference values may live in the first column (``y_col=0``).
       - Otherwise the whole numeric block is treated as ``X``.
 
+    When ``auto_layout=True`` (the default) and the caller did NOT pass
+    explicit ``y_col`` / ``wv_row``, the loader inspects the top-left corner
+    and the first row / first column to detect a common NIR-style layout:
+
+        ,<wv_1>,<wv_2>,...,<wv_n>
+        <y_1>,<a_1_1>,<a_1_2>,...,<a_1_n>
+        <y_2>,<a_2_1>,<a_2_2>,...,<a_2_n>
+        ...
+
+    Detection signals (all must hold):
+      - Cell (0, 0) is empty / NaN (the "corner" where row label meets
+        column label).
+      - The first row (excluding the corner) is fully numeric with values in
+        the typical NIR wavelength range ``[600, 3000] nm`` (or any strictly
+        increasing positive sequence).
+      - The first column (excluding the corner) is fully numeric and its
+        value range differs significantly from the inner block (typical
+        reference values such as moisture 0-100% vs. absorbance 0-3).
+
+    If any check fails, the loader falls back to treating the whole block as
+    ``X`` with no ``y`` and no ``wv`` (preserves prior behavior). Pass
+    ``auto_layout=False`` to disable detection entirely.
+
     Args:
         filepath: Path to the CSV/TXT file.
         delimiter: Optional explicit delimiter (``","``, ``"\\t"`` ...).
@@ -83,6 +107,9 @@ def load_csv(
         x_cols: Reserved for future column-range selectors; currently unused.
         y_col: Index of the reference-value column. ``None`` disables y.
         wv_row: Index of the wavelength row. ``None`` disables wv.
+        auto_layout: When True and ``y_col``/``wv_row`` are not given, try
+            to auto-detect a row-label + column-label layout from the
+            top-left corner.
 
     Returns:
         A :class:`SpectralData` with ``original_format="csv"``.
@@ -111,6 +138,13 @@ def load_csv(
     if arr.ndim == 1:
         arr = arr.reshape(1, -1)
 
+    # Auto-detect row-label + column-label layout when caller didn't pin
+    # y_col / wv_row explicitly. See docstring for the heuristic.
+    if auto_layout and y_col is None and wv_row is None:
+        detected_wv_row, detected_y_col = _detect_labeled_layout(arr)
+        wv_row = detected_wv_row
+        y_col = detected_y_col
+
     X, y, wv = _split_csv_block(arr, y_col=y_col, wv_row=wv_row)
 
     return SpectralData(
@@ -121,6 +155,85 @@ def load_csv(
         source_file=str(filepath),
         original_format="csv",
     )
+
+
+# NIR wavelength range covers visible-NIR (~400 nm) to mid-IR (~25000 nm),
+# but practical instruments used for chemometrics (NIR / FT-NIR) almost
+# always report wavelengths in roughly 600-3000 nm. We use this as a soft
+# signal for "this row looks like wavelengths, not spectra".
+_NIR_WAVELENGTH_MIN_NM = 600.0
+_NIR_WAVELENGTH_MAX_NM = 3000.0
+
+
+def _detect_labeled_layout(
+    arr: np.ndarray,
+) -> tuple[int | None, int | None]:
+    """Detect a labelled NIR-style layout from the top-left corner of ``arr``.
+
+    Returns ``(wv_row, y_col)`` to feed into :func:`_split_csv_block`. Returns
+    ``(None, None)`` when the signals are inconclusive — callers should then
+    treat the whole block as ``X``.
+    """
+    if arr.shape[0] < 2 or arr.shape[1] < 2:
+        return None, None
+
+    # Signal 1: the corner cell (0, 0) must be NaN. CSV with a leading empty
+    # cell in the first row is the canonical "label x wavelength" layout.
+    if np.isfinite(arr[0, 0]):
+        return None, None
+
+    # Signal 2: the wavelength row (rest of row 0) is all finite,
+    # monotonically non-decreasing (within floating-point tolerance),
+    # and in the NIR range.
+    wv_row_values = arr[0, 1:]
+    if not np.isfinite(wv_row_values).all():
+        return None, None
+    wv_min, wv_max = float(wv_row_values.min()), float(wv_row_values.max())
+    if not (
+        wv_min >= _NIR_WAVELENGTH_MIN_NM * 0.5  # half-baked safety margin
+        and wv_max <= _NIR_WAVELENGTH_MAX_NM * 1.5
+    ):
+        # Not in NIR wavelength territory. Could be wavenumbers, frequency,
+        # or just a numeric header. Refuse to guess.
+        return None, None
+    # Monotonic non-decreasing check (small tolerance for FP noise).
+    diffs = np.diff(wv_row_values.astype(float))
+    if not (diffs >= -1e-6).all():
+        return None, None
+
+    # Signal 3: the y column (rest of column 0) is all finite. The inner
+    # block must also have at least one finite value so the spectra block
+    # is non-degenerate.
+    y_col_values = arr[1:, 0]
+    if not np.isfinite(y_col_values).all():
+        return None, None
+    inner_block = arr[1:, 1:]
+    inner_finite = inner_block[np.isfinite(inner_block)]
+    if inner_finite.size == 0:
+        return None, None
+
+    # When signals 1 (corner NaN) and 2 (NIR wavelength row) are already
+    # confident, the first column is almost certainly the reference-value
+    # column: typical NIR reference values (moisture %, pH, protein, oil
+    # content, …) never fall in the NIR wavelength band themselves. Only
+    # reject when the first column's values look like NIR wavelengths,
+    # which would indicate a samples-in-columns layout where the first
+    # column is wavelengths rather than reference values.
+    #
+    # The previous range-ratio heuristic (rejecting when y and spectra had
+    # similar dynamic ranges, ratio in [0.3, 3.0]) silently misclassified
+    # legitimate layouts where reference values and absorbances share a
+    # similar numeric scale — e.g. pH 6–8 (range 2.0) vs absorbance 0.2–1.5
+    # (range 1.3), ratio ≈ 1.54, was wrongly rejected and y got merged
+    # into X with data.y = None.
+    y_min, y_max = float(y_col_values.min()), float(y_col_values.max())
+    if (
+        y_min >= _NIR_WAVELENGTH_MIN_NM * 0.5
+        and y_max <= _NIR_WAVELENGTH_MAX_NM * 1.5
+    ):
+        return None, None
+
+    return 0, 0
 
 
 def auto_detect_and_load(filepath: str) -> SpectralData:

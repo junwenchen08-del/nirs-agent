@@ -212,6 +212,13 @@ def _inspect_csv_like(filepath: str) -> dict:
         "structure": structure,
         "value_range": value_range,
         "has_nan": bool(np.isnan(preview).any()),
+        # The presence of a NaN at the (0, 0) corner is the strongest single
+        # signal that the file uses the row-label + column-label layout
+        # (empty corner where row label meets column label). The agent uses
+        # this to decide whether to expect y / wv auto-separation.
+        "corner_is_nan": bool(
+            preview.shape[0] > 0 and preview.shape[1] > 0 and not np.isfinite(preview[0, 0])
+        ),
     }
 
 

@@ -490,5 +490,159 @@ class TestTitleMiddlewareCoreLogic:
         }
         result = asyncio.run(middleware._agenerate_title_result(state))
         assert result is not None
-        assert "<think>" not in result["title"]
+        assert "think" not in result["title"]
         assert result["title"] == "贵阳发展研究"
+
+    # --- _strip_internal_tags ---
+
+    def test_strip_internal_tags_paired_tags(self):
+        """Paired open/close tags from the known list are removed."""
+        text = "<system-reminder>Current date: 2026-07-09</system-reminder>Help me analyze spectra"
+        result = TitleMiddleware._strip_internal_tags(text)
+        assert "<system-reminder>" not in result
+        assert "Current date" not in result
+        assert result == "Help me analyze spectra"
+
+    def test_strip_internal_tags_self_closing_tag(self):
+        """Self-closing tags (e.g. <uploaded_files/>) are stripped by the
+        orphan-tag second pass even though they have no closing tag."""
+        text = "<uploaded_files/>Help me with NIR"
+        result = TitleMiddleware._strip_internal_tags(text)
+        assert "<uploaded_files" not in result
+        assert result == "Help me with NIR"
+
+    def test_strip_internal_tags_unclosed_opening_tag(self):
+        """A dangling opening tag whose close was truncated upstream is
+        stripped (the opening tag itself is removed; content after it
+        survives since we cannot know where the block would have ended)."""
+        text = "<system-reminder>Current date: 2026-07-09"
+        result = TitleMiddleware._strip_internal_tags(text)
+        assert "<system-reminder>" not in result
+        # Content after the stripped opening tag survives.
+        assert "Current date" in result
+
+    def test_strip_internal_tags_think_block(self):
+        """Paired think blocks are stripped from user text."""
+        text = "<think>reasoning here</think>Actual question"
+        result = TitleMiddleware._strip_internal_tags(text)
+        assert result == "Actual question"
+
+    def test_strip_internal_tags_preserves_unknown_tags(self):
+        """Tags not in the internal tag list are left untouched."""
+        text = "<custom-tag>keep this</custom-tag>"
+        result = TitleMiddleware._strip_internal_tags(text)
+        assert result == "<custom-tag>keep this</custom-tag>"
+
+    def test_strip_internal_tags_mixed_content(self):
+        """Real user text interleaved with internal tags keeps only the
+        real text after stripping."""
+        text = "<uploaded_files>data.csv</uploaded_files>请帮我分析这批玉米光谱<system-reminder>date</system-reminder>"
+        result = TitleMiddleware._strip_internal_tags(text)
+        assert "请帮我分析这批玉米光谱" in result
+        assert "<uploaded_files" not in result
+        assert "<system-reminder" not in result
+        assert "data.csv" not in result
+
+    def test_strip_internal_tags_empty_input(self):
+        """Empty/blank input is handled without error."""
+        assert TitleMiddleware._strip_internal_tags("") == ""
+        assert TitleMiddleware._strip_internal_tags("   \n\n  ").strip() == ""
+
+    # --- _get_uploaded_filenames ---
+
+    def test_get_uploaded_filenames_from_dict_message(self):
+        """Dict-shape messages with additional_kwargs.files are parsed."""
+        msg = {
+            "additional_kwargs": {
+                "files": [
+                    {"name": "spectra.csv"},
+                    {"filename": "ref.csv"},
+                    {"name": ""},
+                    {"no_name": True},
+                ]
+            }
+        }
+        names = TitleMiddleware._get_uploaded_filenames(msg)
+        assert names == ["spectra.csv", "ref.csv"]
+
+    def test_get_uploaded_filenames_from_object_message(self):
+        """Object-shape messages (HumanMessage) with files are parsed."""
+        msg = HumanMessage(content="hi")
+        msg.additional_kwargs = {
+            "files": [
+                SimpleNamespace(name="a.mat"),
+                SimpleNamespace(filename="b.mat"),
+                SimpleNamespace(name=""),
+            ]
+        }
+        names = TitleMiddleware._get_uploaded_filenames(msg)
+        assert names == ["a.mat", "b.mat"]
+
+    def test_get_uploaded_filenames_empty_files_list(self):
+        """An empty files list yields no names."""
+        msg = {"additional_kwargs": {"files": []}}
+        assert TitleMiddleware._get_uploaded_filenames(msg) == []
+
+    def test_get_uploaded_filenames_missing_additional_kwargs(self):
+        """Messages without additional_kwargs or without files yield []."""
+        assert TitleMiddleware._get_uploaded_filenames({}) == []
+        assert TitleMiddleware._get_uploaded_filenames({"additional_kwargs": None}) == []
+        assert TitleMiddleware._get_uploaded_filenames({"additional_kwargs": {}}) == []
+        # Object-shape message with no additional_kwargs.
+        msg = HumanMessage(content="hi")
+        msg.additional_kwargs = None
+        assert TitleMiddleware._get_uploaded_filenames(msg) == []
+
+    def test_get_uploaded_filenames_strips_whitespace(self):
+        """Filename whitespace is stripped; blank-only names are skipped."""
+        msg = {"additional_kwargs": {"files": [{"name": "  spaced.csv  "}, {"name": "   "}]}}
+        assert TitleMiddleware._get_uploaded_filenames(msg) == ["spaced.csv"]
+
+    # --- _get_title_user_message (filename fallback path) ---
+
+    def test_get_title_user_message_falls_back_to_filenames(self):
+        """A user message containing only internal tags falls through to
+        the uploaded-filename fallback so the sidebar shows something
+        useful instead of a tag prefix."""
+        _set_test_title_config(enabled=True)
+        middleware = TitleMiddleware()
+        state = {
+            "messages": [
+                HumanMessage(
+                    content="<uploaded_files>data.csv</uploaded_files>",
+                    additional_kwargs={"files": [{"name": "data.csv"}]},
+                ),
+                AIMessage(content="ok"),
+            ]
+        }
+        user_msg = middleware._get_title_user_message(state)
+        assert user_msg == "data.csv"
+
+    def test_get_title_user_message_prefers_real_text_over_tags(self):
+        """When a message has mixed internal tags and real text, the real
+        text (with tags stripped) is used as the title seed."""
+        _set_test_title_config(enabled=True)
+        middleware = TitleMiddleware()
+        state = {
+            "messages": [
+                HumanMessage(
+                    content="<system-reminder>date</system-reminder>分析玉米水分",
+                    additional_kwargs={"files": [{"name": "corn.csv"}]},
+                ),
+                AIMessage(content="ok"),
+            ]
+        }
+        user_msg = middleware._get_title_user_message(state)
+        assert user_msg == "分析玉米水分"
+        assert "corn.csv" not in user_msg
+
+    def test_get_title_user_message_attachment_only_uses_filename(self):
+        """A message with no text content but attached files uses the
+        joined filenames as the title seed."""
+        _set_test_title_config(enabled=True)
+        middleware = TitleMiddleware()
+        msg = HumanMessage(content="")
+        msg.additional_kwargs = {"files": [{"name": "a.csv"}, {"name": "b.csv"}]}
+        state = {"messages": [msg, AIMessage(content="ok")]}
+        user_msg = middleware._get_title_user_message(state)
+        assert user_msg == "a.csv, b.csv"

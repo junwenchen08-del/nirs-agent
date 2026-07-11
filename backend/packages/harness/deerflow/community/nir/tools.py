@@ -29,9 +29,24 @@ from langchain.tools import InjectedToolCallId, tool
 from deerflow.tools.types import Runtime
 
 
+def _parse_pipeline_step(m: str | dict):
+    """Parse a pipeline step from a method-name string or a dict with params.
+
+    Accepts both ``"snv"`` (string) and ``{"method": "sg_smooth", "params":
+    {"window": 15}}`` (dict) forms, so the LLM can pass hyper-parameters
+    through ``pipeline_steps``.
+    """
+    from nir_core.models import PreprocessingStep
+
+    if isinstance(m, dict):
+        return PreprocessingStep(**m)
+    return PreprocessingStep(method=str(m))
+
+
 # ---------------------------------------------------------------------------
 # Path-resolution helper
 # ---------------------------------------------------------------------------
+
 
 def _resolve(runtime: Runtime, virtual_path: str, *, read_only: bool = True) -> str:
     """Resolve a ``/mnt/user-data/...`` virtual path to a real container path.
@@ -57,10 +72,7 @@ def _resolve(runtime: Runtime, virtual_path: str, *, read_only: bool = True) -> 
 
     thread_data = get_thread_data(runtime)
     if thread_data is None:
-        raise SandboxRuntimeError(
-            "Thread data not available; cannot resolve virtual path "
-            f"{virtual_path!r}."
-        )
+        raise SandboxRuntimeError(f"Thread data not available; cannot resolve virtual path {virtual_path!r}.")
     validate_local_tool_path(virtual_path, thread_data, read_only=read_only)
     return resolve_and_validate_user_data_path(virtual_path, thread_data)
 
@@ -103,11 +115,14 @@ def _json_default(obj):
 # Tools
 # ---------------------------------------------------------------------------
 
+
 @tool("nir_load_data", parse_docstring=True)
 def nir_load_data_tool(
     runtime: Runtime,
     file_path: str,
     output_path: str | None = None,
+    y_col: int | None = None,
+    wv_row: int | None = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",  # noqa: ARG001
 ) -> str:
     """Load a near-infrared spectral data file (.mat / .csv / .txt).
@@ -116,11 +131,26 @@ def nir_load_data_tool(
     samples-in-columns) and standardises it to a SpectralData container.
     Optionally saves a normalised .npz for downstream preprocessing.
 
+    When ``y_col`` / ``wv_row`` are omitted (the common case), the loader
+    auto-detects the canonical NIR "row-label + column-label" layout (empty
+    corner cell, wavelength header row, reference-value column). Pass them
+    explicitly ONLY when auto-detection fails — e.g. unusual CSV layouts
+    without an empty corner cell, or when the first column is NOT the
+    reference values. See the ``nir_inspect`` hint for guidance.
+
     Args:
         file_path: Virtual path to the input file, e.g.
             ``/mnt/user-data/uploads/spectra.mat``.
         output_path: Optional virtual path for a standardised .npz output,
             e.g. ``/mnt/user-data/workspace/data.npz``.
+        y_col: Optional 0-based index of the reference-value column
+            (CSV/TXT only; ignored for .mat). When provided, auto-detection
+            is bypassed and this column is split as y. ``None`` (default)
+            triggers auto-detection.
+        wv_row: Optional 0-based index of the wavelength row (CSV/TXT only;
+            ignored for .mat). When provided, auto-detection is bypassed and
+            this row is split as wv. ``None`` (default) triggers
+            auto-detection.
 
     Returns:
         JSON summary of the loaded data (sample count, wavelength range,
@@ -128,18 +158,52 @@ def nir_load_data_tool(
         returned — only metadata.
     """
     try:
-        from nir_core.io.loaders import auto_detect_and_load
+        from nir_core.io.loaders import auto_detect_and_load, load_csv
+        from nir_core.io.sniffers import detect_format
         from nir_core.io.writers import save_npz
 
         real_in = _resolve(runtime, file_path, read_only=True)
-        data = auto_detect_and_load(real_in)
+
+        # When explicit y_col / wv_row are provided for CSV/TXT files,
+        # bypass auto-detection and call load_csv with the override.
+        # This gives the agent an escape hatch when auto-detection fails,
+        # so it never needs to fall back to writing Python scripts.
+        has_override = y_col is not None or wv_row is not None
+        if has_override and detect_format(real_in) != "mat":
+            data = load_csv(real_in, y_col=y_col, wv_row=wv_row)
+        else:
+            data = auto_detect_and_load(real_in)
+
         if output_path:
             real_out = _resolve(runtime, output_path, read_only=False)
             os.makedirs(os.path.dirname(real_out), exist_ok=True)
             save_npz(data, real_out)
         summary = data.summary()
         summary["output_saved"] = bool(output_path)
+        summary["layout_override_used"] = has_override
+        # ⭐ Surface the auto-detected layout so the agent can confirm y and
+        # wv have been correctly separated from the raw CSV block. Without
+        # these explicit fields the agent tends to "double-check" by writing
+        # its own Python script — which is exactly the anti-pattern this
+        # tool exists to prevent.
+        summary["y_separated"] = data.y is not None
+        summary["wv_separated"] = data.wv is not None
+        if data.y is not None:
+            summary["y_first_values"] = [round(float(v), 4) for v in data.y[:5]]
+            summary["y_last_values"] = [round(float(v), 4) for v in data.y[-3:]]
+        if data.wv is not None:
+            summary["wv_first_values"] = [round(float(v), 2) for v in data.wv[:3]]
+            summary["wv_last_values"] = [round(float(v), 2) for v in data.wv[-3:]]
+        if not summary["y_separated"]:
+            summary["warning"] = (
+                "No reference values (y) detected. The file may be spectra-only, "
+                "or its layout does not match the auto-detected NIR pattern. "
+                "Use nir_inspect to confirm the structure, then re-call "
+                "nir_load_data with explicit y_col / wv_row if needed."
+            )
         return _ok(summary)
+    except MemoryError:
+        return _err("内存不足: 文件过大，无法加载。请先用 nir_inspect 查看文件结构，或使用更小的数据子集。")
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")
 
@@ -163,7 +227,32 @@ def nir_inspect_tool(
         from nir_core.io.sniffers import inspect_file
 
         real_in = _resolve(runtime, file_path, read_only=True)
-        return inspect_file(real_in)
+        raw = inspect_file(real_in)
+        # inspect_file returns a JSON string. Parse it so we can layer extra
+        # advisory fields and re-serialize.
+        import json as _json
+
+        try:
+            info = _json.loads(raw)
+        except (TypeError, ValueError):
+            return raw
+
+        # Add layout advisory so the agent knows whether the NIR-style
+        # "row-label + column-label" pattern is present without having to
+        # open the file in Python.
+        corner_nan = bool(info.get("corner_is_nan"))
+        info["layout_pattern"] = "row_label_and_column_label" if corner_nan else "plain_matrix"
+        info["hint"] = (
+            "Empty/NaN corner cell detected — file uses the canonical NIR "
+            "row-label + column-label layout. nir_load_data will auto-split "
+            "y (first column) and wv (first row) from X. The 'structure' "
+            "field above is just the raw shape heuristic and may misclassify "
+            "this layout as 'samples_in_columns' because columns > rows; "
+            "that is NOT a bug — the corner NaN signal is the authoritative cue."
+            if corner_nan
+            else "No empty corner cell detected. The file may use a plain matrix layout (no separate y column or wavelength header). Pass y_col / wv_row to nir_load_data explicitly if needed."
+        )
+        return _json.dumps(info, ensure_ascii=False)
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")
 
@@ -221,9 +310,7 @@ def nir_preprocess_tool(
             from nir_core.models import PreprocessingStep
         except ImportError:
             return _err(
-                "nir_core V3 features (PreprocessingPipeline / PreprocessingStep) are not "
-                "available in the current sandbox. Please rebuild the Docker image so the "
-                "editable install of ../nir_core picks up the latest sources, then re-run."
+                "nir_core V3 features (PreprocessingPipeline / PreprocessingStep) are not available in the current sandbox. Please rebuild the Docker image so the editable install of ../nir_core picks up the latest sources, then re-run."
             )
 
         # Resolve which mode: multi-step pipeline or single method.
@@ -243,10 +330,7 @@ def nir_preprocess_tool(
         # Validate all methods exist.
         for m in steps_list:
             if m not in PRESTEP_METHODS:
-                return _err(
-                    f"Unknown method {m!r}. Available: "
-                    f"{sorted(PRESTEP_METHODS.keys())}"
-                )
+                return _err(f"Unknown method {m!r}. Available: {sorted(PRESTEP_METHODS.keys())}")
 
         # Validate Savitzky-Golay parameters.
         sg_methods = {"sg_smooth", "derivative1", "derivative2"}
@@ -282,8 +366,7 @@ def nir_preprocess_tool(
             steps.append(PreprocessingStep(method=m, params=params))
 
         pipe = PreprocessingPipeline(steps=steps)
-        X_processed = pipe.apply(X, wv=(np.asarray(data_dict["wv"]).ravel()
-                                        if data_dict.get("wv") is not None else None))
+        X_processed = pipe.apply(X, wv=(np.asarray(data_dict["wv"]).ravel() if data_dict.get("wv") is not None else None))
         data_dict["X"] = X_processed
         # Sync wavelength vector if preprocessing changed the wavelength count.
         if "wv" in data_dict and data_dict["wv"] is not None:
@@ -291,14 +374,16 @@ def nir_preprocess_tool(
             if wv_arr.shape[0] > X_processed.shape[1]:
                 data_dict["wv"] = wv_arr[: X_processed.shape[1]]
         np.savez(real_out, **data_dict)
-        return _ok({
-            "status": "ok",
-            "pipeline": steps_list,
-            "description": pipe.description(),
-            "input_shape": list(X.shape),
-            "output_shape": list(X_processed.shape),
-            "output_path": output_path,
-        })
+        return _ok(
+            {
+                "status": "ok",
+                "pipeline": steps_list,
+                "description": pipe.description(),
+                "input_shape": list(X.shape),
+                "output_shape": list(X_processed.shape),
+                "output_path": output_path,
+            }
+        )
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")
 
@@ -334,10 +419,11 @@ def nir_train_model_tool(
         input_path: Virtual path to the .npz file (must contain ``X`` and
             ``y``). Can be raw data or pre-preprocessed data.
         method: Modelling method: ``pls`` / ``pcr`` / ``svr``.
-        pipeline_steps: ★ v3: JSON array of preprocessing method names.
-            When provided, the tool internally splits data first, then fits
-            the pipeline on train only (leakage-safe), then transforms all
-            sets. For example ``'["snv","sg_smooth","mean_center"]'``.
+        pipeline_steps: ★ v3: JSON array of preprocessing steps. Each step
+            can be a plain method name string (``"snv"``) or a dict with
+            a method name and optional hyper-parameters dict. When provided,
+            the tool internally splits data first, then fits the pipeline on
+            train only (leakage-safe), then transforms all sets.
             If None, assumes input is already preprocessed.
         test_ratio: Fraction of data reserved as the independent test set.
         val_ratio: Fraction reserved as validation.
@@ -378,13 +464,16 @@ def nir_train_model_tool(
         data_dict = dict(np.load(real_in, allow_pickle=True))
         X = np.asarray(data_dict["X"], dtype=float)
         y = np.asarray(data_dict["y"], dtype=float).ravel()
-        wv = (np.asarray(data_dict["wv"], dtype=float).ravel()
-              if data_dict.get("wv") is not None and data_dict["wv"].size else None)
+        wv = np.asarray(data_dict["wv"], dtype=float).ravel() if data_dict.get("wv") is not None and data_dict["wv"].size else None
         if X.shape[0] != y.shape[0]:
             return _err(f"X rows ({X.shape[0]}) != y length ({y.shape[0]})")
 
         (X_tr, y_tr), (X_val, y_val), (X_te, y_te) = split_dataset(
-            X, y, test_ratio=test_ratio, val_ratio=val_ratio, random_state=42,
+            X,
+            y,
+            test_ratio=test_ratio,
+            val_ratio=val_ratio,
+            random_state=42,
         )
 
         # ★ v3: Leakage-safe inline preprocessing when pipeline_steps given.
@@ -395,18 +484,22 @@ def nir_train_model_tool(
                 from nir_core.models import PreprocessingStep
                 from nir_core.preprocess.pipeline import PreprocessingPipeline
             except ImportError:
-                return _err(
-                    "nir_core V3 features (PreprocessingPipeline) are not available in the "
-                    "current sandbox. Please rebuild the Docker image to refresh nir_core, "
-                    "or remove pipeline_steps and train without inline preprocessing."
-                )
+                return _err("nir_core V3 features (PreprocessingPipeline) are not available in the current sandbox. Please rebuild the Docker image to refresh nir_core, or remove pipeline_steps and train without inline preprocessing.")
 
             try:
                 steps_list = _json.loads(pipeline_steps) if isinstance(pipeline_steps, str) else pipeline_steps
             except (ValueError, TypeError):
                 return _err(f"Invalid pipeline_steps JSON: {pipeline_steps!r}")
 
-            steps = [PreprocessingStep(method=str(m)) for m in steps_list]
+            steps = [_parse_pipeline_step(m) for m in steps_list]
+
+            # ★ V3.6: Validate pipeline before training (flexible guardrail).
+            from nir_core.preprocess.pipeline import validate_pipeline
+
+            is_valid, vreason = validate_pipeline(steps)
+            if not is_valid:
+                return _err(f"流水线非法: {vreason}")
+
             best_pipe = PreprocessingPipeline(steps=steps) if steps else None
             if best_pipe is not None:
                 # Fit on TRAIN ONLY, then transform all sets.
@@ -420,14 +513,21 @@ def nir_train_model_tool(
             # Defensive: older nir_core versions do not accept cv_strategy.
             try:
                 model, best_n, cv_results = train_pls(
-                    X_tr, y_tr, n_components=None,
-                    max_components=max_components, cv_folds=cv_folds,
-                    cv_strategy=cv_strategy, random_state=42,
+                    X_tr,
+                    y_tr,
+                    n_components=None,
+                    max_components=max_components,
+                    cv_folds=cv_folds,
+                    cv_strategy=cv_strategy,
+                    random_state=42,
                 )
             except TypeError:
                 model, best_n, cv_results = train_pls(
-                    X_tr, y_tr, n_components=None,
-                    max_components=max_components, cv_folds=cv_folds,
+                    X_tr,
+                    y_tr,
+                    n_components=None,
+                    max_components=max_components,
+                    cv_folds=cv_folds,
                     random_state=42,
                 )
             y_pred_tr = predict_pls(model, X_tr)
@@ -438,14 +538,21 @@ def nir_train_model_tool(
 
             try:
                 model, best_n, cv_results = train_pcr(
-                    X_tr, y_tr, n_components=None,
-                    max_components=max_components, cv_folds=cv_folds,
-                    cv_strategy=cv_strategy, random_state=42,
+                    X_tr,
+                    y_tr,
+                    n_components=None,
+                    max_components=max_components,
+                    cv_folds=cv_folds,
+                    cv_strategy=cv_strategy,
+                    random_state=42,
                 )
             except TypeError:
                 model, best_n, cv_results = train_pcr(
-                    X_tr, y_tr, n_components=None,
-                    max_components=max_components, cv_folds=cv_folds,
+                    X_tr,
+                    y_tr,
+                    n_components=None,
+                    max_components=max_components,
+                    cv_folds=cv_folds,
                     random_state=42,
                 )
             y_pred_tr = predict_pcr(model, X_tr)
@@ -456,12 +563,18 @@ def nir_train_model_tool(
 
             try:
                 model, cv_results = train_svr(
-                    X_tr, y_tr, cv_folds=cv_folds,
-                    cv_strategy=cv_strategy, random_state=42,
+                    X_tr,
+                    y_tr,
+                    cv_folds=cv_folds,
+                    cv_strategy=cv_strategy,
+                    random_state=42,
                 )
             except TypeError:
                 model, cv_results = train_svr(
-                    X_tr, y_tr, cv_folds=cv_folds, random_state=42,
+                    X_tr,
+                    y_tr,
+                    cv_folds=cv_folds,
+                    random_state=42,
                 )
             best_n = None
             y_pred_tr = predict_svr(model, X_tr)
@@ -476,6 +589,7 @@ def nir_train_model_tool(
             "domain": domain,
             "n_samples": int(X.shape[0]),
             "preprocessing": preprocessing_desc,
+            "preprocessing_steps": steps_list if pipeline_steps is not None else [],
             "train": compute_metrics(y_tr, y_pred_tr),
             "val": compute_metrics(y_val, y_pred_val),
             "test": compute_metrics(y_te, y_pred_te),
@@ -520,9 +634,17 @@ def nir_train_model_tool(
                 pass  # VIP computation failure is non-fatal.
 
         # Quality assessment.
-        quality = evaluate_quality(metrics, domain=domain,
-                                   n_samples=int(X.shape[0]))
+        quality = evaluate_quality(metrics, domain=domain, n_samples=int(X.shape[0]))
         metrics["quality"] = quality
+
+        # ★ V3.6: Residual diagnostics for LLM-driven preprocessing decisions.
+        try:
+            from nir_core.diagnostics import compute_residual_diagnostics
+
+            val_diag = compute_residual_diagnostics(y_val, y_pred_val)
+            metrics["diagnostics"] = val_diag
+        except Exception:
+            pass  # Diagnostics failure is non-fatal.
 
         # Serialise model + metrics.
         real_model = _resolve(runtime, model_output, read_only=False)
@@ -545,6 +667,7 @@ def nir_train_model_tool(
         from nir_core.plotting.spectra import plot_raw_spectra
 
         from nir_core.models import SpectralData
+
         spec_data = SpectralData(X=X, y=y, wv=wv)
 
         out_dir = os.path.dirname(real_model)
@@ -583,8 +706,7 @@ def nir_train_model_tool(
                 vip_b64 = plot_vip(vip_scores, wv=wv)
                 coef = get_regression_coefficients(model)
                 coef_b64 = plot_regression_coefficients(coef, wv=wv)
-                for fname, b64 in [("vip_scores.png", vip_b64),
-                                   ("regression_coefficients.png", coef_b64)]:
+                for fname, b64 in [("vip_scores.png", vip_b64), ("regression_coefficients.png", coef_b64)]:
                     if b64:
                         with open(os.path.join(out_dir, fname), "wb") as f:
                             f.write(base64.b64decode(b64))
@@ -593,7 +715,10 @@ def nir_train_model_tool(
 
         # Markdown report with embedded plots.
         report = _build_report(
-            spec_data, metrics, quality, best_pipe,
+            spec_data,
+            metrics,
+            quality,
+            best_pipe,
             raw_spectra_b64=raw_b64,
             predicted_vs_reference_b64=pred_b64,
             residuals_b64=resid_b64,
@@ -605,36 +730,39 @@ def nir_train_model_tool(
 
         out_virtual = os.path.dirname(model_output)
 
-        return _ok({
-            "status": "ok",
-            "method": method,
-            "n_components": best_n,
-            "preprocessing": preprocessing_desc,
-            "R2_val": round(metrics["R2_val"], 4),
-            "RPD": round(metrics["RPD"], 4),
-            "RMSEC": round(metrics["RMSEC"], 4),
-            "RMSECV": (round(metrics["RMSECV"], 4)
-                       if metrics["RMSECV"] is not None else None),
-            "RMSEP": round(metrics["RMSEP"], 4),
-            "vip_summary": vip_summary,
-            "coef_summary": coef_summary,
-            "cv_strategy": cv_results.get("cv_strategy", "unknown"),
-            "grade": quality["grade"],
-            "passed": quality["passed"],
-            "action": quality["action"],
-            "thresholds_used": quality["thresholds_used"],
-            "model_path": model_output,
-            "metrics_path": metrics_output,
-            "report": out_virtual + "/report.md",
-            "plots": {
-                "raw_spectra": out_virtual + "/raw_spectra.png",
-                "predicted_vs_reference": out_virtual + "/predicted_vs_reference.png",
-                "residuals": out_virtual + "/residuals.png",
-                "cv_curve": (out_virtual + "/cv_curve.png") if cv_b64 else None,
-                "vip_scores": (out_virtual + "/vip_scores.png") if vip_b64 else None,
-                "regression_coefficients": (out_virtual + "/regression_coefficients.png") if coef_b64 else None,
-            },
-        })
+        return _ok(
+            {
+                "status": "ok",
+                "method": method,
+                "n_components": best_n,
+                "preprocessing": preprocessing_desc,
+                "R2_val": round(metrics["R2_val"], 4),
+                "RPD": round(metrics["RPD"], 4),
+                "RMSEC": round(metrics["RMSEC"], 4),
+                "RMSECV": (round(metrics["RMSECV"], 4) if metrics["RMSECV"] is not None else None),
+                "RMSEP": round(metrics["RMSEP"], 4),
+                "vip_summary": vip_summary,
+                "coef_summary": coef_summary,
+                "cv_strategy": cv_results.get("cv_strategy", "unknown"),
+                "grade": quality["grade"],
+                "passed": quality["passed"],
+                "action": quality["action"],
+                "thresholds_used": quality["thresholds_used"],
+                "model_path": model_output,
+                "metrics_path": metrics_output,
+                "report": out_virtual + "/report.md",
+                "plots": {
+                    "raw_spectra": out_virtual + "/raw_spectra.png",
+                    "predicted_vs_reference": out_virtual + "/predicted_vs_reference.png",
+                    "residuals": out_virtual + "/residuals.png",
+                    "cv_curve": (out_virtual + "/cv_curve.png") if cv_b64 else None,
+                    "vip_scores": (out_virtual + "/vip_scores.png") if vip_b64 else None,
+                    "regression_coefficients": (out_virtual + "/regression_coefficients.png") if coef_b64 else None,
+                },
+            }
+        )
+    except MemoryError:
+        return _err("内存不足: 数据集过大或预处理候选过多。请减少候选流水线数量或使用更小子集。")
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")
 
@@ -693,8 +821,7 @@ def nir_predict_tool(
             # (best available proxy when no separate training matrix exists).
             drift = compute_mahalanobis_drift(X, X, threshold=3.0)
             result["drift"] = {
-                "note": "Self-reference drift (no training matrix supplied); "
-                        "supply training X for a true drift estimate.",
+                "note": "Self-reference drift (no training matrix supplied); supply training X for a true drift estimate.",
                 "drift_score": float(drift["drift_score"]),
             }
 
@@ -777,10 +904,8 @@ def nir_analyze_tool(
 
             data = SpectralData(
                 X=np.asarray(data_dict["X"], dtype=float),
-                y=(np.asarray(data_dict["y"], dtype=float).ravel()
-                   if data_dict.get("y") is not None and data_dict["y"].size else None),
-                wv=(np.asarray(data_dict["wv"], dtype=float).ravel()
-                    if data_dict.get("wv") is not None and data_dict["wv"].size else None),
+                y=(np.asarray(data_dict["y"], dtype=float).ravel() if data_dict.get("y") is not None and data_dict["y"].size else None),
+                wv=(np.asarray(data_dict["wv"], dtype=float).ravel() if data_dict.get("wv") is not None and data_dict["wv"].size else None),
             )
         else:
             data = auto_detect_and_load(real_in)
@@ -790,15 +915,24 @@ def nir_analyze_tool(
 
         X, y = np.asarray(data.X, dtype=float), np.asarray(data.y, dtype=float).ravel()
         (X_tr, y_tr), (X_val, y_val), (X_te, y_te) = split_dataset(
-            X, y, test_ratio=0.20, val_ratio=0.10, random_state=42,
+            X,
+            y,
+            test_ratio=0.20,
+            val_ratio=0.10,
+            random_state=42,
         )
 
         # Preprocessing selection (leakage-safe fit/transform).
         best_pipe = None
         if auto_preprocess:
             best_pipe, _ = nested_cv_preprocessing(
-                X_tr, y_tr, X_val, y_val,
-                inner_folds=3, max_components=10, random_state=42,
+                X_tr,
+                y_tr,
+                X_val,
+                y_val,
+                inner_folds=3,
+                max_components=10,
+                random_state=42,
                 wv=data.wv,
             )
             p = best_pipe.__class__(best_pipe.steps).fit(X_tr, data.wv)
@@ -811,13 +945,22 @@ def nir_analyze_tool(
         if method == "pls":
             try:
                 model, best_n, cv_results = train_pls(
-                    X_tr, y_tr, n_components=None, max_components=10,
-                    cv_folds=5, cv_strategy="auto", random_state=42,
+                    X_tr,
+                    y_tr,
+                    n_components=None,
+                    max_components=10,
+                    cv_folds=5,
+                    cv_strategy="auto",
+                    random_state=42,
                 )
             except TypeError:
                 model, best_n, cv_results = train_pls(
-                    X_tr, y_tr, n_components=None, max_components=10,
-                    cv_folds=5, random_state=42,
+                    X_tr,
+                    y_tr,
+                    n_components=None,
+                    max_components=10,
+                    cv_folds=5,
+                    random_state=42,
                 )
             y_pred_te = predict_pls(model, X_te)
             y_pred_val = predict_pls(model, X_val)
@@ -827,13 +970,22 @@ def nir_analyze_tool(
 
             try:
                 model, best_n, cv_results = train_pcr(
-                    X_tr, y_tr, n_components=None, max_components=10,
-                    cv_folds=5, cv_strategy="auto", random_state=42,
+                    X_tr,
+                    y_tr,
+                    n_components=None,
+                    max_components=10,
+                    cv_folds=5,
+                    cv_strategy="auto",
+                    random_state=42,
                 )
             except TypeError:
                 model, best_n, cv_results = train_pcr(
-                    X_tr, y_tr, n_components=None, max_components=10,
-                    cv_folds=5, random_state=42,
+                    X_tr,
+                    y_tr,
+                    n_components=None,
+                    max_components=10,
+                    cv_folds=5,
+                    random_state=42,
                 )
             y_pred_te = predict_pcr(model, X_te)
             y_pred_val = predict_pcr(model, X_val)
@@ -843,11 +995,18 @@ def nir_analyze_tool(
 
             try:
                 model, cv_results = train_svr(
-                    X_tr, y_tr, cv_folds=5, cv_strategy="auto", random_state=42,
+                    X_tr,
+                    y_tr,
+                    cv_folds=5,
+                    cv_strategy="auto",
+                    random_state=42,
                 )
             except TypeError:
                 model, cv_results = train_svr(
-                    X_tr, y_tr, cv_folds=5, random_state=42,
+                    X_tr,
+                    y_tr,
+                    cv_folds=5,
+                    random_state=42,
                 )
             best_n = None
             y_pred_te = predict_svr(model, X_te)
@@ -871,8 +1030,7 @@ def nir_analyze_tool(
         metrics["R2_val"] = metrics["val"]["R2"]
         metrics["RPD"] = metrics["test"]["RPD"]
         metrics["RMSEP"] = metrics["test"]["RMSE"]
-        quality = evaluate_quality(metrics, domain=domain,
-                                   n_samples=int(X.shape[0]))
+        quality = evaluate_quality(metrics, domain=domain, n_samples=int(X.shape[0]))
         metrics["quality"] = quality
 
         # Save model + metrics + plots + report.
@@ -891,8 +1049,7 @@ def nir_analyze_tool(
         import base64
 
         raw_b64 = plot_raw_spectra(data, n_highlight=5)
-        pred_b64 = plot_predicted_vs_reference(y_te, y_pred_te,
-                                               title="Predicted vs Reference (test set)")
+        pred_b64 = plot_predicted_vs_reference(y_te, y_pred_te, title="Predicted vs Reference (test set)")
         resid_b64 = plot_residuals(y_te, y_pred_te)
 
         # CV curve only for methods that have cv_results with n_components.
@@ -917,7 +1074,10 @@ def nir_analyze_tool(
 
         # Markdown report (with embedded images).
         report = _build_report(
-            data, metrics, quality, best_pipe,
+            data,
+            metrics,
+            quality,
+            best_pipe,
             raw_spectra_b64=raw_b64,
             predicted_vs_reference_b64=pred_b64,
             residuals_b64=resid_b64,
@@ -926,29 +1086,31 @@ def nir_analyze_tool(
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(report)
 
-        return _ok({
-            "status": "ok",
-            "method": method,
-            "n_components": best_n,
-            "preprocessing": (best_pipe.description() if best_pipe else "none"),
-            "R2_val": round(metrics["R2_val"], 4),
-            "RPD": round(metrics["RPD"], 4),
-            "RMSEP": round(metrics["RMSEP"], 4),
-            "grade": quality["grade"],
-            "passed": quality["passed"],
-            "action": quality["action"],
-            "thresholds_used": quality["thresholds_used"],
-            "output_dir": output_dir,
-            "report": output_dir + "/report.md",
-            "model": output_dir + "/model.pkl",
-            "metrics": output_dir + "/metrics.json",
-            "plots": {
-                "raw_spectra": output_dir + "/raw_spectra.png",
-                "predicted_vs_reference": output_dir + "/predicted_vs_reference.png",
-                "residuals": output_dir + "/residuals.png",
-                "cv_curve": output_dir + "/cv_curve.png" if cv_b64 else None,
-            },
-        })
+        return _ok(
+            {
+                "status": "ok",
+                "method": method,
+                "n_components": best_n,
+                "preprocessing": (best_pipe.description() if best_pipe else "none"),
+                "R2_val": round(metrics["R2_val"], 4),
+                "RPD": round(metrics["RPD"], 4),
+                "RMSEP": round(metrics["RMSEP"], 4),
+                "grade": quality["grade"],
+                "passed": quality["passed"],
+                "action": quality["action"],
+                "thresholds_used": quality["thresholds_used"],
+                "output_dir": output_dir,
+                "report": output_dir + "/report.md",
+                "model": output_dir + "/model.pkl",
+                "metrics": output_dir + "/metrics.json",
+                "plots": {
+                    "raw_spectra": output_dir + "/raw_spectra.png",
+                    "predicted_vs_reference": output_dir + "/predicted_vs_reference.png",
+                    "residuals": output_dir + "/residuals.png",
+                    "cv_curve": output_dir + "/cv_curve.png" if cv_b64 else None,
+                },
+            }
+        )
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")
 
@@ -956,6 +1118,7 @@ def nir_analyze_tool(
 # ---------------------------------------------------------------------------
 # Report builder
 # ---------------------------------------------------------------------------
+
 
 def _build_report(
     data,
@@ -968,7 +1131,7 @@ def _build_report(
     cv_curve_b64: str = "",
 ) -> str:
     """Build a Chinese Markdown analysis report with embedded plots."""
-    pp = (best_pipe.description() if best_pipe else "无（使用原始光谱）")
+    pp = best_pipe.description() if best_pipe else "无（使用原始光谱）"
     lines = [
         "# 近红外光谱分析报告",
         "",
@@ -977,10 +1140,8 @@ def _build_report(
         "## 1. 数据概览",
         f"- 样本数: {metrics['n_samples']}",
         f"- 波长数: {data.X.shape[1]}",
-        (f"- 波长范围: {float(data.wv.min()):.1f} - {float(data.wv.max()):.1f} nm"
-         if data.wv is not None else "- 波长范围: 未提供"),
-        (f"- 参考值范围: {float(data.y.min()):.3f} - {float(data.y.max()):.3f}"
-         if data.y is not None else ""),
+        (f"- 波长范围: {float(data.wv.min()):.1f} - {float(data.wv.max()):.1f} nm" if data.wv is not None else "- 波长范围: 未提供"),
+        (f"- 参考值范围: {float(data.y.min()):.3f} - {float(data.y.max()):.3f}" if data.y is not None else ""),
         "",
         "## 2. 预处理方法",
         f"- 选定流水线: {pp}",
@@ -996,8 +1157,7 @@ def _build_report(
         f"- 等级: {quality['grade']}",
         f"- 是否通过: {'是' if quality['passed'] else '否'}",
         f"- 行动建议: {quality['action']}",
-        f"- 使用阈值: R²≥{quality['thresholds_used']['min_r2']}, "
-        f"RPD≥{quality['thresholds_used']['min_rpd']}",
+        f"- 使用阈值: R²≥{quality['thresholds_used']['min_r2']}, RPD≥{quality['thresholds_used']['min_rpd']}",
         f"- 领域: {quality['thresholds_used']['domain']}",
         "",
         "## 5. 可视化",
@@ -1018,9 +1178,11 @@ def _build_report(
     lines.extend(_embed("残差诊断", residuals_b64))
     lines.extend(_embed("交叉验证选成分", cv_curve_b64))
 
-    lines.extend([
-        "## 6. 部署建议",
-    ])
+    lines.extend(
+        [
+            "## 6. 部署建议",
+        ]
+    )
     if quality["passed"]:
         lines.append("- 模型质量达标，可用于预测。建议定期做漂移检测。")
     elif quality["action"] == "retry_preprocessing":
@@ -1037,6 +1199,7 @@ def _build_report(
 # Phase 3: Deterministic reflection & parallel comparison tools
 # ---------------------------------------------------------------------------
 
+
 @tool("nir_reflect", parse_docstring=True)
 def nir_reflect_tool(
     runtime: Runtime,
@@ -1049,10 +1212,15 @@ def nir_reflect_tool(
 ) -> str:
     """Deterministic reflection decision for the NIR preprocessing retry loop.
 
+    ★ V3.6: Returns diagnostics (residual trend/variance/outliers) from the
+    metrics file so the LLM can reason about *what* to try next.  The
+    deterministic ``fallback_suggestion`` is provided as a safety net — the
+    LLM should prefer constructing its own ``pipeline_steps`` based on the
+    diagnostics, falling back to the suggestion only when stuck.
+
     Wraps should_retry + get_next_pipeline + suggest_lv_adjustment into a
-    single deterministic call so the LLM does not have to interpret
-    quality-gate tables or invent retry strategies.  Call this after every
-    nir_train_model to decide what to do next.
+    single deterministic call.  Call this after every nir_train_model to
+    decide what to do next.
 
     Args:
         metrics_path: Virtual path to the metrics.json produced by
@@ -1066,8 +1234,9 @@ def nir_reflect_tool(
         max_retries: Maximum allowed retries (default 3).
 
     Returns:
-        JSON with should_retry, reason, next_pipeline, next_pipeline_steps,
-        lv_adjustment, best_so_far, attempt, and next_attempt.
+        JSON with should_retry, reason, diagnostics, fallback_suggestion,
+        fallback_suggestion_steps, lv_adjustment, current_quality,
+        best_so_far, attempt, and next_attempt.
     """
     try:
         import json as _json
@@ -1093,13 +1262,17 @@ def nir_reflect_tool(
 
         # Quality + LV adjustment.
         lv_adj = suggest_lv_adjustment(
-            metrics, domain=domain, n_samples=n_samples,
+            metrics,
+            domain=domain,
+            n_samples=n_samples,
         )
         quality = lv_adj["quality"]
 
         # Should retry?
         retry = should_retry(
-            quality, attempt=attempt, max_retries=max_retries,
+            quality,
+            attempt=attempt,
+            max_retries=max_retries,
             history=history_list,
         )
 
@@ -1116,10 +1289,12 @@ def nir_reflect_tool(
                 retry = False
 
         # Find best-so-far from history + current.
-        all_records = list(history_list) + [{
-            "pipeline": metrics.get("preprocessing_steps", []),
-            "metrics": metrics,
-        }]
+        all_records = list(history_list) + [
+            {
+                "pipeline": metrics.get("preprocessing_steps", []),
+                "metrics": metrics,
+            }
+        ]
         best = None
         for rec in all_records:
             m = rec.get("metrics", {}) if isinstance(rec, dict) else {}
@@ -1149,33 +1324,38 @@ def nir_reflect_tool(
             reason_parts.append(f"当前等级={quality['grade']}，未通过门禁。")
             if lv_adj["issues"]:
                 reason_parts.append(f"检测到问题: {', '.join(lv_adj['issues'])}。")
-            if next_pipeline:
-                reason_parts.append(f"建议尝试预处理: {' → '.join(next_pipeline)}。")
+            diagnostics = metrics.get("diagnostics", {})
+            if diagnostics:
+                reason_parts.append(f"残差诊断: trend={diagnostics.get('residual_trend', 'unknown')}, variance={diagnostics.get('residual_variance', 'unknown')}, outliers={diagnostics.get('outlier_count', 0)}。")
+                reason_parts.append("请根据诊断信息自主构造下一步 pipeline_steps（含超参数），经 validate_pipeline 校验后调用 nir_train_model。")
             reason_parts.append(lv_adj["recommendation"])
 
-        return _ok({
-            "should_retry": retry,
-            "reason": " ".join(reason_parts),
-            "next_pipeline": next_pipeline,
-            "next_pipeline_steps": next_steps,
-            "lv_adjustment": {
-                "current_n": lv_adj["current_n"],
-                "suggested_n": lv_adj["suggested_n"],
-                "change": lv_adj["change"],
-                "delta": lv_adj["delta"],
-                "issues": lv_adj["issues"],
-                "recommendation": lv_adj["recommendation"],
-            },
-            "current_quality": {
-                "grade": quality["grade"],
-                "passed": quality["passed"],
-                "action": quality["action"],
-                "thresholds_used": quality["thresholds_used"],
-            },
-            "best_so_far": best,
-            "attempt": attempt,
-            "next_attempt": (attempt + 1) if retry else None,
-        })
+        return _ok(
+            {
+                "should_retry": retry,
+                "reason": " ".join(reason_parts),
+                "diagnostics": metrics.get("diagnostics", {}),
+                "fallback_suggestion": next_pipeline,
+                "fallback_suggestion_steps": next_steps,
+                "lv_adjustment": {
+                    "current_n": lv_adj["current_n"],
+                    "suggested_n": lv_adj["suggested_n"],
+                    "change": lv_adj["change"],
+                    "delta": lv_adj["delta"],
+                    "issues": lv_adj["issues"],
+                    "recommendation": lv_adj["recommendation"],
+                },
+                "current_quality": {
+                    "grade": quality["grade"],
+                    "passed": quality["passed"],
+                    "action": quality["action"],
+                    "thresholds_used": quality["thresholds_used"],
+                },
+                "best_so_far": best,
+                "attempt": attempt,
+                "next_attempt": (attempt + 1) if retry else None,
+            }
+        )
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")
 
@@ -1201,8 +1381,8 @@ def nir_compare_tool(
         data_path: Virtual path to the raw spectral file (.mat/.csv/.txt) or
             an already-standardised .npz.
         pipelines: JSON string: list of pipeline definitions. Each pipeline
-            is a list of method names, e.g.
-            '[["snv","sg_smooth","mean_center"],["msc","derivative1","autoscale"]]'.
+            is a list of steps; each step can be a method name string or a
+            dict with a method name and optional hyper-parameters dict.
             Use "[]" for raw spectra (no preprocessing).
         method: Modelling method: pls / pcr / svr.
         domain: Application domain for quality-gate thresholds.
@@ -1228,10 +1408,7 @@ def nir_compare_tool(
             from nir_core.models import ModelResult, PreprocessingStep
             from nir_core.preprocess.pipeline import PreprocessingPipeline
         except ImportError:
-            return _err(
-                "nir_core V3 features (PreprocessingPipeline) are not available in the "
-                "current sandbox. Please rebuild the Docker image to refresh nir_core."
-            )
+            return _err("nir_core V3 features (PreprocessingPipeline) are not available in the current sandbox. Please rebuild the Docker image to refresh nir_core.")
 
         # Parse pipelines.
         try:
@@ -1251,7 +1428,11 @@ def nir_compare_tool(
             return _err("Data has no reference values (y); cannot train models.")
 
         (X_tr, y_tr), (X_val, y_val), (X_te, y_te) = split_dataset(
-            X, y, test_ratio=0.20, val_ratio=0.10, random_state=42,
+            X,
+            y,
+            test_ratio=0.20,
+            val_ratio=0.10,
+            random_state=42,
         )
 
         results = []
@@ -1261,7 +1442,7 @@ def nir_compare_tool(
 
         for i, methods in enumerate(pipe_list):
             # Build and apply pipeline.
-            steps = [PreprocessingStep(method=str(m)) for m in methods]
+            steps = [_parse_pipeline_step(m) for m in methods]
             pipe = PreprocessingPipeline(steps=steps) if steps else None
 
             try:
@@ -1275,27 +1456,38 @@ def nir_compare_tool(
                     X_tr_p, X_val_p, X_te_p = X_tr, X_val, X_te
                     pp_desc = "无（原始光谱）"
             except Exception as pp_exc:
-                summaries.append({
-                    "pipeline": methods,
-                    "description": " → ".join(methods) if methods else "raw",
-                    "error": f"{type(pp_exc).__name__}: {pp_exc}",
-                })
+                summaries.append(
+                    {
+                        "pipeline": methods,
+                        "description": " → ".join(methods) if methods else "raw",
+                        "error": f"{type(pp_exc).__name__}: {pp_exc}",
+                    }
+                )
                 continue
 
             # Train.
             if method == "pcr":
                 from nir_core.model.pcr import predict_pcr, train_pcr
+
                 model, best_n, cv_results = train_pcr(
-                    X_tr_p, y_tr, n_components=None,
-                    max_components=20, cv_folds=10, random_state=42,
+                    X_tr_p,
+                    y_tr,
+                    n_components=None,
+                    max_components=20,
+                    cv_folds=10,
+                    random_state=42,
                 )
                 y_pred_tr = predict_pcr(model, X_tr_p)
                 y_pred_val = predict_pcr(model, X_val_p)
                 y_pred_te = predict_pcr(model, X_te_p)
             elif method == "svr":
                 from nir_core.model.svr import predict_svr, train_svr
+
                 model, cv_results = train_svr(
-                    X_tr_p, y_tr, cv_folds=10, random_state=42,
+                    X_tr_p,
+                    y_tr,
+                    cv_folds=10,
+                    random_state=42,
                 )
                 best_n = None
                 y_pred_tr = predict_svr(model, X_tr_p)
@@ -1303,8 +1495,12 @@ def nir_compare_tool(
                 y_pred_te = predict_svr(model, X_te_p)
             else:
                 model, best_n, cv_results = train_pls(
-                    X_tr_p, y_tr, n_components=None,
-                    max_components=20, cv_folds=10, random_state=42,
+                    X_tr_p,
+                    y_tr,
+                    n_components=None,
+                    max_components=20,
+                    cv_folds=10,
+                    random_state=42,
                 )
                 y_pred_te = predict_pls(model, X_te_p)
                 y_pred_val = predict_pls(model, X_val_p)
@@ -1340,24 +1536,28 @@ def nir_compare_tool(
             m_with_arrays = dict(m)
             m_with_arrays["y_ref"] = y_te
             m_with_arrays["y_pred"] = y_pred_te
-            results.append(ModelResult(
-                method=method,
-                n_components=best_n,
-                metrics=m_with_arrays,
-                preprocessing_steps=steps,
-            ))
+            results.append(
+                ModelResult(
+                    method=method,
+                    n_components=best_n,
+                    metrics=m_with_arrays,
+                    preprocessing_steps=steps,
+                )
+            )
 
-            summaries.append({
-                "pipeline": methods,
-                "description": pp_desc,
-                "n_components": best_n,
-                "R2_val": round(m["R2_val"], 4),
-                "RPD": round(m["RPD"], 4),
-                "RMSEP": round(m["RMSEP"], 4),
-                "RMSECV": round(m["RMSECV"], 4) if m["RMSECV"] else None,
-                "grade": m["quality"]["grade"],
-                "passed": m["quality"]["passed"],
-            })
+            summaries.append(
+                {
+                    "pipeline": methods,
+                    "description": pp_desc,
+                    "n_components": best_n,
+                    "R2_val": round(m["R2_val"], 4),
+                    "RPD": round(m["RPD"], 4),
+                    "RMSEP": round(m["RMSEP"], 4),
+                    "RMSECV": round(m["RMSECV"], 4) if m["RMSECV"] else None,
+                    "grade": m["quality"]["grade"],
+                    "passed": m["quality"]["passed"],
+                }
+            )
 
             if m["RPD"] > best_rpd:
                 best_rpd = m["RPD"]
@@ -1387,23 +1587,20 @@ def nir_compare_tool(
         ]
         for i, s in enumerate(summaries):
             mark = " ⭐" if i == best_idx else ""
-            md_lines.append(
-                f"| {i+1} | {s['description']}{mark} | {s.get('n_components','-')} | "
-                f"{s.get('R2_val','-')} | {s.get('RPD','-')} | "
-                f"{s.get('RMSEP','-')} | {s.get('grade','-')} | "
-                f"{'是' if s.get('passed') else '否'} |"
-            )
-        md_lines.extend([
-            "",
-            "## 最佳组合",
-            f"- 预处理: {best['description']}",
-            f"- 成分数: {best.get('n_components')}",
-            f"- R²(验证): {best.get('R2_val')}",
-            f"- RPD: {best.get('RPD')}",
-            f"- RMSEP: {best.get('RMSEP')}",
-            f"- 等级: {best.get('grade')}",
-            "",
-        ])
+            md_lines.append(f"| {i + 1} | {s['description']}{mark} | {s.get('n_components', '-')} | {s.get('R2_val', '-')} | {s.get('RPD', '-')} | {s.get('RMSEP', '-')} | {s.get('grade', '-')} | {'是' if s.get('passed') else '否'} |")
+        md_lines.extend(
+            [
+                "",
+                "## 最佳组合",
+                f"- 预处理: {best['description']}",
+                f"- 成分数: {best.get('n_components')}",
+                f"- R²(验证): {best.get('R2_val')}",
+                f"- RPD: {best.get('RPD')}",
+                f"- RMSEP: {best.get('RMSEP')}",
+                f"- 等级: {best.get('grade')}",
+                "",
+            ]
+        )
         summary_md = "\n".join(md_lines)
         md_path = os.path.join(real_outdir, "comparison_summary.md")
         with open(md_path, "w", encoding="utf-8") as f:
@@ -1414,16 +1611,18 @@ def nir_compare_tool(
         with open(all_metrics_path, "w", encoding="utf-8") as f:
             _json.dump(summaries, f, ensure_ascii=False, indent=2, default=_json_default)
 
-        return _ok({
-            "status": "ok",
-            "n_compared": len(summaries),
-            "best_index": best_idx,
-            "best": best,
-            "all_results": summaries,
-            "gallery": output_dir + "/comparison_gallery.html",
-            "summary": output_dir + "/comparison_summary.md",
-            "all_metrics": output_dir + "/all_metrics.json",
-        })
+        return _ok(
+            {
+                "status": "ok",
+                "n_compared": len(summaries),
+                "best_index": best_idx,
+                "best": best,
+                "all_results": summaries,
+                "gallery": output_dir + "/comparison_gallery.html",
+                "summary": output_dir + "/comparison_summary.md",
+                "all_metrics": output_dir + "/all_metrics.json",
+            }
+        )
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")
 
@@ -1431,6 +1630,7 @@ def nir_compare_tool(
 # ---------------------------------------------------------------------------
 # Phase 3 (v3): Model registration tool (anti-parallel-write-conflict)
 # ---------------------------------------------------------------------------
+
 
 @tool("nir_register_model", parse_docstring=True)
 def nir_register_model_tool(
@@ -1467,10 +1667,7 @@ def nir_register_model_tool(
         try:
             from nir_core.utils.registry import ModelRegistry
         except ImportError:
-            return _err(
-                "nir_core V3 features (ModelRegistry) are not available in the current "
-                "sandbox. Please rebuild the Docker image to refresh nir_core."
-            )
+            return _err("nir_core V3 features (ModelRegistry) are not available in the current sandbox. Please rebuild the Docker image to refresh nir_core.")
 
         # Resolve paths.
         real_model = _resolve(runtime, model_path, read_only=True)
@@ -1507,13 +1704,15 @@ def nir_register_model_tool(
 
         # Return a summary (no matrix data).
         all_versions = registry.list_versions(model_id)
-        return _ok({
-            "status": "registered",
-            "model_id": model_id,
-            "version": version,
-            "n_versions": len(all_versions),
-            "domain": domain,
-            "registry_path": registry_path,
-        })
+        return _ok(
+            {
+                "status": "registered",
+                "model_id": model_id,
+                "version": version,
+                "n_versions": len(all_versions),
+                "domain": domain,
+                "registry_path": registry_path,
+            }
+        )
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")

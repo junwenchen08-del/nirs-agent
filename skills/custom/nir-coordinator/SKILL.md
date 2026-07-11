@@ -30,8 +30,18 @@ allowed-tools:
 **❌ 禁止用 `write_file` 创建任何分析脚本**（如 `analyze.py`、`train.py`）——工具会自动完成。
 **❌ 禁止手动 import `scipy.io.loadmat`、`sklearn.cross_decomposition.PLSRegression` 等**——由 `nir_*` 工具内部处理。
 **❌ 禁止自己用 matplotlib 画图**——`nir_analyze` / `nir_train_model` 自动生成 PNG。
-**❌ 禁止自己编造预处理流水线组合**——必须调用 `nir_reflect` 获得确定性的下一步。
+**✅ V3.6: 允许根据残差诊断自主构造 `pipeline_steps`（含超参数）**——`nir_train_model` 内置 `validate_pipeline` 守护，非法组合会被拦截并返回原因。
 **❌ 禁止自己实现 snv/sg_smooth/derivative1 等算法**——`nir_preprocess` 已提供。
+
+### 🚨 CSV / .mat / .txt 文件布局：禁止自己解析
+
+`nir_load_data` **自动检测**典型 NIR 光谱文件布局：
+- **CSV 第一行是波长、第一列是 y 值**（NIR 行业惯例）—— `nir_load_data` 看到 `(0,0)` 角是 NaN、其余第一行是 NIR 波长范围数字时，**自动分离** y 和 wv
+- **MAT** —— 自动识别 X/y/wv 变量
+- 解析成功后，工具 summary 里会包含 `y_separated: true`、`y_first_values: [5.0, 5.25, ...]` 等强证据
+
+**❌ 看到 "structure: samples_in_columns" 也不要自己写 Python 解析**——这只是形状启发式，不是布局类型。
+**✅ 看到 `nir_inspect` 输出 `corner_is_nan: true` 时，直接调用 `nir_load_data` 信任工具结果**。
 
 > ⚠️ **反例警告**：曾经在 LLM 自己写完整 Python 脚本（手写 SNV/SG/MSC 算法 + 三集分离 + 嵌套CV + PLS建模 + 反射闭环）时失败，因为：
 > 1. 沙箱中 `nir_core` 未安装 → `import nir_core` 失败
@@ -81,6 +91,23 @@ allowed-tools:
 对绝大多数请求，直接调用 `nir_analyze` 一次即可。它会自动完成：
 加载 → 三集分离 → 嵌套 CV 预处理选择 → 建模 → 评估 → 生成报告和图。
 
+**CSV 文件直接调用（无需先调用 nir_load_data）**：
+```
+nir_analyze(
+  data_path="/mnt/user-data/uploads/corn_moisture.csv",
+  auto_preprocess=true,
+  method="pls",
+  domain="food_moisture",
+  output_dir="/mnt/user-data/outputs/nir_analysis"
+)
+```
+`nir_analyze` 内部自动处理 CSV 布局检测（角 NaN 信号识别）→ 分离 y 和 wv → 训练。
+
+如果用 `nir_load_data` + `nir_train_model` 分步模式：
+1. 调用 `nir_load_data(file_path, output_path=".../data.npz")` —— 看返回 summary 的 `y_separated: true` 和 `y_first_values: [...]` 确认 y 已分离
+2. 调用 `nir_train_model(input_path=".../data.npz", ...)` —— 训练模型
+3. **不要自己解析 CSV** —— 工具已自动处理
+
 调用示例：
 ```
 nir_analyze(
@@ -107,25 +134,57 @@ nir_analyze(
 
 ## 模式 B：分步模式（仅当快速模式结果不达标或用户明确要求优化时使用）
 
-### 反思闭环流程（使用 `nir_reflect` 确定性驱动）
+### 反思闭环流程（V3.6: 诊断驱动自主决策）
 
-每次 `nir_train_model` 完成后，**必须调用 `nir_reflect`** 来获得确定性的重试决策。不要自己解读指标或决定下一个预处理组合——`nir_reflect` 会基于 `should_retry` + `get_next_pipeline` + `suggest_lv_adjustment` 给出明确指令。
+每次 `nir_train_model` 完成后，**必须调用 `nir_reflect`** 获取残差诊断和重试预算。
+`nir_reflect` 返回 `diagnostics`（残差趋势/方差/异常点）和 `should_retry`（是否还能重试），
+你根据诊断信息**自主构造**下一步 `pipeline_steps`（含超参数），`nir_train_model` 内置 `validate_pipeline` 守护。
 
 ```
 步骤1: nir_load_data(file_path, output_path) → 生成 data.npz
-步骤2: nir_preprocess(input_path, method, output_path) → 预处理
-步骤3: nir_train_model(input_path, method, domain, model_output, metrics_output) → 建模
-步骤4: nir_reflect(metrics_path, history, domain, attempt) → 获得重试决策
+步骤2: nir_train_model(input_path, pipeline_steps, method, domain, ...) → 建模
+步骤3: nir_reflect(metrics_path, history, domain, attempt) → 获取诊断+重试决策
        ↓
        should_retry == true?
-       ├─ 是: 按 next_pipeline 调用 nir_preprocess → 回到步骤3，attempt+1
+       ├─ 是: <thought> 分析 diagnostics → 自主构造 pipeline_steps → 回到步骤2，attempt+1
+       │      仅当连续2次自构造效果不如 best_so_far 时，使用 fallback_suggestion 兜底
        └─ 否: 闭环结束，进入报告生成
-步骤5: 调用 present_files 展示所有输出文件
+步骤4: 调用 present_files 展示所有输出文件
 ```
+
+### 残差模式-解决方案映射（推理跳板）
+
+根据 `nir_reflect` 返回的 `diagnostics` 选择下一步策略：
+
+| 诊断信号 | 含义 | 建议操作 |
+|----------|------|----------|
+| `residual_trend: upward` | 高端预测偏低（基线漂移） | 加入 `airpls` 基线校正，`lambda_` 默认 1e6，漂移严重时减小 |
+| `residual_trend: downward` | 高端预测偏高（乘性散射） | 加入 `snv` 或 `msc` 散射校正 |
+| `residual_variance: high` | 残差离散（噪声大） | 加入 `sg_smooth`，`window` 试 11→15 |
+| `outlier_count` 高 | 异常样本干扰 | 尝试 `remove_outliers=True`，或简化流水线 |
+| R²提升但RMSEP仍高 | 过拟合 | 减小 `max_components`，或增大 SG 窗口 |
+
+### 超参数调整模板
+
+构造 `pipeline_steps` 时支持 `params` 字段：
+```json
+[
+  {"method": "airpls", "params": {"lambda_": 1000000}},
+  {"method": "sg_smooth", "params": {"window": 15, "order": 2}},
+  {"method": "snv"},
+  {"method": "mean_center"}
+]
+```
+
+约束（`validate_pipeline` 会拦截违规）：
+- SG 窗口：5-15 的奇数
+- airPLS lambda：1e3-1e8
+- `snv` 和 `msc` 互斥，`derivative1` 和 `derivative2` 互斥
+- 方法顺序：基线校正 → 散射校正/平滑 → 缩放
 
 ### `nir_reflect` 调用示例
 
-第1次尝试（原始光谱建模后）：
+第1次尝试（SNV建模后）：
 ```
 nir_reflect(
   metrics_path="/mnt/user-data/outputs/metrics.json",
@@ -135,11 +194,11 @@ nir_reflect(
 )
 ```
 
-第2次尝试（SNV预处理后，history 带上第1次记录）：
+第2次尝试（history 带上第1次记录）：
 ```
 nir_reflect(
   metrics_path="/mnt/user-data/outputs/metrics.json",
-  history='[{"pipeline":[{"method":"raw"}],"metrics":{"R2_val":0.72,"RPD":2.1}}]',
+  history='[{"pipeline":[{"method":"snv"}],"metrics":{"R2_val":0.72,"RPD":2.1}}]',
   domain="food_protein",
   attempt=2
 )
@@ -147,16 +206,19 @@ nir_reflect(
 
 `nir_reflect` 返回的关键字段：
 - `should_retry`: 是否应继续重试
-- `next_pipeline`: 下一个应尝试的预处理方法列表（如 `["snv","sg_smooth","mean_center"]`）
-- `lv_adjustment.suggested_n`: 建议的成分数（过拟合时减少，欠拟合时增加）
-- `reason`: 中文决策理由
+- `diagnostics`: 残差诊断（`residual_trend`/`residual_variance`/`outlier_count`）
+- `fallback_suggestion`: 兜底候选流水线（仅当自构造效果不佳时使用）
+- `fallback_suggestion_steps`: 兜底候选的步骤详情
+- `lv_adjustment.suggested_n`: 建议的成分数
+- `best_so_far`: 历史最优记录
+- `reason`: 中文决策理由（含诊断摘要）
 
 ### 反思重试约束
 
 - 最多 3 次重试（由 `nir_reflect` 的 `max_retries` 控制）
 - 连续两次 R² 改善 < 0.02 时自动停止（plateau 检测）
 - 候选流水线耗尽时停止
-- 你**不需要**自己判断是否达标——`nir_reflect` 会告诉你
+- `should_retry` 由确定性规则判断——你只需要决定**试什么**
 
 ## 质量门禁（按领域分级）
 
