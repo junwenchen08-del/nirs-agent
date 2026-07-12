@@ -5,6 +5,7 @@ import {
   CableIcon,
   InfoIcon,
   BrainIcon,
+  LibraryIcon,
   PaletteIcon,
   SparklesIcon,
   UserIcon,
@@ -23,6 +24,7 @@ import { AboutSettingsPage } from "@/components/workspace/settings/about-setting
 import { AccountSettingsPage } from "@/components/workspace/settings/account-settings-page";
 import { AppearanceSettingsPage } from "@/components/workspace/settings/appearance-settings-page";
 import { ChannelsSettingsPage } from "@/components/workspace/settings/channels-settings-page";
+import { KnowledgeSettingsPage } from "@/components/workspace/settings/knowledge-settings-page";
 import { MemorySettingsPage } from "@/components/workspace/settings/memory-settings-page";
 import { NotificationSettingsPage } from "@/components/workspace/settings/notification-settings-page";
 import { SkillSettingsPage } from "@/components/workspace/settings/skill-settings-page";
@@ -38,6 +40,7 @@ type SettingsSection =
   | "tools"
   | "skills"
   | "notification"
+  | "knowledge"
   | "about";
 
 type SettingsDialogProps = React.ComponentProps<typeof Dialog> & {
@@ -87,6 +90,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
       },
       { id: "tools", label: t.settings.sections.tools, icon: WrenchIcon },
       { id: "skills", label: t.settings.sections.skills, icon: SparklesIcon },
+      { id: "knowledge", label: t.settings.sections.knowledge, icon: LibraryIcon },
       { id: "about", label: t.settings.sections.about, icon: InfoIcon },
     ],
     [
@@ -97,6 +101,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
       t.settings.sections.tools,
       t.settings.sections.skills,
       t.settings.sections.notification,
+      t.settings.sections.knowledge,
       t.settings.sections.about,
     ],
   );
@@ -153,6 +158,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
               )}
               {activeSection === "notification" && <NotificationSettingsPage />}
               {activeSection === "channels" && <ChannelsSettingsPage />}
+              {activeSection === "knowledge" && <KnowledgeSettingsPage />}
               {activeSection === "about" && <AboutSettingsPage />}
             </div>
           </ScrollArea>

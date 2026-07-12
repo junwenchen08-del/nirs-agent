@@ -338,6 +338,7 @@ export interface Translations {
       tools: string;
       skills: string;
       notification: string;
+      knowledge: string;
       about: string;
     };
     memory: {
@@ -445,6 +446,42 @@ export interface Translations {
       emptyButton: string;
       adminRequired: string;
       installAdminRequired: string;
+    };
+    knowledge: {
+      title: string;
+      description: string;
+      empty: string;
+      statsDocuments: string;
+      statsChunks: string;
+      uploadButton: string;
+      uploadHint: string;
+      uploadSuccess: string;
+      uploadFailed: string;
+      deleteButton: string;
+      deleteConfirmTitle: string;
+      deleteConfirmDescription: string;
+      deleteSuccess: string;
+      deleteFailed: string;
+      refreshButton: string;
+      searchTitle: string;
+      searchPlaceholder: string;
+      searchButton: string;
+      searchEmpty: string;
+      columnTitle: string;
+      columnSource: string;
+      columnYear: string;
+      columnChunks: string;
+      columnMethods: string;
+      columnActions: string;
+      titleLabel: string;
+      titlePlaceholder: string;
+      yearLabel: string;
+      yearPlaceholder: string;
+      loading: string;
+      error: string;
+      serverUnreachable: string;
+      noYear: string;
+      entitiesLabel: string;
     };
     notification: {
       title: string;

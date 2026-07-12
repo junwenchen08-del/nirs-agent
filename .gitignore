@@ -22,6 +22,14 @@ nir_core.egg-info/
 dist/
 build/
 
+# Knowledge base local data (ChromaDB + embedding model)
+nir_core/knowledge/.chromadb/
+nir_core/knowledge/all-MiniLM-L6-v2/
+
+# Temporary probe scripts
+probe_*.py
+container_loaders.py
+
 # Virtual environments
 .venv
 venv/

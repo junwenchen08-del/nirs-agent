@@ -20,6 +20,7 @@ from app.gateway.routers import (
     channels,
     features,
     feedback,
+    knowledge,
     mcp,
     memory,
     models,
@@ -323,6 +324,10 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
                 "description": "Upload and manage user files for threads",
             },
             {
+                "name": "knowledge",
+                "description": "Manage the NIR knowledge base (documents, search, stats)",
+            },
+            {
                 "name": "threads",
                 "description": "Manage DeerFlow thread-local filesystem data",
             },
@@ -401,6 +406,9 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
 
     # Uploads API is mounted at /api/threads/{thread_id}/uploads
     app.include_router(uploads.router)
+
+    # Knowledge base API is mounted at /api/knowledge
+    app.include_router(knowledge.router)
 
     # Thread cleanup API is mounted at /api/threads/{thread_id}
     app.include_router(threads.router)

@@ -1716,3 +1716,172 @@ def nir_register_model_tool(
         )
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Knowledge base semantic search tool
+# ---------------------------------------------------------------------------
+
+# Cache: None = untested, "direct" = in-process import works, "http" = fallback
+_knowledge_search_mode: str | None = None
+
+# HTTP search server URL (set via NIR_KNOWLEDGE_URL env var, or auto-detected)
+_knowledge_http_url: str | None = None
+
+
+def _get_knowledge_http_url() -> str:
+    """Determine the knowledge search server URL.
+
+    Priority:
+    1. NIR_KNOWLEDGE_URL env var
+    2. http://host.docker.internal:8089 (Docker -> host)
+    3. http://localhost:8089 (local dev)
+    """
+    global _knowledge_http_url
+    if _knowledge_http_url is not None:
+        return _knowledge_http_url
+
+    url = os.environ.get("NIR_KNOWLEDGE_URL", "")
+    if not url:
+        # In Docker, host.docker.internal resolves to the host gateway.
+        # In local dev, localhost works.
+        url = "http://host.docker.internal:8089"
+    _knowledge_http_url = url
+    return url
+
+
+def _search_knowledge_via_http(query: str, top_k: int) -> str:
+    """Fallback: search knowledge base via HTTP.
+
+    Used when ``nir_core.knowledge`` cannot be imported in the backend
+    process (heavy deps like torch/chromadb not installed). Calls a
+    lightweight HTTP server running on the host machine.
+    """
+    import urllib.error
+    import urllib.request
+
+    url = _get_knowledge_http_url() + "/search"
+    payload = json.dumps({"query": query, "top_k": top_k}).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if data.get("error"):
+            return _err(f"Knowledge search error: {data['error']}")
+        return _ok(data)
+    except urllib.error.URLError as exc:
+        return _err(
+            f"Knowledge search server unreachable at {url}: {exc.reason}. "
+            "Start it with: python nir_core/knowledge/_search_server.py"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Knowledge search HTTP error: {type(exc).__name__}: {exc}")
+
+
+@tool("nir_search_knowledge", parse_docstring=True)
+def nir_search_knowledge_tool(
+    runtime: Runtime,
+    query: str,
+    top_k: int = 5,
+    tool_call_id: Annotated[str, InjectedToolCallId] = "",  # noqa: ARG001
+) -> str:
+    """Search the NIR knowledge base (papers / docs) for relevant sections.
+
+    Use this when the inline chemometrics rules and per-domain tips are not
+    enough — e.g. to confirm which preprocessing method works best for a
+    specific sample type, compare method effectiveness, or check whether a
+    reported R2 / RPD range is reasonable for the domain.
+
+    The knowledge base is populated offline via
+    ``python -m nir_core.knowledge.cli import-dir <papers_dir>``. If the
+    base is empty, this tool returns an empty result list (not an error).
+
+    Args:
+        query: Natural-language query, e.g.
+            ``"SNV vs MSC for soil organic carbon"`` or
+            ``"typical R2 for PLS on wheat protein"``.
+        top_k: Maximum number of matching sections to return (default 5).
+
+    Returns:
+        JSON with a list of matching paper sections. Each entry includes
+        the chunk content (truncated to 1000 chars), source file, similarity
+        score, and any NIR entities (methods / models / datasets) detected
+        in the chunk.
+    """
+    global _knowledge_search_mode
+
+    # Try in-process import first (fast path — works if deps are installed)
+    if _knowledge_search_mode in (None, "direct"):
+        try:
+            from nir_core.knowledge.config import get_retriever
+
+            retriever = get_retriever()
+            results = retriever.search(query, top_k=top_k)
+            _knowledge_search_mode = "direct"
+
+            if not results:
+                return _ok(
+                    {
+                        "results": [],
+                        "count": 0,
+                        "query": query,
+                        "message": (
+                            "Knowledge base is empty or returned no matches. "
+                            "Populate it via `python -m nir_core.knowledge.cli "
+                            "import-dir <papers_dir>`."
+                        ),
+                    }
+                )
+
+            output = []
+            for r in results:
+                meta = r.chunk.metadata or {}
+
+                def _load_entities(key: str) -> list[str]:
+                    val = meta.get(key, "")
+                    if isinstance(val, list):
+                        return val
+                    if isinstance(val, str) and val:
+                        try:
+                            decoded = json.loads(val)
+                            return decoded if isinstance(decoded, list) else [val]
+                        except (ValueError, TypeError):
+                            return [val]
+                    return []
+
+                output.append(
+                    {
+                        "content": r.chunk.content[:1000],
+                        "source": r.chunk.source,
+                        "score": round(r.score, 4),
+                        "entities": {
+                            "methods": _load_entities("methods"),
+                            "models": _load_entities("models"),
+                            "datasets": _load_entities("datasets"),
+                            "metrics": _load_entities("metrics"),
+                        },
+                        "related_entities": r.related_entities,
+                    }
+                )
+
+            return _ok(
+                {
+                    "results": output,
+                    "count": len(output),
+                    "query": query,
+                }
+            )
+        except Exception:  # noqa: BLE001
+            if _knowledge_search_mode == "direct":
+                # Was working before but failed now — unusual, try HTTP
+                pass
+            _knowledge_search_mode = "http"
+
+    # Fallback: HTTP search server (runs on host with Anaconda Python)
+    return _search_knowledge_via_http(query, top_k)
