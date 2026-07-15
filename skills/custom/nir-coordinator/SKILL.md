@@ -19,6 +19,7 @@ allowed-tools:
   - nir_reflect
   - nir_compare
   - nir_register_model
+  - nir_search_knowledge
 ---
 
 # NIR 光谱分析协调器
@@ -79,6 +80,90 @@ allowed-tools:
 - 如果模型出现 **过拟合** (RMSEP > 2×RMSECV)：读取 `/mnt/skills/custom/nir-knowledge/docs/troubleshooting.md`
 - 如果需要 **指标解读** 参考：读取 `/mnt/skills/custom/nir-knowledge/docs/metrics-interpretation.md`
 - 化学计量学硬规则始终生效（已内联在本 SKILL 中），无需额外读取
+
+## ★ 语义知识检索（论文库）—— 事件驱动触发规则
+
+知识库通过 `nir_search_knowledge` 工具进行语义检索。**触发条件必须是可观测信号**，不是模糊的"当需要时"。
+
+### 必须调用的情况（不是可选）
+
+| 触发信号（来自工具输出） | 查询模板 |
+|------------------------|---------|
+| `nir_train_model` / `nir_analyze` / `nir_reflect` 返回的 `knowledge_hint != null` | **直接使用 `knowledge_hint.query` 字段**，不要自己构造 |
+| `domain` 不在 {food_moisture, food_protein, pharma, feed, soil, default} 内 | `query="<domain> NIR calibration PLS preprocessing"` |
+| `nir_reflect` 返回 `grade in {C, D, F}` 且 `attempt >= 2` | 参考 `knowledge_hint.query`（已按 diagnostics 生成） |
+| `diagnostics.residual_trend == "upward"` 且重试1次后仍无改善 | `query="airpls baseline correction <domain> NIR"` |
+| `diagnostics.residual_trend == "downward"` 且重试1次后仍无改善 | `query="snv vs msc scatter correction <domain> NIR"` |
+| `diagnostics.residual_variance == "high"` 且重试1次后仍无改善 | `query="sg_smooth window selection <domain> NIR noise"` |
+| `R²_val < 0.7` | `query="typical R2 RPD PLS <domain> NIR"` |
+| 用户问"为什么 R² 这么低" / "正常吗" / "合理范围" | `query="typical R2 RPD PLS <domain> NIR"` |
+| 用户在 SNV vs MSC / airPLS vs asLS / derivative1 vs derivative2 之间二选一 | `query="SNV vs MSC <domain> NIR"` 等 |
+
+### 禁止调用的情况
+
+- **同一对话里已经检索过相同或相似 query**（避免重复 token 浪费）
+- `grade` 已为 A/B 且用户没有要求优化
+- 用户明确要求"快速分析"且结果已通过门禁
+- 知识库为空（首次返回 `count: 0` 时不要再检索）
+
+### 调用方式
+
+```
+nir_search_knowledge(query="SNV vs MSC soil data scatter correction", top_k=3)
+```
+
+**返回内容**：论文段落（截断 1000 字）+ 来源文件 + 相似度分数 + 实体（methods/models/datasets/metrics）+ `available_documents` 列表。
+
+**注意**：知识库为空时返回空结果（非报错）。论文导入方式：`python -m nir_core.knowledge.cli import-dir <论文目录>`
+
+### knowledge_hint 字段说明
+
+V3.7 起，`nir_train_model` / `nir_analyze` / `nir_reflect` 在以下情况下会在返回 JSON 里附带 `knowledge_hint` 字段：
+
+```json
+{
+  "knowledge_hint": {
+    "should_search": true,
+    "query": "soil NIR PLS improve RPD preprocessing",
+    "reason": "重试 2 次仍未通过门禁 (grade=C)，建议检索论文库寻找该领域提升 RPD 的预处理组合经验。"
+  }
+}
+```
+
+- `should_search == true` 时，**必须**在下一步调用 `nir_search_knowledge(query=hint['query'])`
+- `query` 字段已构造好，直接使用，不要自己重写
+- `reason` 字段解释为什么建议检索，可以引用到给用户的回复里
+- `knowledge_hint == null` 时不强制检索，但可根据上表其他信号主动检索
+
+### 调用示例
+
+**示例 1**：用户上传 soil 数据，初始 grade=C，knowledge_hint 已给出 query
+```
+步骤1: nir_train_model(pipeline_steps='["snv","mean_center"]', domain="soil")
+  → 返回 grade="C", R²_val=0.65, knowledge_hint={should_search:true, query:"soil NIR PLS improve RPD preprocessing"}
+步骤2: nir_search_knowledge(query="soil NIR PLS improve RPD preprocessing", top_k=3)
+  → 返回论文建议 soil 数据常用 SNV+SG+derivative1
+步骤3: 根据论文构造 pipeline_steps='["snv","sg_smooth","derivative1","mean_center"]'
+步骤4: nir_train_model(pipeline_steps='["snv","sg_smooth","derivative1","mean_center"]', domain="soil", attempt=2)
+步骤5: nir_reflect(metrics_path, history, domain="soil", attempt=2)
+  → 若 knowledge_hint 仍非空且 query 不同，再次检索；若 query 相同则跳过
+```
+
+**示例 2**：用户问"我的 R²=0.6 正常吗"
+```
+步骤1: nir_search_knowledge(query="typical R2 RPD PLS soil NIR", top_k=3)
+  → 返回 soil 领域 R² 通常 0.7-0.85
+步骤2: 基于论文数据回答用户：当前 R² 略低于领域典型范围，建议尝试 SNV+SG 组合
+```
+
+**示例 3**：用户上传未知领域数据（domain="textile"）
+```
+步骤1: nir_analyze(data_path, domain="textile")
+  → 返回 knowledge_hint={should_search:true, query:"textile NIR calibration PLS preprocessing"}
+步骤2: nir_search_knowledge(query="textile NIR calibration PLS preprocessing", top_k=3)
+  → 返回该领域常用预处理和指标范围
+步骤3: 基于论文知识判断结果是否合理，必要时进入反思闭环
+```
 
 ## 开始分析前
 

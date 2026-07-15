@@ -174,19 +174,17 @@ class ChromaDBRetriever:
         docs: dict[str, dict[str, Any]] = {}
         for meta in all_data.get("metadatas", []):
             doc_id = meta.get("doc_id", "")
-            if not doc_id or doc_id in docs:
+            if not doc_id:
                 continue
-            docs[doc_id] = {
-                "doc_id": doc_id,
-                "title": meta.get("title", ""),
-                "source": meta.get("source", ""),
-                "year": meta.get("year"),
-                "chunk_count": 0,
-            }
-        # Count chunks per doc.
-        for meta in all_data.get("metadatas", []):
-            doc_id = meta.get("doc_id", "")
-            if doc_id in docs:
+            if doc_id not in docs:
+                docs[doc_id] = {
+                    "doc_id": doc_id,
+                    "title": meta.get("title", ""),
+                    "source": meta.get("source", ""),
+                    "year": meta.get("year"),
+                    "chunk_count": 1,
+                }
+            else:
                 docs[doc_id]["chunk_count"] += 1
         return list(docs.values())
 

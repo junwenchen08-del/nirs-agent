@@ -528,9 +528,11 @@ export const zhCN: Translations = {
       statsDocuments: "文档数",
       statsChunks: "分块数",
       uploadButton: "上传文档",
-      uploadHint: "支持 PDF、DOCX、TXT、MD、HTML、CSV 格式，单文件最大 50MB。",
+      uploadHint: "支持 PDF、DOCX、TXT、MD、HTML、CSV 格式，单文件最大 20MB。",
       uploadSuccess: "上传成功，共生成 {count} 个分块。",
       uploadFailed: "上传失败：{message}",
+      unsupportedType: "不支持的文件类型。支持的格式：{ext}",
+      fileTooLarge: "文件过大：{size}MB，最大允许 20MB。",
       deleteButton: "删除",
       deleteConfirmTitle: "删除文档？",
       deleteConfirmDescription:

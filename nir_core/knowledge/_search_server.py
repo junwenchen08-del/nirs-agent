@@ -52,12 +52,23 @@ _retriever = ChromaDBRetriever(
     collection_name=_cfg.collection_name,
 )
 
-# 50 MB upload cap (matches backend upload limit)
-_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+# 20 MB upload cap (matches backend upload limit)
+_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+# Max JSON body size for POST endpoints (60 MB — allows base64 overhead)
+_MAX_BODY_BYTES = 60 * 1024 * 1024
+
+# Simple token authentication: if NIR_KNOWLEDGE_TOKEN env var is set,
+# all requests must include "Authorization: Bearer <token>" header.
+_AUTH_TOKEN = os.environ.get("NIR_KNOWLEDGE_TOKEN", "")
 
 print(f"[knowledge-server] ChromaDB: {_cfg.chroma_path}")
 print(f"[knowledge-server] Model: {_model_path}")
 print(f"[knowledge-server] Retriever initialized")
+if _AUTH_TOKEN:
+    print(f"[knowledge-server] Auth: enabled (token from NIR_KNOWLEDGE_TOKEN)")
+else:
+    print(f"[knowledge-server] Auth: disabled (set NIR_KNOWLEDGE_TOKEN to enable)")
 
 
 # ---------------------------------------------------------------------------
@@ -224,10 +235,21 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _check_auth(self) -> bool:
+        """Return True if auth passes (or is disabled)."""
+        if not _AUTH_TOKEN:
+            return True
+        auth_header = self.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            return auth_header[7:] == _AUTH_TOKEN
+        return False
+
     def _read_json_body(self) -> dict | None:
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length == 0:
             return None
+        if content_length > _MAX_BODY_BYTES:
+            return None  # caller will see None and return 400
         body = self.rfile.read(content_length)
         try:
             return json.loads(body)
@@ -235,6 +257,9 @@ class _Handler(BaseHTTPRequestHandler):
             return None
 
     def do_GET(self) -> None:
+        if not self._check_auth():
+            self._send_json(401, {"error": "Unauthorized"})
+            return
         parsed = urlparse(self.path)
         path = parsed.path
 
@@ -250,13 +275,16 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "Not found"})
 
     def do_POST(self) -> None:
+        if not self._check_auth():
+            self._send_json(401, {"error": "Unauthorized"})
+            return
         parsed = urlparse(self.path)
         path = parsed.path
 
         if path == "/search":
             req = self._read_json_body()
             if req is None:
-                self._send_json(400, {"error": "Invalid JSON body"})
+                self._send_json(400, {"error": "Invalid JSON body or body too large"})
                 return
             query = req.get("query", "")
             top_k = int(req.get("top_k", 5))
@@ -275,7 +303,7 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/documents":
             req = self._read_json_body()
             if req is None:
-                self._send_json(400, {"error": "Invalid JSON body"})
+                self._send_json(400, {"error": "Invalid JSON body or body too large"})
                 return
             filename = req.get("filename", "")
             content_b64 = req.get("content_b64", "")
@@ -298,6 +326,9 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "Not found"})
 
     def do_DELETE(self) -> None:
+        if not self._check_auth():
+            self._send_json(401, {"error": "Unauthorized"})
+            return
         parsed = urlparse(self.path)
         path = parsed.path
 

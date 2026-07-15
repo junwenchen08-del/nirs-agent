@@ -65,6 +65,10 @@ interface KnowledgeSearchResult {
 // API helpers
 // ---------------------------------------------------------------------------
 
+// Supported file extensions (must match backend _SUPPORTED_EXTS)
+const SUPPORTED_EXTS = [".pdf", ".docx", ".txt", ".md", ".markdown", ".html", ".htm", ".csv"];
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+
 async function readErrorDetail(response: Response): Promise<string> {
   const data = (await response.json().catch(() => ({}))) as { detail?: string };
   return data.detail ?? `HTTP ${response.status}: ${response.statusText}`;
@@ -441,6 +445,23 @@ function UploadDialog({
       setError(t.settings.knowledge.uploadHint);
       return;
     }
+    // Client-side file type validation
+    const fileName = file.name.toLowerCase();
+    const isValidExt = SUPPORTED_EXTS.some((ext) => fileName.endsWith(ext));
+    if (!isValidExt) {
+      setError(t.settings.knowledge.unsupportedType.replace("{ext}", SUPPORTED_EXTS.join(", ")));
+      return;
+    }
+    // Client-side file size validation
+    if (file.size > MAX_FILE_SIZE) {
+      setError(
+        t.settings.knowledge.fileTooLarge.replace(
+          "{size}",
+          String(Math.round(file.size / 1024 / 1024)),
+        ),
+      );
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
@@ -629,7 +650,7 @@ function SearchTest({
       {results && results.length > 0 && (
         <div className="space-y-3">
           {results.map((r, i) => (
-            <div key={i} className="rounded-lg border p-3">
+            <div key={`${r.source}-${i}`} className="rounded-lg border p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-muted-foreground truncate text-xs">
                   {r.source}

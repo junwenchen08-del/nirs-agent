@@ -883,41 +883,48 @@ tools:
     use: deerflow.sandbox.tools:bash_tool
 
   # ── NIR spectroscopy tools (backed by nir_core) ───────────────────────────
+  # Tools are split into focused sub-modules under deerflow.community.nir;
+  # see backend/packages/harness/deerflow/community/nir/tools.py for the
+  # facade that re-exports all of them.
   - name: nir_load_data
     group: bash
-    use: deerflow.community.nir.tools:nir_load_data_tool
+    use: deerflow.community.nir.io_tools:nir_load_data_tool
 
   - name: nir_inspect
     group: bash
-    use: deerflow.community.nir.tools:nir_inspect_tool
+    use: deerflow.community.nir.io_tools:nir_inspect_tool
 
   - name: nir_preprocess
     group: bash
-    use: deerflow.community.nir.tools:nir_preprocess_tool
+    use: deerflow.community.nir.preprocess:nir_preprocess_tool
 
   - name: nir_train_model
     group: bash
-    use: deerflow.community.nir.tools:nir_train_model_tool
+    use: deerflow.community.nir.modeling:nir_train_model_tool
 
   - name: nir_predict
     group: bash
-    use: deerflow.community.nir.tools:nir_predict_tool
+    use: deerflow.community.nir.io_tools:nir_predict_tool
 
   - name: nir_analyze
     group: bash
-    use: deerflow.community.nir.tools:nir_analyze_tool
+    use: deerflow.community.nir.modeling:nir_analyze_tool
 
   - name: nir_reflect
     group: bash
-    use: deerflow.community.nir.tools:nir_reflect_tool
+    use: deerflow.community.nir.reflect:nir_reflect_tool
 
   - name: nir_compare
     group: bash
-    use: deerflow.community.nir.tools:nir_compare_tool
+    use: deerflow.community.nir.modeling:nir_compare_tool
 
   - name: nir_register_model
     group: bash
-    use: deerflow.community.nir.tools:nir_register_model_tool
+    use: deerflow.community.nir.modeling:nir_register_model_tool
+
+  - name: nir_search_knowledge
+    group: bash
+    use: deerflow.community.nir.knowledge:nir_search_knowledge_tool
 
 # ============================================================================
 # Tool Search Configuration (Deferred Tool Loading)

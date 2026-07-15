@@ -552,9 +552,11 @@ export const enUS: Translations = {
       statsDocuments: "Documents",
       statsChunks: "Chunks",
       uploadButton: "Upload Document",
-      uploadHint: "Supports PDF, DOCX, TXT, MD, HTML, CSV. Max 50MB per file.",
+      uploadHint: "Supports PDF, DOCX, TXT, MD, HTML, CSV. Max 20MB per file.",
       uploadSuccess: "Upload succeeded, generated {count} chunks.",
       uploadFailed: "Upload failed: {message}",
+      unsupportedType: "Unsupported file type. Supported: {ext}",
+      fileTooLarge: "File too large: {size}MB, max 20MB.",
       deleteButton: "Delete",
       deleteConfirmTitle: "Delete document?",
       deleteConfirmDescription:
