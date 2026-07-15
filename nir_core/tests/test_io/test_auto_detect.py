@@ -101,6 +101,45 @@ def test_inspect_file_csv(tmp_path: Path) -> None:
     assert info["has_nan"] is False
 
 
+def test_inspect_file_csv_detects_non_numeric_columns(tmp_path: Path) -> None:
+    """★ v3.8: inspect_file should detect non-numeric metadata columns.
+
+    Simulates the Anderson 2020 mango CSV layout: 8 string metadata columns
+    (Set/Season/Region/...) followed by numeric spectra columns. The string
+    columns become NaN under genfromtxt(dtype=float); inspect should flag
+    them in ``non_numeric_columns`` so the agent can pass x_cols to skip.
+    """
+    import json
+
+    n_samples, n_spec = 20, 10
+    rng = np.random.default_rng(42)
+    X_spec = rng.uniform(0, 1, size=(n_samples, n_spec))
+    meta_cols = ["Set", "Season", "Region", "Date", "Type", "Cultivar", "Pop", "Temp"]
+    fp = tmp_path / "mango_like.csv"
+    with open(fp, "w", encoding="utf-8") as fh:
+        fh.write(",".join(meta_cols) + "," + ",".join(f"w{i}" for i in range(n_spec)) + "\n")
+        for row in X_spec:
+            fh.write(",".join(meta_cols) + "," + ",".join(f"{v:g}" for v in row) + "\n")
+
+    info = json.loads(inspect_file(str(fp)))
+    assert info["format"] == "csv"
+    assert "non_numeric_columns" in info
+    assert info["non_numeric_columns"] == [0, 1, 2, 3, 4, 5, 6, 7]
+    assert info["has_nan"] is True
+
+
+def test_inspect_file_csv_no_non_numeric_columns_when_all_numeric(tmp_path: Path) -> None:
+    """★ v3.8: A purely numeric CSV should report non_numeric_columns=[]."""
+    import json
+
+    X = np.linspace(0, 1, 30).reshape(10, 3)
+    fp = tmp_path / "numeric.csv"
+    np.savetxt(str(fp), X, delimiter=",")
+
+    info = json.loads(inspect_file(str(fp)))
+    assert info["non_numeric_columns"] == []
+
+
 def test_inspect_file_mat(tmp_path: Path) -> None:
     import json
 

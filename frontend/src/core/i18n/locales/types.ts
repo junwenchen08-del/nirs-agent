@@ -457,6 +457,8 @@ export interface Translations {
       uploadHint: string;
       uploadSuccess: string;
       uploadFailed: string;
+      unsupportedType: string;
+      fileTooLarge: string;
       deleteButton: string;
       deleteConfirmTitle: string;
       deleteConfirmDescription: string;

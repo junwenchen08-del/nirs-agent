@@ -1,8 +1,9 @@
-"""Core behaviour tests for NIR community tool helpers.
+﻿﻿"""Core behaviour tests for NIR community tool helpers.
 
 Covers:
 - _parse_pipeline_step: parsing method-name strings and dicts with params
 - nir_reflect: diagnostics extraction, fallback_suggestion naming
+- _build_knowledge_hint: structured knowledge-base retrieval triggers
 """
 
 import json
@@ -11,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 from nir_core.models import PreprocessingStep
 
-from deerflow.community.nir.tools import _parse_pipeline_step
+from deerflow.community.nir.tools import _build_knowledge_hint, _parse_pipeline_step
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +101,7 @@ class TestNirReflectDiagnostics:
         metrics_path = self._make_metrics_file(tmp_path, with_diagnostics=True)
         mock_runtime = MagicMock()
 
-        with patch("deerflow.community.nir.tools._resolve", return_value=metrics_path):
+        with patch("deerflow.community.nir.reflect._resolve", return_value=metrics_path):
             result = nir_reflect_tool.func(
                 runtime=mock_runtime,
                 metrics_path="/mnt/user-data/outputs/metrics.json",
@@ -121,7 +122,7 @@ class TestNirReflectDiagnostics:
         metrics_path = self._make_metrics_file(tmp_path, with_diagnostics=False)
         mock_runtime = MagicMock()
 
-        with patch("deerflow.community.nir.tools._resolve", return_value=metrics_path):
+        with patch("deerflow.community.nir.reflect._resolve", return_value=metrics_path):
             result = nir_reflect_tool.func(
                 runtime=mock_runtime,
                 metrics_path="/mnt/user-data/outputs/metrics.json",
@@ -140,7 +141,7 @@ class TestNirReflectDiagnostics:
         metrics_path = self._make_metrics_file(tmp_path, with_diagnostics=True)
         mock_runtime = MagicMock()
 
-        with patch("deerflow.community.nir.tools._resolve", return_value=metrics_path):
+        with patch("deerflow.community.nir.reflect._resolve", return_value=metrics_path):
             result = nir_reflect_tool.func(
                 runtime=mock_runtime,
                 metrics_path="/mnt/user-data/outputs/metrics.json",
@@ -161,7 +162,7 @@ class TestNirReflectDiagnostics:
         metrics_path = self._make_metrics_file(tmp_path, with_diagnostics=True)
         mock_runtime = MagicMock()
 
-        with patch("deerflow.community.nir.tools._resolve", return_value=metrics_path):
+        with patch("deerflow.community.nir.reflect._resolve", return_value=metrics_path):
             result = nir_reflect_tool.func(
                 runtime=mock_runtime,
                 metrics_path="/mnt/user-data/outputs/metrics.json",
@@ -181,7 +182,7 @@ class TestNirReflectDiagnostics:
         metrics_path = self._make_metrics_file(tmp_path, with_diagnostics=True)
         mock_runtime = MagicMock()
 
-        with patch("deerflow.community.nir.tools._resolve", return_value=metrics_path):
+        with patch("deerflow.community.nir.reflect._resolve", return_value=metrics_path):
             result = nir_reflect_tool.func(
                 runtime=mock_runtime,
                 metrics_path="/mnt/user-data/outputs/metrics.json",
@@ -193,3 +194,270 @@ class TestNirReflectDiagnostics:
         result_dict = json.loads(result)
         assert result_dict["best_so_far"] is not None
         assert result_dict["best_so_far"]["RPD"] == 2.1
+
+
+# ---------------------------------------------------------------------------
+# _build_knowledge_hint: structured knowledge-base retrieval triggers
+# ---------------------------------------------------------------------------
+class TestBuildKnowledgeHint:
+    """Tests for _build_knowledge_hint trigger logic."""
+
+    def test_unknown_domain_triggers_hint(self):
+        """A domain outside the known set triggers a hint with domain query."""
+        hint = _build_knowledge_hint(domain="textile")
+        assert hint is not None
+        assert hint["should_search"] is True
+        assert "textile" in hint["query"]
+        assert "不在已知领域列表内" in hint["reason"]
+
+    def test_known_domain_no_hint_when_grade_ok(self):
+        """Known domain with passing grade returns no hint."""
+        hint = _build_knowledge_hint(
+            domain="soil",
+            grade="A",
+            passed=True,
+            attempt=1,
+            r2_val=0.85,
+            diagnostics={"residual_trend": "none", "residual_variance": "low"},
+        )
+        assert hint is None
+
+    def test_low_r2_triggers_hint(self):
+        """R²_val < 0.7 triggers a domain-typical-range query."""
+        hint = _build_knowledge_hint(
+            domain="soil",
+            grade="B",
+            passed=True,
+            attempt=1,
+            r2_val=0.55,
+            diagnostics={"residual_trend": "none", "residual_variance": "low"},
+        )
+        assert hint is not None
+        assert hint["should_search"] is True
+        assert "typical R2 RPD" in hint["query"]
+        assert "soil" in hint["query"]
+        assert "0.550" in hint["reason"]
+
+    def test_grade_c_attempt_2_upward_trend_triggers_airpls_query(self):
+        """grade=C, attempt>=2, upward trend → airPLS baseline query."""
+        hint = _build_knowledge_hint(
+            domain="food_protein",
+            grade="C",
+            passed=False,
+            attempt=2,
+            r2_val=0.72,
+            diagnostics={"residual_trend": "upward", "residual_variance": "low"},
+        )
+        assert hint is not None
+        assert "airpls baseline" in hint["query"]
+        assert "food_protein" in hint["query"]
+        assert "上升趋势" in hint["reason"]
+
+    def test_grade_d_attempt_2_downward_trend_triggers_snv_msc_query(self):
+        """grade=D, attempt>=2, downward trend → SNV vs MSC query."""
+        hint = _build_knowledge_hint(
+            domain="pharma",
+            grade="D",
+            passed=False,
+            attempt=3,
+            r2_val=0.72,
+            diagnostics={"residual_trend": "downward", "residual_variance": "low"},
+        )
+        assert hint is not None
+        assert "snv vs msc" in hint["query"]
+        assert "pharma" in hint["query"]
+        assert "下降趋势" in hint["reason"]
+
+    def test_grade_f_attempt_2_high_variance_triggers_sg_smooth_query(self):
+        """grade=F, attempt>=2, high variance → sg_smooth window query."""
+        hint = _build_knowledge_hint(
+            domain="feed",
+            grade="F",
+            passed=False,
+            attempt=2,
+            r2_val=0.72,
+            diagnostics={"residual_trend": "none", "residual_variance": "high"},
+        )
+        assert hint is not None
+        assert "sg_smooth window" in hint["query"]
+        assert "feed" in hint["query"]
+        assert "方差高" in hint["reason"]
+
+    def test_grade_c_attempt_1_no_hint(self):
+        """grade=C but attempt=1 → no hint yet (give one retry first)."""
+        hint = _build_knowledge_hint(
+            domain="soil",
+            grade="C",
+            passed=False,
+            attempt=1,
+            r2_val=0.72,
+            diagnostics={"residual_trend": "upward", "residual_variance": "low"},
+        )
+        assert hint is None
+
+    def test_grade_c_attempt_2_no_diag_falls_back_to_improve_query(self):
+        """grade=C, attempt>=2, no specific diag signal → generic improve query."""
+        hint = _build_knowledge_hint(
+            domain="soil",
+            grade="C",
+            passed=False,
+            attempt=2,
+            r2_val=0.72,
+            diagnostics={"residual_trend": "none", "residual_variance": "low"},
+        )
+        assert hint is not None
+        assert "improve RPD" in hint["query"]
+
+    def test_unknown_domain_takes_priority_over_low_r2(self):
+        """Unknown domain should win over low R² (first match wins)."""
+        hint = _build_knowledge_hint(
+            domain="textile",
+            grade="F",
+            passed=False,
+            attempt=3,
+            r2_val=0.3,
+            diagnostics={"residual_trend": "upward", "residual_variance": "high"},
+        )
+        assert hint is not None
+        # Unknown-domain branch query, not the low-R² branch query
+        assert "textile NIR calibration" in hint["query"]
+        assert "不在已知领域列表内" in hint["reason"]
+
+    def test_none_diagnostics_handled(self):
+        """None diagnostics should not raise; low-R² path still triggers."""
+        hint = _build_knowledge_hint(
+            domain="soil",
+            grade="B",
+            passed=True,
+            attempt=1,
+            r2_val=0.5,
+            diagnostics=None,
+        )
+        assert hint is not None
+        assert "typical R2 RPD" in hint["query"]
+
+
+# ---------------------------------------------------------------------------
+# nir_reflect: knowledge_hint integration
+# ---------------------------------------------------------------------------
+class TestNirReflectKnowledgeHint:
+    """Tests that nir_reflect surfaces knowledge_hint in its return value."""
+
+    @staticmethod
+    def _make_metrics_file(tmp_path: Path, r2_val: float = 0.65, with_diagnostics: bool = True) -> str:
+        """Create a temporary metrics.json and return its path."""
+        metrics = {
+            "method": "pls",
+            "n_components": 5,
+            "domain": "default",
+            "n_samples": 150,
+            "preprocessing": "SNV",
+            "preprocessing_steps": [{"method": "snv"}],
+            "R2_val": r2_val,
+            "RPD": 2.1,
+            "RMSEP": 0.5,
+            "RMSECV": 0.4,
+            "test": {"RMSE": 0.5, "R2": 0.60, "RPD": 2.0, "bias": 0.01},
+            "val": {"RMSE": 0.4, "R2": r2_val, "RPD": 2.1, "bias": 0.01},
+            "train": {"RMSE": 0.3, "R2": 0.75, "RPD": 3.0, "bias": 0.0},
+        }
+        if with_diagnostics:
+            metrics["diagnostics"] = {
+                "residual_trend": "upward",
+                "residual_variance": "high",
+                "outlier_ratio": 0.08,
+                "outlier_count": 12,
+                "residual_std": 0.35,
+            }
+        metrics_file = tmp_path / "metrics.json"
+        metrics_file.write_text(json.dumps(metrics, ensure_ascii=False), encoding="utf-8")
+        return str(metrics_file)
+
+    def test_knowledge_hint_present_when_low_r2(self, tmp_path):
+        """nir_reflect returns a non-null knowledge_hint when R²_val < 0.7."""
+        from deerflow.community.nir.tools import nir_reflect_tool
+
+        metrics_path = self._make_metrics_file(tmp_path, r2_val=0.55, with_diagnostics=True)
+        mock_runtime = MagicMock()
+
+        with patch("deerflow.community.nir.reflect._resolve", return_value=metrics_path):
+            result = nir_reflect_tool.func(
+                runtime=mock_runtime,
+                metrics_path="/mnt/user-data/outputs/metrics.json",
+                history="[]",
+                domain="default",
+                attempt=1,
+            )
+
+        result_dict = json.loads(result)
+        assert "knowledge_hint" in result_dict
+        hint = result_dict["knowledge_hint"]
+        assert hint is not None
+        assert hint["should_search"] is True
+        assert "typical R2 RPD" in hint["query"]
+
+    def test_knowledge_hint_none_when_r2_ok(self, tmp_path):
+        """nir_reflect returns null knowledge_hint when R² is acceptable."""
+        from deerflow.community.nir.tools import nir_reflect_tool
+
+        metrics_path = self._make_metrics_file(tmp_path, r2_val=0.92, with_diagnostics=False)
+        mock_runtime = MagicMock()
+
+        with patch("deerflow.community.nir.reflect._resolve", return_value=metrics_path):
+            result = nir_reflect_tool.func(
+                runtime=mock_runtime,
+                metrics_path="/mnt/user-data/outputs/metrics.json",
+                history="[]",
+                domain="default",
+                attempt=1,
+            )
+
+        result_dict = json.loads(result)
+        assert result_dict["knowledge_hint"] is None
+
+    def test_knowledge_hint_for_unknown_domain(self, tmp_path):
+        """nir_reflect returns a hint for an unknown domain even with ok R²."""
+        from deerflow.community.nir.tools import nir_reflect_tool
+
+        metrics_path = self._make_metrics_file(tmp_path, r2_val=0.92, with_diagnostics=False)
+        mock_runtime = MagicMock()
+
+        with patch("deerflow.community.nir.reflect._resolve", return_value=metrics_path):
+            result = nir_reflect_tool.func(
+                runtime=mock_runtime,
+                metrics_path="/mnt/user-data/outputs/metrics.json",
+                history="[]",
+                domain="textile",
+                attempt=1,
+            )
+
+        result_dict = json.loads(result)
+        hint = result_dict["knowledge_hint"]
+        assert hint is not None
+        assert "textile" in hint["query"]
+        assert "不在已知领域列表内" in hint["reason"]
+
+    def test_knowledge_hint_triggers_when_grade_c_attempt_2(self, tmp_path):
+        """nir_reflect surfaces a hint when grade=C and attempt>=2."""
+        from deerflow.community.nir.tools import nir_reflect_tool
+
+        # R²=0.65 with upward trend → quality grade should be low.
+        metrics_path = self._make_metrics_file(tmp_path, r2_val=0.65, with_diagnostics=True)
+        mock_runtime = MagicMock()
+
+        with patch("deerflow.community.nir.reflect._resolve", return_value=metrics_path):
+            result = nir_reflect_tool.func(
+                runtime=mock_runtime,
+                metrics_path="/mnt/user-data/outputs/metrics.json",
+                history="[]",
+                domain="default",
+                attempt=2,
+            )
+
+        result_dict = json.loads(result)
+        hint = result_dict["knowledge_hint"]
+        assert hint is not None
+        # attempt=2 + grade low → either airpls branch (upward trend) or low-R² branch
+        # The upward trend takes priority inside _build_knowledge_hint.
+        assert hint["should_search"] is True
+        assert "airpls" in hint["query"] or "typical R2 RPD" in hint["query"] or "improve RPD" in hint["query"]

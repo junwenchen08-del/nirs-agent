@@ -32,7 +32,7 @@ router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
 # Supported document extensions (must match parser.SUPPORTED_EXTENSIONS)
 _SUPPORTED_EXTS = {".pdf", ".docx", ".txt", ".md", ".markdown", ".html", ".htm", ".csv"}
-_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+_MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB (reduces memory spike from base64 encoding)
 
 
 def _kb_base_url() -> str:
