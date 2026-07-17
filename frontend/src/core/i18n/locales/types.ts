@@ -130,6 +130,7 @@ export interface Translations {
     agents: string;
     agentsDisabledTooltip: string;
     channels: string;
+    evaluations: string;
   };
 
   // Agents
@@ -175,6 +176,7 @@ export interface Translations {
   breadcrumb: {
     workspace: string;
     chats: string;
+    evaluations: string;
   };
 
   // Workspace
@@ -189,6 +191,45 @@ export interface Translations {
     logout: string;
     gatewayUnavailable: string;
     gatewayUnavailableRetrying: string;
+  };
+
+  nirEvaluations: {
+    eyebrow: string;
+    title: string;
+    description: string;
+    scenarios: string;
+    deterministic: string;
+    mappingTitle: string;
+    mappingDescription: string;
+    threadId: string;
+    threadPlaceholder: string;
+    scenario: string;
+    selectScenario: string;
+    remove: string;
+    addCase: string;
+    run: string;
+    running: string;
+    loadError: string;
+    runError: string;
+    duplicateScenario: string;
+    recentTrend: string;
+    trendDescription: string;
+    noHistory: string;
+    older: string;
+    latest: string;
+    passRate: string;
+    averageScore: string;
+    policyViolations: string;
+    tokens: string;
+    duration: string;
+    results: string;
+    passed: string;
+    failed: string;
+    trace: string;
+    noTraceId: string;
+    exportEvidence: string;
+    clearResult: string;
+    noResults: string;
   };
 
   // Conversation
@@ -484,6 +525,10 @@ export interface Translations {
       serverUnreachable: string;
       noYear: string;
       entitiesLabel: string;
+      batchSelectFiles: string;
+      batchFilesSelected: string;
+      batchUploading: string;
+      batchPartialFailed: string;
     };
     notification: {
       title: string;

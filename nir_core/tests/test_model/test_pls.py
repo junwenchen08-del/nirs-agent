@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 from sklearn.cross_decomposition import PLSRegression
 
-from nir_core.model.pls import predict_pls, train_pls
+from nir_core.model.pls import (
+    get_regression_coefficients,
+    get_regression_intercept,
+    predict_pls,
+    train_pls,
+)
 from nir_core.utils.metrics import r2_score
 
 
@@ -50,6 +55,21 @@ def test_predict_pls_shape_and_type(synthetic_data):
     assert isinstance(pred, np.ndarray)
     assert pred.ndim == 1
     assert pred.shape[0] == X.shape[0]
+
+
+def test_coefficients_and_intercept_reconstruct_predictions(synthetic_data):
+    """The exported linear equation operates on raw, uncentered spectra."""
+    X, y = synthetic_data.X, synthetic_data.y
+    model, _, _ = train_pls(X, y, n_components=3)
+
+    coefficients = get_regression_coefficients(model)
+    intercept = get_regression_intercept(model)
+
+    np.testing.assert_allclose(
+        X @ coefficients + intercept,
+        predict_pls(model, X),
+        atol=1e-10,
+    )
 
 
 def test_train_pls_reproducible(synthetic_data):

@@ -10,7 +10,7 @@ from langchain.tools import InjectedToolCallId, tool
 
 from deerflow.tools.types import Runtime
 
-from ._common import _err, _ok, _resolve
+from ._common import _err, _ok, _parse_pipeline_step, _resolve
 
 
 @tool("nir_preprocess", parse_docstring=True)
@@ -32,8 +32,9 @@ def nir_preprocess_tool(
     Two modes:
     - **Single method** (backward-compatible): pass ``method="snv"`` etc.
     - **Multi-step pipeline** (★ v3): pass ``pipeline_steps`` as a JSON array
-      of method names, e.g. ``'["snv","sg_smooth","mean_center"]'``. All
-      steps execute atomically in one call, reducing LLM round-trips.
+      of method names or step dicts, e.g.
+      ``'["snv", {"method":"sg_smooth","params":{"window":15}}]'``.
+      All steps execute atomically in one call, reducing LLM round-trips.
 
     The input .npz must contain at least an ``X`` array. The result is saved
     to ``output_path``.
@@ -44,7 +45,7 @@ def nir_preprocess_tool(
         method: Single preprocessing method (backward-compatible). One of:
             snv, msc, sg_smooth, derivative1, derivative2, airpls, asls,
             detrend, mean_center, autoscale, normalize.
-        pipeline_steps: JSON array of method names for multi-step atomic
+        pipeline_steps: JSON array of method names or step dicts for multi-step atomic
             execution. Takes precedence over ``method`` if both given.
             For example ``'["snv","sg_smooth","mean_center"]'``.
         window: Savitzky-Golay window (odd, > order).
@@ -62,35 +63,42 @@ def nir_preprocess_tool(
         import json as _json
 
         try:
-            from nir_core.preprocess.pipeline import PRESTEP_METHODS, PreprocessingPipeline
             from nir_core.models import PreprocessingStep
+            from nir_core.preprocess.pipeline import PRESTEP_METHODS, PreprocessingPipeline
         except ImportError:
             return _err(
                 "nir_core V3 features (PreprocessingPipeline / PreprocessingStep) are not available in the current sandbox. Please rebuild the Docker image so the editable install of ../nir_core picks up the latest sources, then re-run."
             )
 
         # Resolve which mode: multi-step pipeline or single method.
-        steps_list: list[str] = []
+        steps_list: list = []
         if pipeline_steps is not None:
             try:
                 steps_list = _json.loads(pipeline_steps) if isinstance(pipeline_steps, str) else pipeline_steps
             except (ValueError, TypeError):
                 return _err(f"Invalid pipeline_steps JSON: {pipeline_steps!r}")
             if not isinstance(steps_list, list) or not steps_list:
-                return _err("pipeline_steps must be a non-empty JSON array of method names")
+                return _err("pipeline_steps must be a non-empty JSON array of method names or step dicts")
         elif method is not None:
             steps_list = [method]
         else:
             return _err("Either 'method' or 'pipeline_steps' must be provided")
 
+        try:
+            parsed_steps = [_parse_pipeline_step(m) for m in steps_list]
+        except Exception as exc:  # noqa: BLE001
+            return _err(f"Invalid pipeline step: {type(exc).__name__}: {exc}")
+
+        method_names = [s.method for s in parsed_steps]
+
         # Validate all methods exist.
-        for m in steps_list:
+        for m in method_names:
             if m not in PRESTEP_METHODS:
                 return _err(f"Unknown method {m!r}. Available: {sorted(PRESTEP_METHODS.keys())}")
 
         # Validate Savitzky-Golay parameters.
         sg_methods = {"sg_smooth", "derivative1", "derivative2"}
-        if sg_methods & set(steps_list):
+        if sg_methods & set(method_names):
             if window % 2 == 0:
                 return _err(f"window must be odd, got {window}")
             if window <= order:
@@ -105,20 +113,21 @@ def nir_preprocess_tool(
 
         # Build and apply pipeline atomically.
         steps = []
-        for m in steps_list:
-            params: dict = {}
+        for step in parsed_steps:
+            m = step.method
+            params: dict = dict(step.params or {})
             if m in sg_methods:
-                params["window"] = window
-                params["order"] = order
+                params.setdefault("window", window)
+                params.setdefault("order", order)
             elif m == "airpls":
-                if lambda_ is not None:
+                if lambda_ is not None and "lambda_" not in params:
                     params["lambda_"] = lambda_
             elif m == "asls":
-                if lambda_ is not None:
+                if lambda_ is not None and "lambda_" not in params:
                     params["lambda_"] = lambda_
-                params["p"] = p
+                params.setdefault("p", p)
             elif m == "normalize":
-                params["norm"] = norm
+                params.setdefault("norm", norm)
             steps.append(PreprocessingStep(method=m, params=params))
 
         pipe = PreprocessingPipeline(steps=steps)
@@ -133,7 +142,7 @@ def nir_preprocess_tool(
         return _ok(
             {
                 "status": "ok",
-                "pipeline": steps_list,
+                "pipeline": [{"method": s.method, "params": s.params} for s in steps],
                 "description": pipe.description(),
                 "input_shape": list(X.shape),
                 "output_shape": list(X_processed.shape),

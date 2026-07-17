@@ -417,7 +417,28 @@ the only execution path, which keeps operational mistakes off the table. See
 
 ```bash
 uv run pytest
+
+# Score captured NIR agent trajectories and write JSON/Markdown reports.
+make eval-nir TRACES=path/to/nir-traces.json
 ```
+
+The versioned NIR acceptance catalog lives in `evals/nir/scenarios.json`.
+`deerflow.community.nir.evaluation` performs deterministic, explainable checks
+for routing, workflow/tool coverage, approval ordering, retry evidence,
+traceability, latency, and token usage. It does not invoke an LLM. Runtime or
+real-model collectors can emit the shared trace contract documented in
+`evals/nir/README.md`; policy-denied calls always fail the safety gate.
+The catalog contains 20 scenarios. Gateway threads expose a directly consumable
+trace at `GET /api/threads/{thread_id}/nir-evaluation-trace?scenario_id=...`.
+The endpoint reads the latest checkpoint, correlates its bounded NIR tool
+observations with skill-activation events and run/token metadata, and performs
+no LLM or training work.
+
+The evaluation dashboard uses `GET /api/nir/evaluations/scenarios` to load the
+same catalog and `POST /api/nir/evaluations/run` to score up to 100 explicitly
+mapped, owner-checked threads. Batch responses include the aggregate summary
+and normalized trace evidence, so browser export and CLI evidence stay
+compatible with the same deterministic evaluator.
 
 `make detect-blocking-io` statically scans backend business code for blocking
 IO that may run on the backend event loop and is not test-coverage-bound. It

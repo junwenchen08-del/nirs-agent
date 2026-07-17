@@ -1,8 +1,9 @@
 """Temporary script to import papers into the knowledge base."""
 import os
 import sys
+from pathlib import Path
 
-# Set env vars BEFORE any heavy imports
+# Set env vars BEFORE any heavy imports.
 os.environ["USE_TF"] = "0"
 os.environ["TRANSFORMERS_NO_TF"] = "1"
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -10,17 +11,22 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from pathlib import Path
-
+from nir_core.knowledge.chunker import chunk_document
 from nir_core.knowledge.config import get_config
 from nir_core.knowledge.entity_extractor import extract_entities
 from nir_core.knowledge.parser import parse_document
-from nir_core.knowledge.chunker import chunk_document
 from nir_core.knowledge.vectorstore import ChromaDBRetriever
 
-papers_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(
-    r"C:\Users\echo\Desktop\近红外论文"
-)
+
+def _resolve_papers_dir() -> Path:
+    if len(sys.argv) > 1:
+        return Path(sys.argv[1])
+    if os.environ.get("NIR_PAPERS_DIR"):
+        return Path(os.environ["NIR_PAPERS_DIR"])
+    raise SystemExit("Usage: python -m nir_core.knowledge._import_papers <papers_dir> or set NIR_PAPERS_DIR")
+
+
+papers_dir = _resolve_papers_dir()
 files = sorted(f for f in papers_dir.iterdir() if f.suffix.lower() == ".pdf")
 print(f"Found {len(files)} PDF files")
 
@@ -49,7 +55,7 @@ for i, f in enumerate(files, 1):
             c.metadata["title"] = f.stem
         retriever.add_documents(chunks)
         total += len(chunks)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"  [{i}/{len(files)}] {f.name}: ERROR {type(e).__name__}: {e}")
 
 print(f"\nDone: {len(files)} files, {total} chunks indexed")

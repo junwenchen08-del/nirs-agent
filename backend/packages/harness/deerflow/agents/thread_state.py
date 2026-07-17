@@ -1,5 +1,6 @@
+import json
 from collections.abc import Mapping
-from typing import Annotated, NotRequired, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
 from langchain.agents import AgentState
 
@@ -20,6 +21,161 @@ class ThreadDataState(TypedDict):
 class ViewedImageData(TypedDict):
     base64: str
     mime_type: str
+
+
+NIRWorkflowStage = Literal[
+    "intake",
+    "data_audit",
+    "planning",
+    "execution",
+    "evaluation",
+    "knowledge",
+    "review",
+    "approved",
+    "registered",
+    "completed",
+    "blocked",
+]
+
+
+class NIRWorkflowState(TypedDict):
+    """Checkpointed state for one NIR analysis workflow in a thread."""
+
+    project_id: str
+    task_type: str
+    stage: NIRWorkflowStage
+    revision: int
+    domain: NotRequired[str | None]
+    analyte: NotRequired[str | None]
+    unit: NotRequired[str | None]
+    data_path: NotRequired[str | None]
+    model_path: NotRequired[str | None]
+    metrics_path: NotRequired[str | None]
+    knowledge_evidence: list[str]
+    run_ids: list[str]
+    trace_ids: list[str]
+    tool_observations: list[dict]
+    attempt: int
+    max_attempts: int
+    missing_inputs: list[str]
+    approval_status: Literal["not_required", "pending", "approved", "rejected"]
+    next_action: str
+    history: list[dict]
+    updated_at: str
+
+
+def merge_nir_workflow(
+    existing: NIRWorkflowState | None,
+    new: NIRWorkflowState | None,
+) -> NIRWorkflowState | None:
+    """Keep the newest NIR workflow revision and merge sibling tool writes.
+
+    LangGraph may execute several tool calls from one assistant message in the
+    same super-step. Each tool sees the same checkpoint and can emit a
+    same-revision NIR workflow update, usually differing only by audit history
+    and tool observations. Preserve those observations instead of failing the
+    whole run. Same-revision project-id disagreements are recorded in history
+    and collapsed onto the more progressed workflow because the current state
+    model supports only one active NIR workflow per thread.
+    """
+    if new is None:
+        return existing
+    if existing is None:
+        return new
+
+    existing_revision = existing.get("revision", 0)
+    new_revision = new.get("revision", 0)
+    if new_revision != existing_revision:
+        preferred = new if new_revision > existing_revision else existing
+        if existing.get("project_id") != new.get("project_id"):
+            return preferred
+        return _merge_nir_workflow_evidence(preferred, existing, new)
+    if new_revision == existing_revision:
+        if new == existing:
+            return existing
+        return _merge_sibling_nir_workflows(existing, new)
+    return new
+
+
+_NIR_STAGE_RANK = {
+    "intake": 0,
+    "data_audit": 1,
+    "planning": 2,
+    "execution": 3,
+    "knowledge": 4,
+    "evaluation": 5,
+    "review": 6,
+    "approved": 7,
+    "registered": 8,
+    "completed": 9,
+    "blocked": 9,
+}
+_NIR_HISTORY_LIMIT = 50
+_NIR_TOOL_OBSERVATION_LIMIT = 100
+
+
+def _dedupe_ordered(values: list | None) -> list:
+    if not values:
+        return []
+    seen: set[str] = set()
+    merged: list = []
+    for value in values:
+        try:
+            key = json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
+        except TypeError:
+            key = repr(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(value)
+    return merged
+
+
+def _workflow_progress_score(workflow: NIRWorkflowState) -> tuple[int, int, int, int, int]:
+    """Rank same-revision sibling updates by useful workflow progress."""
+    populated_paths = sum(1 for key in ("data_path", "model_path", "metrics_path") if workflow.get(key))
+    return (
+        _NIR_STAGE_RANK.get(str(workflow.get("stage")), -1),
+        int(workflow.get("attempt", 0)),
+        populated_paths,
+        len(workflow.get("knowledge_evidence") or []),
+        len(workflow.get("history") or []),
+    )
+
+
+def _merge_sibling_nir_workflows(existing: NIRWorkflowState, new: NIRWorkflowState) -> NIRWorkflowState:
+    existing_score = _workflow_progress_score(existing)
+    new_score = _workflow_progress_score(new)
+    preferred = new if new_score > existing_score else existing
+    project_conflict_event = []
+    if existing.get("project_id") != new.get("project_id"):
+        project_conflict_event = [
+            {
+                "action": "project_conflict_merged",
+                "kept_project_id": preferred.get("project_id"),
+                "dropped_project_id": new.get("project_id") if preferred is existing else existing.get("project_id"),
+                "revision": preferred.get("revision"),
+            }
+        ]
+    merged = _merge_nir_workflow_evidence(preferred, existing, new)
+    merged["history"] = _dedupe_ordered([*(merged.get("history") or []), *project_conflict_event])[-_NIR_HISTORY_LIMIT:]
+    return merged  # type: ignore[return-value]
+
+
+def _merge_nir_workflow_evidence(
+    preferred: NIRWorkflowState,
+    existing: NIRWorkflowState,
+    new: NIRWorkflowState,
+) -> NIRWorkflowState:
+    """Merge bounded audit evidence without overwriting preferred workflow fields."""
+    merged: dict = dict(preferred)
+    merged["knowledge_evidence"] = _dedupe_ordered([*(existing.get("knowledge_evidence") or []), *(new.get("knowledge_evidence") or [])])
+    merged["run_ids"] = _dedupe_ordered([*(existing.get("run_ids") or []), *(new.get("run_ids") or [])])
+    merged["trace_ids"] = _dedupe_ordered([*(existing.get("trace_ids") or []), *(new.get("trace_ids") or [])])
+    merged["tool_observations"] = _dedupe_ordered([*(existing.get("tool_observations") or []), *(new.get("tool_observations") or [])])[-_NIR_TOOL_OBSERVATION_LIMIT:]
+    merged["history"] = _dedupe_ordered([*(existing.get("history") or []), *(new.get("history") or [])])[-_NIR_HISTORY_LIMIT:]
+    merged["updated_at"] = max(str(existing.get("updated_at") or ""), str(new.get("updated_at") or "")) or preferred.get("updated_at")
+    return merged  # type: ignore[return-value]
 
 
 def merge_sandbox(existing: SandboxState | None, new: SandboxState | None) -> SandboxState | None:
@@ -233,3 +389,4 @@ class ThreadState(AgentState):
     delegations: Annotated[list[DelegationEntry], merge_delegations]
     skill_context: Annotated[list[SkillEntry], merge_skill_context]
     summary_text: NotRequired[str | None]
+    nir_workflow: Annotated[NIRWorkflowState | None, merge_nir_workflow]

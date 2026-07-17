@@ -63,23 +63,24 @@ def compute_residual_diagnostics(y_true: np.ndarray, y_pred: np.ndarray) -> dict
 
     residuals = y_true - y_pred
     y_std = float(np.std(y_true))
-    y_var = float(np.var(y_true))
+    y_var = y_std * y_std
+    resid_std = float(np.std(residuals))
+    resid_var = resid_std * resid_std
 
     # Guard against zero-variance y (all reference values identical).
     if y_std < 1e-12:
         return {
             "residual_trend": "flat",
-            "residual_variance": "low" if np.var(residuals) < 1e-12 else "high",
+            "residual_variance": "low" if resid_var < 1e-12 else "high",
             "outlier_ratio": 0.0,
             "outlier_count": 0,
-            "residual_std": float(np.std(residuals)),
+            "residual_std": resid_std,
         }
 
     # 1. Residual trend: Pearson correlation between residuals and y_true.
     #    |r| > 0.3 indicates a systematic trend (scale-invariant).
     #    r > 0.3 → upward (residuals grow with y → under-prediction at high y)
     #    r < -0.3 → downward (over-prediction at high y)
-    resid_std = float(np.std(residuals))
     if resid_std > 1e-12:
         r_matrix = np.corrcoef(y_true, residuals)
         r = float(r_matrix[0, 1])
@@ -94,7 +95,7 @@ def compute_residual_diagnostics(y_true: np.ndarray, y_pred: np.ndarray) -> dict
 
     # 2. Residual variance ratio: var(residuals) / var(y_true).
     #    ratio > 0.25 → high (model explains < 75% of variance)
-    var_ratio = float(np.var(residuals)) / y_var if y_var > 1e-12 else 0.0
+    var_ratio = resid_var / y_var if y_var > 1e-12 else 0.0
     variance_level = "high" if var_ratio > 0.25 else "low"
 
     # 3. Outlier detection: |residual| > 2 * std(residuals).

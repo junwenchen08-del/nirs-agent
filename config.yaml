@@ -886,6 +886,10 @@ tools:
   # Tools are split into focused sub-modules under deerflow.community.nir;
   # see backend/packages/harness/deerflow/community/nir/tools.py for the
   # facade that re-exports all of them.
+  - name: nir_workflow
+    group: bash
+    use: deerflow.community.nir.workflow:nir_workflow_tool
+
   - name: nir_load_data
     group: bash
     use: deerflow.community.nir.io_tools:nir_load_data_tool

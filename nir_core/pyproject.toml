@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 mat73 = ["h5py>=3.8.0"]
 ensemble = ["xgboost>=1.7.0", "lightgbm>=3.3.0"]
+deep = ["torch>=2.0.0"]
 knowledge = [
     "chromadb>=0.5.0",
     "sentence-transformers>=2.0",
@@ -39,4 +40,7 @@ include = ["nir_core*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "slow: compute-intensive model training, selection, or persistence regression",
+]

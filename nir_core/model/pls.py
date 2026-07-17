@@ -251,9 +251,9 @@ def compute_vip(model: PLSRegression, X: np.ndarray, y: np.ndarray) -> np.ndarra
 def get_regression_coefficients(model: PLSRegression) -> np.ndarray:
     """Return the regression coefficients (B) from a fitted PLS model.
 
-    The coefficients map spectral variables to the predicted reference
-    value: ``y_pred = X @ B``. They are useful for interpreting which
-    wavelengths contribute positively or negatively to the prediction.
+    The coefficients describe wavelength contributions in the original
+    feature space. Use :func:`get_regression_intercept` when reconstructing
+    predictions: ``y_pred = X @ B + intercept``.
 
     Args:
         model: A fitted :class:`PLSRegression`.
@@ -265,4 +265,32 @@ def get_regression_coefficients(model: PLSRegression) -> np.ndarray:
     return coef.ravel()
 
 
-__all__ = ["train_pls", "predict_pls", "compute_vip", "get_regression_coefficients"]
+def get_regression_intercept(model: PLSRegression) -> float:
+    """Return the raw-feature-space intercept of a fitted PLS model.
+
+    ``PLSRegression`` centers features internally, so ``model.intercept_`` is
+    not by itself the intercept for an equation using uncentered input. A
+    zero-feature prediction gives the effective intercept without relying on
+    scikit-learn's private centering attributes.
+
+    Args:
+        model: A fitted :class:`PLSRegression`.
+
+    Returns:
+        Scalar intercept satisfying ``model.predict(X) == X @ B + intercept``.
+    """
+    coef = get_regression_coefficients(model)
+    zero_spectrum = np.zeros((1, coef.size), dtype=float)
+    intercept = np.asarray(model.predict(zero_spectrum), dtype=float).ravel()
+    if intercept.size != 1:
+        raise ValueError("Expected a single-target PLS model")
+    return float(intercept[0])
+
+
+__all__ = [
+    "train_pls",
+    "predict_pls",
+    "compute_vip",
+    "get_regression_coefficients",
+    "get_regression_intercept",
+]

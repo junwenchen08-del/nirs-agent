@@ -93,6 +93,7 @@ make dev                # Run Gateway API with reload (port 8001)
 make gateway            # Run Gateway API only (port 8001)
 make test               # Run all backend tests
 make test-blocking-io   # Run strict Blockbuster runtime gate on tests/blocking_io/
+make eval-nir TRACES=path/to/nir-traces.json  # Score captured NIR agent trajectories
 make lint               # Lint with ruff
 make format             # Format code with ruff
 make migrate-rev MSG="..."  # Autogenerate a new alembic revision (see Schema Migrations section)
@@ -192,6 +193,47 @@ from deerflow.config import get_app_config
 **ThreadState** (`packages/harness/deerflow/agents/thread_state.py`):
 - Extends `AgentState` with: `sandbox`, `thread_data`, `title`, `artifacts`, `todos`, `uploaded_files`, `viewed_images`, `goal`, `promoted`, `delegations`, `skill_context`, `summary_text`
 - Uses custom reducers: `merge_artifacts` (deduplicate), `merge_viewed_images` (merge/clear), `merge_goal` (preserve the active goal across ordinary state updates unless the goal writer replaces it), `merge_promoted` (catalog-hash-scoped deferred tool promotions), `merge_delegations` (append task delegation entries, same id latest wins, terminal status never downgraded, capped to the most recent entries), and `merge_skill_context` (dedupe active-skill references by path, keep the most recently read entries; entries store a name/path/description reference, not the SKILL.md body). `summary_text` is a LastValue channel updated by summarization and projected into model requests as durable context data instead of being stored as a `messages` item.
+- NIR domain runs use the checkpointed `nir_workflow` channel. The
+  `deerflow.community.nir.workflow:nir_workflow_tool` applies validated stage
+  transitions, retry budgets, required-input checks, and the user approval gate
+  before model registration. NIR requests are deterministically routed to the
+  `nir-coordinator` skill by `SkillActivationMiddleware` auto-routes; explicit
+  slash activation continues to take precedence. `NIRWorkflowMiddleware`
+  rejects NIR tools outside their task/stage policy and converts successful
+  modeling, knowledge-search, and registration results into atomic checkpoint
+  updates without discarding existing `ToolMessage` or `Command` fields.
+  `merge_nir_workflow` preserves bounded audit evidence across parallel updates
+  for the same project, including updates that reach different revisions;
+  same-revision project-id
+  disagreements are collapsed onto the more progressed workflow and recorded in
+  history because each thread owns one active NIR workflow. PLS
+  training responses expose an original-feature-space `coef_summary.intercept`
+  alongside coefficient statistics so downstream reports can reconstruct the
+  model equation without omitting scikit-learn's internal centering offset.
+  `nir_train_model` and `nir_analyze` support train-only wavelength selection
+  (`none`, `cars`, `spa`, `manual`) after leakage-safe preprocessing and before
+  model fitting; selected original-column indices are persisted in metrics and,
+  when selection is enabled, in the saved model artifact. Version-2 artifacts
+  also persist the fitted preprocessing pipeline, so `nir_predict` can apply
+  train-time preprocessing and then the same spectral columns to raw samples;
+  `input_preprocessed=true` explicitly bypasses the preprocessing step.
+  Successful knowledge retrieval stores bounded source identifiers in
+  `nir_workflow.knowledge_evidence`, while attempt history stores model and
+  metrics paths for post-run traceability. The deterministic evaluator in
+  `deerflow.community.nir.evaluation` scores the versioned scenarios under
+  `evals/nir/`; `make eval-nir TRACES=...` produces machine-readable JSON and a
+  Markdown scorecard without invoking an LLM. `NIRWorkflowMiddleware` retains
+  the latest 100 NIR tool observations plus associated run/trace IDs in the
+  checkpoint. `DurableContextMiddleware` removes those trace details and
+  `tool_call` audit events from the model-facing projection, exposing only an
+  observation count. The owner-checked Gateway endpoint
+  `GET /api/threads/{thread_id}/nir-evaluation-trace?scenario_id=...` correlates
+  checkpoint evidence with `middleware:skill_activation` events and RunManager
+  token/timing metadata, returning the same versioned trace envelope accepted
+  by the CLI. `GET /api/nir/evaluations/scenarios` publishes the shared catalog,
+  while `POST /api/nir/evaluations/run` owner-checks and scores at most 100
+  explicit thread/scenario mappings with that same evaluator. Batch scenarios
+  must be unique. Old checkpoints without trace fields export empty lists.
 
 **Runtime Configuration** (via `config.configurable`):
 - `thinking_enabled` - Enable model's extended thinking
@@ -220,21 +262,22 @@ Lead-agent middlewares are assembled in strict order across three functions: the
 
 11. **DynamicContextMiddleware** - Injects the current date (and optionally memory) as a `<system-reminder>` into the first HumanMessage, keeping the base system prompt fully static for prefix-cache reuse
 12. **SkillActivationMiddleware** - Detects strict `/skill-name task` syntax on the latest real user message, resolves only enabled and runtime-allowed skills, injects the `SKILL.md` body as hidden current-turn context, and records a `middleware:skill_activation` audit event
-13. **DurableContextMiddleware** - Captures `task` delegations into `ThreadState.delegations` (including in-progress dispatches and terminal result summaries) and loaded skill-file references (name/path/description, parsed in-memory - not the body) into `ThreadState.skill_context` before summarization can compact the paired tool-call/result messages, then projects durable context into each model request. Static authority rules are injected as a `SystemMessage`; untrusted field values (`summary_text`, delegation results, skill descriptions) are injected separately as a hidden `HumanMessage` data block so compressed history, delegated work, and which skills are active stay visible without being stored as `messages` or promoted to system-role instructions.
-14. **SummarizationMiddleware** - *(optional, if enabled)* Context reduction when approaching token limits
-15. **TodoListMiddleware** - *(optional, if `is_plan_mode`)* Task tracking with the `write_todos` tool
-16. **TokenUsageMiddleware** - *(optional, if `token_usage.enabled`)* Records token usage metrics; subagent usage is merged back into the dispatching AIMessage by message position
-17. **TitleMiddleware** - Auto-generates the thread title after the first complete exchange and normalizes structured message content before prompting the title model. If a first-turn run is interrupted before this middleware can write a title, `runtime/runs/worker.py` keeps the run in a finalizing state, persists a local fallback title from the latest checkpoint or original run input, and then syncs it to `threads_meta.display_name`. Replacement runs admitted by `multitask_strategy="interrupt"` / `"rollback"` wait for older same-thread finalization before entering the graph; the interrupted run only skips the fallback title write once a later run has started and may have advanced the checkpoint.
-18. **MemoryMiddleware** - Queues conversations for async memory update (filters to user + final AI responses)
-19. **ViewImageMiddleware** - *(optional, if the model supports vision)* Injects base64 image data before the LLM call
-20. **DeferredToolFilterMiddleware** - *(optional, if `tool_search.enabled`)* Hides deferred (MCP) tool schemas from the bound model until `tool_search` promotes them (reads per-thread promotions from `ThreadState.promoted`, hash-scoped)
-21. **SystemMessageCoalescingMiddleware** - Merges every SystemMessage into a single leading SystemMessage per request; provider-agnostic fix for strict backends (vLLM/SGLang/Qwen/Anthropic) that reject non-leading system messages. Touches the per-request payload only (checkpoint state unchanged); on midnight crossings only the latest `dynamic_context_reminder` SystemMessage survives
-22. **SubagentLimitMiddleware** - *(optional, if `subagent_enabled`)* Truncates excess `task` tool calls to enforce the `MAX_CONCURRENT_SUBAGENTS` limit
-23. **LoopDetectionMiddleware** - *(optional, if `loop_detection.enabled`)* Detects repeated tool-call loops; hard-stop clears both structured `tool_calls` and raw provider tool-call metadata before forcing a final text answer
-24. **TokenBudgetMiddleware** - *(optional, if `token_budget.enabled`)* Enforces per-run token limits
-25. **Custom middlewares** - *(optional)* Any `custom_middlewares` passed to `build_middlewares` are injected here, before the safety/clarification tail
-26. **SafetyFinishReasonMiddleware** - *(optional, if `safety_finish_reason.enabled`)* Suppresses tool execution when the provider safety-terminated the response (e.g. `finish_reason=content_filter`); registered after custom middlewares so LangChain's reverse-order `after_model` dispatch runs it first
-27. **ClarificationMiddleware** - Intercepts `ask_clarification` tool calls, interrupts via `Command(goto=END)` (must be last)
+13. **NIRWorkflowMiddleware** - Enforces the checkpointed NIR task/stage policy before domain tool execution and atomically advances modeling, retrieval, and registration outcomes afterward
+14. **DurableContextMiddleware** - Captures `task` delegations into `ThreadState.delegations` (including in-progress dispatches and terminal result summaries) and loaded skill-file references (name/path/description, parsed in-memory - not the body) into `ThreadState.skill_context` before summarization can compact the paired tool-call/result messages, then projects durable context into each model request. Static authority rules are injected as a `SystemMessage`; untrusted field values (`summary_text`, delegation results, skill descriptions) are injected separately as a hidden `HumanMessage` data block so compressed history, delegated work, and which skills are active stay visible without being stored as `messages` or promoted to system-role instructions.
+15. **SummarizationMiddleware** - *(optional, if enabled)* Context reduction when approaching token limits
+16. **TodoListMiddleware** - *(optional, if `is_plan_mode`)* Task tracking with the `write_todos` tool
+17. **TokenUsageMiddleware** - *(optional, if `token_usage.enabled`)* Records token usage metrics; subagent usage is merged back into the dispatching AIMessage by message position
+18. **TitleMiddleware** - Auto-generates the thread title after the first complete exchange and normalizes structured message content before prompting the title model. If a first-turn run is interrupted before this middleware can write a title, `runtime/runs/worker.py` keeps the run in a finalizing state, persists a local fallback title from the latest checkpoint or original run input, and then syncs it to `threads_meta.display_name`. Replacement runs admitted by `multitask_strategy="interrupt"` / `"rollback"` wait for older same-thread finalization before entering the graph; the interrupted run only skips the fallback title write once a later run has started and may have advanced the checkpoint.
+19. **MemoryMiddleware** - Queues conversations for async memory update (filters to user + final AI responses)
+20. **ViewImageMiddleware** - *(optional, if the model supports vision)* Injects base64 image data before the LLM call
+21. **DeferredToolFilterMiddleware** - *(optional, if `tool_search.enabled`)* Hides deferred (MCP) tool schemas from the bound model until `tool_search` promotes them (reads per-thread promotions from `ThreadState.promoted`, hash-scoped)
+22. **SystemMessageCoalescingMiddleware** - Merges every SystemMessage into a single leading SystemMessage per request; provider-agnostic fix for strict backends (vLLM/SGLang/Qwen/Anthropic) that reject non-leading system messages. Touches the per-request payload only (checkpoint state unchanged); on midnight crossings only the latest `dynamic_context_reminder` SystemMessage survives
+23. **SubagentLimitMiddleware** - *(optional, if `subagent_enabled`)* Truncates excess `task` tool calls to enforce the `MAX_CONCURRENT_SUBAGENTS` limit
+24. **LoopDetectionMiddleware** - *(optional, if `loop_detection.enabled`)* Detects repeated tool-call loops; hard-stop clears both structured `tool_calls` and raw provider tool-call metadata before forcing a final text answer
+25. **TokenBudgetMiddleware** - *(optional, if `token_budget.enabled`)* Enforces per-run token limits
+26. **Custom middlewares** - *(optional)* Any `custom_middlewares` passed to `build_middlewares` are injected here, before the safety/clarification tail
+27. **SafetyFinishReasonMiddleware** - *(optional, if `safety_finish_reason.enabled`)* Suppresses tool execution when the provider safety-terminated the response (e.g. `finish_reason=content_filter`); registered after custom middlewares so LangChain's reverse-order `after_model` dispatch runs it first
+28. **ClarificationMiddleware** - Intercepts `ask_clarification` tool calls, interrupts via `Command(goto=END)` (must be last)
 
 ### Configuration System
 

@@ -14,18 +14,25 @@ from nir_core.preprocess.pipeline import PreprocessingPipeline
 from nir_core.models import PreprocessingStep
 
 
-def test_nested_cv_returns_pipeline_and_results(synthetic_data):
-    """nested_cv_preprocessing returns a PreprocessingPipeline + results dict."""
+@pytest.fixture(scope="module")
+def nested_cv_result(synthetic_data):
+    """Build one representative nested-CV result for contract assertions."""
     X, y = synthetic_data.X, synthetic_data.y
-    # Use a small validation split so the test is fast.
     from nir_core.model.evaluation import split_dataset
     (X_tr, y_tr), (X_val, y_val), _ = split_dataset(
         X, y, test_ratio=0.20, val_ratio=0.15, random_state=42
     )
     best_pipe, results = nested_cv_preprocessing(
         X_tr, y_tr, X_val, y_val,
-        inner_folds=3, model_method="pls", max_components=8, random_state=42,
+        inner_folds=3, model_method="pls", max_components=6, random_state=42,
     )
+    return X_tr, y_tr, X_val, y_val, best_pipe, results
+
+
+@pytest.mark.slow
+def test_nested_cv_returns_pipeline_and_results(nested_cv_result):
+    """nested_cv_preprocessing returns a PreprocessingPipeline + results dict."""
+    _, _, _, _, best_pipe, results = nested_cv_result
     assert isinstance(best_pipe, PreprocessingPipeline)
     assert "candidates" in results
     assert "best" in results
@@ -39,7 +46,8 @@ def test_nested_cv_returns_pipeline_and_results(synthetic_data):
     assert results["best"] == best_pipe.description(locale="zh")
 
 
-def test_nested_cv_validation_not_in_inner_search(synthetic_data):
+@pytest.mark.slow
+def test_nested_cv_validation_not_in_inner_search(nested_cv_result):
     """The validation set must not appear in the inner CV component search.
 
     We verify this indirectly: the cv_r2 reported for each candidate is
@@ -47,16 +55,7 @@ def test_nested_cv_validation_not_in_inner_search(synthetic_data):
     different one should leave cv_r2 essentially unchanged (within
     numerical noise from PLS itself).
     """
-    X, y = synthetic_data.X, synthetic_data.y
-    from nir_core.model.evaluation import split_dataset
-    (X_tr, y_tr), (X_val, y_val), _ = split_dataset(
-        X, y, test_ratio=0.20, val_ratio=0.15, random_state=42
-    )
-    # Run with the real validation set.
-    _, r1 = nested_cv_preprocessing(
-        X_tr, y_tr, X_val, y_val,
-        inner_folds=3, max_components=6, random_state=42,
-    )
+    X_tr, y_tr, X_val, y_val, _, r1 = nested_cv_result
     # Run with a shuffled validation set (different rows).
     rng = np.random.default_rng(99)
     perm = rng.permutation(len(y_val))
@@ -79,6 +78,7 @@ def test_nested_cv_validation_not_in_inner_search(synthetic_data):
     # is that cv_r2 is identical.
 
 
+@pytest.mark.slow
 def test_nested_cv_custom_pipelines(synthetic_data):
     """Passing custom candidate pipelines works."""
     X, y = synthetic_data.X, synthetic_data.y

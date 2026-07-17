@@ -18,6 +18,48 @@ from deerflow.tools.types import Runtime
 from ._common import _err, _ok, _resolve
 
 
+def _unwrap_model_artifact(artifact):
+    """Return model and transform metadata for plain models and NIR artifacts."""
+    if isinstance(artifact, dict) and artifact.get("format") == "nir_model_artifact":
+        return (
+            artifact.get("model"),
+            artifact.get("preprocessing") or {},
+            artifact.get("wavelength_selection") or {},
+        )
+    return artifact, {}, {}
+
+
+def _apply_artifact_preprocessing(
+    X: np.ndarray,
+    wv: np.ndarray | None,
+    preprocessing: dict,
+    *,
+    input_preprocessed: bool,
+) -> tuple[np.ndarray, bool]:
+    """Apply a fitted version-2 artifact pipeline to raw prediction spectra."""
+    pipeline = preprocessing.get("pipeline") if preprocessing else None
+    if input_preprocessed or pipeline is None or not preprocessing.get("apply_on_predict"):
+        return X, False
+    return np.asarray(pipeline.transform(X, wv), dtype=float), True
+
+
+def _apply_artifact_wavelength_selection(X: np.ndarray, wavelength_selection: dict) -> np.ndarray:
+    """Slice prediction spectra with the train-time selected wavelength indices."""
+    if not wavelength_selection or wavelength_selection.get("method") in {None, "none"}:
+        return X
+
+    indices = wavelength_selection.get("selected_indices")
+    if not indices:
+        return X
+
+    selected = [int(i) for i in indices]
+    if X.shape[1] == len(selected):
+        return X
+    if max(selected) >= X.shape[1]:
+        raise ValueError(f"Prediction data has {X.shape[1]} wavelengths, but the model expects original indices up to {max(selected)}.")
+    return X[:, selected]
+
+
 @tool("nir_load_data", parse_docstring=True)
 def nir_load_data_tool(
     runtime: Runtime,
@@ -205,16 +247,12 @@ def nir_inspect_tool(
                     f" ★ v3.8: {len(non_numeric_cols)} non-numeric metadata column(s) "
                     f"detected at indices {non_numeric_cols}. These contain strings "
                     f"(e.g. Set/Season/Region/Cultivar) and would leak into X as NaN, "
-                    f"breaking PLS/SVR. Pass x_cols=\"{first_numeric}:\" to "
+                    f'breaking PLS/SVR. Pass x_cols="{first_numeric}:" to '
                     f"nir_load_data to skip them. The first numeric column is at "
                     f"index {first_numeric}."
                 )
             elif non_numeric_cols:
-                metadata_hint = (
-                    f" ★ v3.8: Non-numeric column(s) at indices {non_numeric_cols} "
-                    f"detected. Use x_cols with nir_load_data to select only the "
-                    f"numeric spectra columns."
-                )
+                metadata_hint = f" ★ v3.8: Non-numeric column(s) at indices {non_numeric_cols} detected. Use x_cols with nir_load_data to select only the numeric spectra columns."
 
         # ★ v3.7: Struct .mat advisory — when the file is a MATLAB struct,
         # tell the agent exactly how to call nir_load_data(subset=...).
@@ -231,11 +269,7 @@ def nir_inspect_tool(
                 )
             else:
                 info["hint"] = (
-                    "MATLAB struct detected (no nested sub-datasets). "
-                    "nir_load_data will auto-flatten the struct and pick "
-                    f"X from {info.get('x_fields', [])}, Y from "
-                    f"{info.get('y_fields', [])}, wv from "
-                    f"{info.get('wv_fields', [])}."
+                    f"MATLAB struct detected (no nested sub-datasets). nir_load_data will auto-flatten the struct and pick X from {info.get('x_fields', [])}, Y from {info.get('y_fields', [])}, wv from {info.get('wv_fields', [])}."
                 )
         elif corner_nan:
             info["hint"] = (
@@ -259,11 +293,7 @@ def nir_inspect_tool(
                 "column) and wv_row if applicable."
             ) + metadata_hint
         else:
-            info["hint"] = (
-                "No empty corner cell detected. The file may use a plain matrix "
-                "layout (no separate y column or wavelength header). Pass y_col / "
-                "wv_row to nir_load_data explicitly if needed."
-            ) + metadata_hint
+            info["hint"] = ("No empty corner cell detected. The file may use a plain matrix layout (no separate y column or wavelength header). Pass y_col / wv_row to nir_load_data explicitly if needed.") + metadata_hint
         return _json.dumps(info, ensure_ascii=False)
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")
@@ -276,21 +306,25 @@ def nir_predict_tool(
     data_path: str,
     output_path: str | None = None,
     detect_drift: bool = True,
+    input_preprocessed: bool = False,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",  # noqa: ARG001
 ) -> str:
     """Predict reference values for new spectra using a trained model.
 
-    Loads a joblib-serialised model and applies it to a preprocessed .npz.
+    Loads a joblib-serialised model and applies its fitted preprocessing and
+    wavelength selection metadata to raw spectra before inference.
     Optionally runs Mahalanobis drift detection against the training
     distribution (if the metrics JSON contains training stats).
 
     Args:
         model_path: Virtual path to the .pkl model file.
-        data_path: Virtual path to the preprocessed new-data .npz.
+        data_path: Virtual path to a new-data .npz containing X and optional wv.
         output_path: Optional virtual path for a CSV of predictions.
         detect_drift: If True, compute Mahalanobis drift of the new spectra
             against the input data's own distribution (as a proxy when no
             training reference is available).
+        input_preprocessed: Set True only when X already has the artifact's
+            train-time preprocessing applied.
 
     Returns:
         JSON with predictions summary (count, mean, min, max) and optional
@@ -301,9 +335,19 @@ def nir_predict_tool(
 
         real_model = _resolve(runtime, model_path, read_only=True)
         real_data = _resolve(runtime, data_path, read_only=True)
-        model = joblib.load(real_model)
+        model, preprocessing, wavelength_selection = _unwrap_model_artifact(joblib.load(real_model))
+        if model is None:
+            return _err("Model artifact is missing the fitted model object.")
         data_dict = dict(np.load(real_data, allow_pickle=True))
         X = np.asarray(data_dict["X"], dtype=float)
+        wv = np.asarray(data_dict["wv"], dtype=float).ravel() if data_dict.get("wv") is not None and data_dict["wv"].size else None
+        X, preprocessing_applied = _apply_artifact_preprocessing(
+            X,
+            wv,
+            preprocessing,
+            input_preprocessed=input_preprocessed,
+        )
+        X = _apply_artifact_wavelength_selection(X, wavelength_selection)
 
         # Predict (sklearn-style model).
         y_pred = np.asarray(model.predict(X)).ravel()
@@ -314,6 +358,11 @@ def nir_predict_tool(
             "prediction_mean": float(np.mean(y_pred)),
             "prediction_min": float(np.min(y_pred)),
             "prediction_max": float(np.max(y_pred)),
+            "preprocessing": {
+                "description": preprocessing.get("description", "none"),
+                "applied": preprocessing_applied,
+            },
+            "wavelength_selection": wavelength_selection or None,
         }
 
         if detect_drift:

@@ -708,4 +708,25 @@ describe("orphan tool messages", () => {
     expect(t1b).toBeDefined();
     expect(t1b?.type).toBe("tool");
   });
+
+  test("leading orphan tool message opens a processing group without console noise", () => {
+    const messages = [
+      {
+        id: "t-leading",
+        type: "tool",
+        name: "nir_inspect",
+        tool_call_id: "call-leading",
+        content: "inspection output",
+      },
+      { id: "ai-1", type: "ai", content: "Done." },
+    ] as Message[];
+
+    const groups = getMessageGroups(messages);
+
+    expect(groups.map((g) => g.type)).toEqual([
+      "assistant:processing",
+      "assistant",
+    ]);
+    expect(groups[0]?.messages.map((m) => m.id)).toEqual(["t-leading"]);
+  });
 });

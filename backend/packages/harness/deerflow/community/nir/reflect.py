@@ -67,7 +67,7 @@ def nir_reflect_tool(
 
         # Load current metrics.
         real_metrics = _resolve(runtime, metrics_path, read_only=True)
-        with open(real_metrics, "r", encoding="utf-8") as f:
+        with open(real_metrics, encoding="utf-8") as f:
             metrics = _json.load(f)
 
         # Parse history.
@@ -116,11 +116,12 @@ def nir_reflect_tool(
         best = None
         for rec in all_records:
             m = rec.get("metrics", {}) if isinstance(rec, dict) else {}
-            r2 = m.get("R2_val") or m.get("R2")
+            r2 = m["R2_val"] if "R2_val" in m else m.get("R2")
             rpd_v = m.get("RPD")
             if rpd_v is None:
                 rpd_v = 0.0
-            if best is None or (rpd_v or 0) > (best.get("RPD") or 0):
+            best_rpd = best.get("RPD") if best is not None else None
+            if best is None or rpd_v > (best_rpd if best_rpd is not None else float("-inf")):
                 best = {
                     "R2_val": r2,
                     "RPD": rpd_v,

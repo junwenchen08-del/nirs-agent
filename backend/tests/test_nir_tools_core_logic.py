@@ -1,4 +1,4 @@
-﻿﻿"""Core behaviour tests for NIR community tool helpers.
+"""Core behaviour tests for NIR community tool helpers.
 
 Covers:
 - _parse_pipeline_step: parsing method-name strings and dicts with params
@@ -10,9 +10,217 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 from nir_core.models import PreprocessingStep
 
 from deerflow.community.nir.tools import _build_knowledge_hint, _parse_pipeline_step
+
+
+def test_pls_training_exposes_raw_space_intercept(tmp_path: Path):
+    """The tool response and persisted metrics expose the complete PLS equation."""
+    from deerflow.community.nir.tools import nir_train_model_tool
+
+    rng = np.random.RandomState(42)
+    X = rng.rand(60, 12)
+    y = X @ rng.rand(12) + 2.5
+    input_file = tmp_path / "data.npz"
+    model_file = tmp_path / "model.pkl"
+    metrics_file = tmp_path / "metrics.json"
+    np.savez(input_file, X=X, y=y)
+
+    virtual_input = "/mnt/user-data/uploads/data.npz"
+    virtual_model = "/mnt/user-data/outputs/model.pkl"
+    virtual_metrics = "/mnt/user-data/outputs/metrics.json"
+    resolved = {
+        virtual_input: str(input_file),
+        virtual_model: str(model_file),
+        virtual_metrics: str(metrics_file),
+    }
+
+    with patch(
+        "deerflow.community.nir.modeling._resolve",
+        side_effect=lambda _runtime, path, *, read_only: resolved[path],
+    ):
+        result = nir_train_model_tool.func(
+            runtime=MagicMock(),
+            input_path=virtual_input,
+            method="pls",
+            max_components=2,
+            cv_folds=2,
+            cv_strategy="fixed",
+            model_output=virtual_model,
+            metrics_output=virtual_metrics,
+        )
+
+    payload = json.loads(result)
+    persisted = json.loads(metrics_file.read_text(encoding="utf-8"))
+    assert payload["status"] == "ok"
+    assert isinstance(payload["coef_summary"]["intercept"], float)
+    assert payload["coef_summary"]["intercept"] == persisted["coef_summary"]["intercept"]
+
+
+def test_train_model_cars_selection_persists_artifact_metadata(tmp_path: Path):
+    """CARS selection is fitted during training and stored with the model artifact."""
+    import joblib
+
+    from deerflow.community.nir.tools import nir_train_model_tool
+
+    rng = np.random.RandomState(7)
+    X = rng.rand(48, 18)
+    y = X[:, 2] * 1.8 - X[:, 9] * 0.7 + rng.normal(scale=0.02, size=48)
+    wv = np.linspace(900, 1700, X.shape[1])
+    input_file = tmp_path / "data.npz"
+    model_file = tmp_path / "model.pkl"
+    metrics_file = tmp_path / "metrics.json"
+    np.savez(input_file, X=X, y=y, wv=wv)
+
+    virtual_input = "/mnt/user-data/uploads/data.npz"
+    virtual_model = "/mnt/user-data/outputs/model.pkl"
+    virtual_metrics = "/mnt/user-data/outputs/metrics.json"
+    resolved = {
+        virtual_input: str(input_file),
+        virtual_model: str(model_file),
+        virtual_metrics: str(metrics_file),
+    }
+
+    with patch(
+        "deerflow.community.nir.modeling._resolve",
+        side_effect=lambda _runtime, path, *, read_only: resolved[path],
+    ):
+        result = nir_train_model_tool.func(
+            runtime=MagicMock(),
+            input_path=virtual_input,
+            method="pls",
+            max_components=2,
+            cv_folds=2,
+            cv_strategy="fixed",
+            wavelength_selection="cars",
+            wavelength_selection_params='{"n_mc_samples": 6, "n_folds": 2, "random_state": 11}',
+            model_output=virtual_model,
+            metrics_output=virtual_metrics,
+        )
+
+    payload = json.loads(result)
+    persisted = json.loads(metrics_file.read_text(encoding="utf-8"))
+    artifact = joblib.load(model_file)
+
+    assert payload["status"] == "ok"
+    assert payload["wavelength_selection"]["method"] == "cars"
+    assert payload["wavelength_selection"]["n_selected"] < X.shape[1]
+    assert persisted["wavelength_selection"] == payload["wavelength_selection"]
+    assert artifact["format"] == "nir_model_artifact"
+    assert artifact["wavelength_selection"] == payload["wavelength_selection"]
+
+
+def test_nir_predict_applies_artifact_wavelength_selection(tmp_path: Path):
+    """Prediction accepts a full-width X matrix and slices train-selected columns."""
+    import joblib
+    from sklearn.linear_model import LinearRegression
+
+    from deerflow.community.nir.io_tools import nir_predict_tool
+
+    rng = np.random.RandomState(13)
+    X = rng.rand(20, 5)
+    selected_indices = [1, 3]
+    y = X[:, selected_indices] @ np.array([2.0, -1.0])
+    model = LinearRegression().fit(X[:, selected_indices], y)
+
+    model_file = tmp_path / "model.pkl"
+    data_file = tmp_path / "predict.npz"
+    np.savez(data_file, X=X)
+    joblib.dump(
+        {
+            "format": "nir_model_artifact",
+            "version": 1,
+            "model": model,
+            "wavelength_selection": {
+                "method": "manual",
+                "selected_indices": selected_indices,
+                "n_original": X.shape[1],
+                "n_selected": len(selected_indices),
+            },
+        },
+        model_file,
+    )
+
+    virtual_model = "/mnt/user-data/outputs/model.pkl"
+    virtual_data = "/mnt/user-data/uploads/predict.npz"
+    resolved = {
+        virtual_model: str(model_file),
+        virtual_data: str(data_file),
+    }
+
+    with patch(
+        "deerflow.community.nir.io_tools._resolve",
+        side_effect=lambda _runtime, path, *, read_only: resolved[path],
+    ):
+        result = nir_predict_tool.func(
+            runtime=MagicMock(),
+            model_path=virtual_model,
+            data_path=virtual_data,
+            detect_drift=False,
+        )
+
+    payload = json.loads(result)
+    assert payload["status"] == "ok"
+    assert payload["n_samples"] == X.shape[0]
+    assert payload["wavelength_selection"]["selected_indices"] == selected_indices
+
+
+def test_nir_predict_applies_fitted_artifact_preprocessing(tmp_path: Path):
+    """Version-2 artifacts reproduce train-time preprocessing for raw spectra."""
+    import joblib
+    from nir_core.models import PreprocessingStep
+    from nir_core.preprocess.pipeline import PreprocessingPipeline
+    from sklearn.linear_model import LinearRegression
+
+    from deerflow.community.nir.io_tools import nir_predict_tool
+
+    rng = np.random.RandomState(21)
+    X_train = rng.rand(30, 4)
+    X_predict = rng.rand(8, 4)
+    pipeline = PreprocessingPipeline([PreprocessingStep(method="mean_center")]).fit(X_train)
+    y_train = pipeline.transform(X_train) @ np.array([1.5, -0.5, 2.0, 0.25])
+    model = LinearRegression().fit(pipeline.transform(X_train), y_train)
+    expected = model.predict(pipeline.transform(X_predict))
+
+    model_file = tmp_path / "model-v2.pkl"
+    data_file = tmp_path / "raw-predict.npz"
+    np.savez(data_file, X=X_predict)
+    joblib.dump(
+        {
+            "format": "nir_model_artifact",
+            "version": 2,
+            "model": model,
+            "preprocessing": {
+                "description": pipeline.description(),
+                "pipeline": pipeline,
+                "apply_on_predict": True,
+            },
+            "wavelength_selection": {"method": "none"},
+        },
+        model_file,
+    )
+
+    resolved = {
+        "/mnt/user-data/outputs/model-v2.pkl": str(model_file),
+        "/mnt/user-data/uploads/raw-predict.npz": str(data_file),
+    }
+    with patch(
+        "deerflow.community.nir.io_tools._resolve",
+        side_effect=lambda _runtime, path, *, read_only: resolved[path],
+    ):
+        result = nir_predict_tool.func(
+            runtime=MagicMock(),
+            model_path="/mnt/user-data/outputs/model-v2.pkl",
+            data_path="/mnt/user-data/uploads/raw-predict.npz",
+            detect_drift=False,
+        )
+
+    payload = json.loads(result)
+    assert payload["status"] == "ok"
+    assert payload["preprocessing"]["applied"] is True
+    assert np.isclose(payload["prediction_mean"], float(np.mean(expected)))
 
 
 # ---------------------------------------------------------------------------

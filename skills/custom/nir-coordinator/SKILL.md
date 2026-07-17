@@ -3,13 +3,14 @@ name: nir-coordinator
 description: >-
   完整的近红外光谱分析工作流。协调数据加载、预处理优化、模型建立和质量评估。
   包含反思闭环机制——当模型质量不达标时自动尝试不同的预处理组合。
-  通过 /nir-coordinator 命令激活。
+  支持自然语言自动路由，也可通过 /nir-coordinator 命令显式激活。
 allowed-tools:
   - read_file
   - write_file
   - ls
   - task
   - present_files
+  - nir_workflow
   - nir_load_data
   - nir_inspect
   - nir_preprocess
@@ -23,6 +24,39 @@ allowed-tools:
 ---
 
 # NIR 光谱分析协调器
+
+## 工作流状态（强制）
+
+运行时会自动将明确的近红外请求路由到本 Skill，用户无需输入
+`/nir-coordinator`。开始任何新的 NIR 分析前，先调用：
+
+```text
+nir_workflow(
+  action="start",
+  task_type="analysis",
+  data_path="...",
+  domain="...",
+  analyte="...",
+  unit="..."
+)
+```
+
+严格按照返回的 `next_action` 推进。以下决策节点由你显式记录：
+
+- 数据检查后：`record_audit`
+- 分析计划确定后：`plan_ready`
+- 用户明确同意采用模型后：`approve`
+- 工作交付完毕后：`complete`
+
+以下节点由运行时中间件根据工具的结构化成功结果自动记录，**不要重复调用**：
+
+- `nir_train_model` / `nir_analyze` / `nir_compare`：自动 `record_attempt`
+- `nir_search_knowledge`：自动 `knowledge_retrieved`
+- `nir_register_model`：自动 `registered`
+
+如果返回 `missing_inputs`，必须先向用户收集缺失信息。模型通过质量门槛后只会
+进入 `review`，未记录用户 `approve` 前禁止调用 `nir_register_model`。任何越阶段或
+与任务类型不匹配的 `nir_*` 调用都会被运行时拒绝，并返回当前 `next_action`。
 
 ## ⛔ 绝对禁止（违反会得到错误结果，必须严格执行）
 
@@ -173,7 +207,8 @@ V3.7 起，`nir_train_model` / `nir_analyze` / `nir_reflect` 在以下情况下�
 
 ## 模式 A：快速模式（强烈推荐优先使用）
 
-对绝大多数请求，直接调用 `nir_analyze` 一次即可。它会自动完成：
+对绝大多数请求，在完成 `start → 数据检查 → record_audit → plan_ready` 后，调用
+`nir_analyze` 一次即可。它会自动完成：
 加载 → 三集分离 → 嵌套 CV 预处理选择 → 建模 → 评估 → 生成报告和图。
 
 **CSV 文件直接调用（无需先调用 nir_load_data）**：

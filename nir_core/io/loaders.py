@@ -6,6 +6,7 @@ All loaders are pure functions: they read from disk and return a new
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -197,12 +198,22 @@ def load_csv(
     )
 
 
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
 # NIR wavelength range covers visible-NIR (~400 nm) to mid-IR (~25000 nm),
 # but practical instruments used for chemometrics (NIR / FT-NIR) almost
 # always report wavelengths in roughly 600-3000 nm. We use this as a soft
 # signal for "this row looks like wavelengths, not spectra".
-_NIR_WAVELENGTH_MIN_NM = 600.0
-_NIR_WAVELENGTH_MAX_NM = 3000.0
+_NIR_WAVELENGTH_MIN_NM = _env_float("NIR_WAVELENGTH_MIN_NM", 600.0)
+_NIR_WAVELENGTH_MAX_NM = _env_float("NIR_WAVELENGTH_MAX_NM", 3000.0)
 
 
 def _detect_labeled_layout(
@@ -544,7 +555,7 @@ def _concat_multi_x(
     """
     x_names = sorted(
         n for n, v in flat.items()
-        if v.ndim == 2 and _name_matches(n.lower(), _X_NAME_RE)
+        if isinstance(v, np.ndarray) and v.ndim == 2 and _name_matches(n.lower(), _X_NAME_RE)
     )
     if not x_names:
         raise ValueError(
@@ -726,7 +737,7 @@ def _resolve_explicit(
 
 def _heuristic_x(variables: dict[str, np.ndarray]) -> np.ndarray:
     """Pick the spectra matrix: the 2D variable with the most elements."""
-    candidates = {k: v for k, v in variables.items() if v.ndim == 2}
+    candidates = {k: v for k, v in variables.items() if isinstance(v, np.ndarray) and v.ndim == 2}
     if not candidates:
         raise ValueError(
             "No 2D variable found in MAT file; cannot identify spectra "

@@ -8,6 +8,11 @@
 
 NIR-Agent 是一个基于 [DeerFlow v2.0](https://github.com/bytedance/deer-flow) 框架构建的**近红外光谱（NIR）专用智能体**，实现了完整的化学计量学分析工作流：数据加载 → 预处理优化 → 建模评估 → 反思闭环 → 报告生成。
 
+明确的近红外请求会被自动路由到 `nir-coordinator`，无需命令前缀。任务阶段、
+必需信息、重试历史和用户审批状态由 `nir_workflow` 持久化到线程检查点；模型在
+用户明确批准前不能进入注册阶段。运行时中间件会拒绝越阶段或任务类型不匹配的
+NIR 工具调用，并从建模、知识检索和注册工具的结构化结果自动推进工作流。
+
 ---
 
 ## 设计哲学
@@ -84,7 +89,7 @@ deer-flow/
 ├── config.yaml                          # DeerFlow 主配置（NIR 工具 + 子代理注册）
 │
 ├── skills/custom/                       # NIR 自定义技能
-│   ├── nir-coordinator/SKILL.md         # 主编排技能（/nir 命令激活）
+│   ├── nir-coordinator/SKILL.md         # 主编排技能（自动路由或命令激活）
 │   ├── nir-io/SKILL.md                  # 数据加载技能
 │   ├── nir-preprocess/SKILL.md          # 预处理技能
 │   ├── nir-model/SKILL.md               # 建模技能
@@ -101,7 +106,7 @@ deer-flow/
 │
 ├── backend/packages/harness/deerflow/community/nir/   # DeerFlow 工具桥接层
 │   ├── __init__.py
-│   └── tools.py                         # 8 个 @tool 函数
+│   └── tools.py                         # NIR @tool 兼容导出入口
 │
 └── nir_core/                            # 独立确定性算法包
     ├── pyproject.toml
@@ -157,11 +162,34 @@ deer-flow/
 | `nir_load_data` | 加载光谱文件（.mat/.csv/.txt），标准化为 .npz | `nir_load_data(file_path)` |
 | `nir_inspect` | 预览文件结构（不完整加载） | `nir_inspect(file_path)` |
 | `nir_preprocess` | 单步预处理（11种方法） | `nir_preprocess(input_path, method, output_path)` |
-| `nir_train_model` | 建模（PLS/PCR/SVR），含三集分离+CV+质量门禁 | `nir_train_model(input_path, method, domain)` |
+| `nir_train_model` | 建模（PLS/PCR/SVR/ML 等），含三集分离、CV、可选波长选择和质量门禁 | `nir_train_model(input_path, method, domain, wavelength_selection)` |
 | `nir_predict` | 使用已训练模型预测新样本（可选漂移检测） | `nir_predict(model_path, data_path)` |
 | `nir_analyze` | 一键端到端分析（不含反思闭环） | `nir_analyze(data_path, domain)` |
 | `nir_reflect` | 确定性反思决策（should_retry + get_next_pipeline） | `nir_reflect(metrics, domain, attempt, history)` |
 | `nir_compare` | 多预处理流水线并行对比 | `nir_compare(data_path, pipelines, method)` |
+
+---
+
+## 波长选择
+
+`nir_train_model` 和 `nir_analyze` 支持在训练集内执行波长选择，流程为：
+先划分 train/val/test，再仅用训练集拟合预处理和选择器，最后用同一组
+`selected_indices` 裁剪验证集、测试集和后续预测数据，避免测试集信息泄漏。
+
+支持的方法：
+
+| 方法 | 参数 | 说明 |
+|------|------|------|
+| `none` | `{}` | 默认，全波长建模 |
+| `cars` | `n_mc_samples`, `n_folds`, `random_state` | CARS 竞争性自适应重加权采样，适合 PLS 定量建模 |
+| `spa` | `n_min`, `n_max` | SPA 连续投影算法，适合少量代表性波长 |
+| `manual` | `indices` 或波长 `ranges` | 使用已知波段，如 `{"ranges":[[900,1200],[1450,1650]]}` |
+
+启用预处理或波长选择时，保存的 `.pkl` v2 artifact 会包含模型、已拟合的
+预处理流水线和选择元数据。`nir_predict` 默认接收原始光谱，先复用训练时的
+预处理，再按 `selected_indices` 裁剪；输入已完成同一预处理时可设置
+`input_preprocessed=true` 跳过流水线。metrics 和返回值会包含
+`wavelength_selection`、`n_wavelengths_original`、`n_wavelengths_model`。
 
 ---
 
@@ -208,10 +236,11 @@ deer-flow/
 
 ### 快速模式
 
-直接调用 `nir_analyze` 工具，单次完成全流程。不触发反思闭环。
+完成工作流启动、数据审计和计划确认后，调用 `nir_analyze` 工具单次完成算法流程。
+工具结果会自动记录为一次建模尝试；不达标时进入知识检索与反思闭环。
 
 ```
-/nir 分析这批光谱数据，建立蛋白质含量模型
+分析这批近红外光谱数据，建立蛋白质含量模型
 ```
 
 ### 分步模式（含反思闭环）
@@ -261,10 +290,10 @@ make dev
 
 ### 3. 使用 NIR-Agent
 
-访问 http://localhost:2026，输入 `/nir` 前缀激活 NIR 分析技能：
+访问 http://localhost:2026，直接描述 NIR 任务即可自动激活专业工作流：
 
 ```
-/nir 加载 /mnt/user-data/uploads/corn.mat 并建立蛋白质含量的 PLS 模型
+加载 /mnt/user-data/uploads/corn.mat 并建立蛋白质含量的近红外 PLS 模型
 ```
 
 ---
@@ -311,7 +340,13 @@ print(f"质量评级: {quality['grade']}, 通过: {quality['passed']}")
 ```bash
 cd nir_core
 
-# 运行全部单元测试
+# 日常快速门禁（跳过高成本训练与特征选择）
+pytest -m "not slow"
+
+# 仅运行高成本训练、特征选择与持久化回归
+pytest -m slow
+
+# 运行全部测试
 pytest
 
 # 运行 Phase 1 端到端验证
@@ -321,6 +356,37 @@ python scripts/validate_phase1.py
 pytest tests/test_preprocess/test_snv.py -v
 pytest tests/test_model/test_pls.py -v
 ```
+
+后端还提供无需调用外部模型的 NIR 智能体轨迹评测，以及用于真实/回放会话的统一
+评分入口：
+
+```bash
+cd backend
+
+# 确定性工作流与评分器回归
+pytest tests/test_nir_evaluation.py -v
+
+# 评分捕获的智能体轨迹，生成 JSON 与 Markdown 报告
+make eval-nir TRACES=path/to/nir-traces.json
+```
+
+Gateway 会自动把 NIR 工具决策、工作流阶段、run/trace 标识和 Token 汇总保存为
+可导出的轨迹：
+
+```bash
+curl -sS "http://localhost:2026/api/threads/THREAD_ID/nir-evaluation-trace?scenario_id=calibration-register" -o nir-traces.json
+cd backend && make eval-nir TRACES=../nir-traces.json
+```
+
+也可以直接访问 `http://localhost:2026/workspace/evaluations` 使用 NIR 评测控制台：
+为一个或多个已完成线程选择预期场景，Gateway 会统一执行所有权校验、轨迹采集和
+确定性评分。页面展示通过率、平均分、策略违规、Token、耗时及逐项检查，并支持
+导出完整 JSON 证据；最近 12 次汇总仅保存在当前浏览器中用于观察质量趋势。
+
+版本化场景位于 `backend/evals/nir/scenarios.json`，当前包含 20 个场景，覆盖需求
+收集、数据检查与阻断、校准注册、审批/拒绝、RAG 重试、重试预算耗尽、预测、
+知识无命中诚实性、模型比较，以及食品、土壤和制药领域。评分检查路由、工作流
+终态、工具序列、审批安全、检索证据、模型产物可追溯性以及耗时/Token。
 
 ---
 

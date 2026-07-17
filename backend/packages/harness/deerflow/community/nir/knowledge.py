@@ -54,6 +54,15 @@ def _get_knowledge_http_url() -> str:
     return url
 
 
+def _knowledge_http_headers() -> dict[str, str]:
+    """Build headers for the lightweight knowledge HTTP server."""
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("NIR_KNOWLEDGE_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def _search_knowledge_via_http(query: str, top_k: int) -> str:
     """Fallback: search knowledge base via HTTP.
 
@@ -74,25 +83,29 @@ def _search_knowledge_via_http(query: str, top_k: int) -> str:
         req = urllib.request.Request(
             url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers=_knowledge_http_headers(),
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         if data.get("error"):
             return _err(f"Knowledge search error: {data['error']}")
+    except urllib.error.HTTPError as exc:
+        try:
+            err_body = json.loads(exc.read().decode("utf-8"))
+            err_msg = err_body.get("error", str(err_body))
+        except (ValueError, TypeError):
+            err_msg = f"HTTP {exc.code} {exc.reason}"
+        return _err(f"Knowledge search HTTP {exc.code}: {err_msg}")
     except urllib.error.URLError as exc:
-        return _err(
-            f"Knowledge search server unreachable at {url}: {exc.reason}. "
-            "Start it with: python nir_core/knowledge/_search_server.py"
-        )
+        return _err(f"Knowledge search server unreachable at {url}: {exc.reason}. Start it with: python nir_core/knowledge/_search_server.py")
     except Exception as exc:  # noqa: BLE001
         return _err(f"Knowledge search HTTP error: {type(exc).__name__}: {exc}")
 
     # Also fetch the full document list so the agent knows all available papers
     try:
         docs_url = base_url + "/documents"
-        docs_req = urllib.request.Request(docs_url, method="GET")
+        docs_req = urllib.request.Request(docs_url, headers=_knowledge_http_headers(), method="GET")
         with urllib.request.urlopen(docs_req, timeout=10) as docs_resp:
             docs_data = json.loads(docs_resp.read().decode("utf-8"))
         data["available_documents"] = docs_data.get("documents", [])
@@ -175,11 +188,7 @@ def nir_search_knowledge_tool(
                         "results": [],
                         "count": 0,
                         "query": query,
-                        "message": (
-                            "Knowledge base is empty or returned no matches. "
-                            "Populate it via `python -m nir_core.knowledge.cli "
-                            "import-dir <papers_dir>`."
-                        ),
+                        "message": ("Knowledge base is empty or returned no matches. Populate it via `python -m nir_core.knowledge.cli import-dir <papers_dir>`."),
                     }
                 )
 
@@ -214,16 +223,14 @@ def nir_search_knowledge_tool(
                     }
                 )
 
+            documents = retriever.list_documents()
             return _ok(
                 {
                     "results": output,
                     "count": len(output),
                     "query": query,
-                    "available_documents": [
-                        {"doc_id": d.get("doc_id", ""), "title": d.get("title", ""), "chunk_count": d.get("chunk_count", 0)}
-                        for d in retriever.list_documents()
-                    ],
-                    "total_documents": len(retriever.list_documents()),
+                    "available_documents": [{"doc_id": d.get("doc_id", ""), "title": d.get("title", ""), "chunk_count": d.get("chunk_count", 0)} for d in documents],
+                    "total_documents": len(documents),
                 }
             )
         except Exception as exc:  # noqa: BLE001

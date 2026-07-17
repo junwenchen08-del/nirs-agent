@@ -528,7 +528,7 @@ def _matches_any(name_lower: str, prefixes: tuple[str, ...]) -> bool:
 
 def _pick_first_2d(candidates: dict[str, np.ndarray]) -> np.ndarray | None:
     """Pick the first variable that is 2D (prefer larger arrays)."""
-    two_d = {k: v for k, v in candidates.items() if v.ndim == 2}
+    two_d = {k: v for k, v in candidates.items() if isinstance(v, np.ndarray) and v.ndim == 2}
     if not two_d:
         return None
     # Prefer the array with the most elements (heuristic for the spectra block).

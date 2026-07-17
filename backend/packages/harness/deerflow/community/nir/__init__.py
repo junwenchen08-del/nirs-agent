@@ -20,6 +20,7 @@ from .modeling import (
 )
 from .preprocess import nir_preprocess_tool
 from .reflect import nir_reflect_tool
+from .workflow import nir_workflow_tool
 
 __all__ = [
     "nir_load_data_tool",
@@ -32,4 +33,5 @@ __all__ = [
     "nir_compare_tool",
     "nir_register_model_tool",
     "nir_search_knowledge_tool",
+    "nir_workflow_tool",
 ]
