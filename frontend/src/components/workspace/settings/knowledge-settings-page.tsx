@@ -9,6 +9,7 @@ import {
   UploadIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -24,10 +25,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getBackendBaseURL } from "@/core/config";
 import { fetch } from "@/core/api/fetcher";
+import { getBackendBaseURL } from "@/core/config";
 import { useI18n } from "@/core/i18n/hooks";
-import { toast } from "sonner";
 
 import { SettingsSection } from "./settings-section";
 
@@ -66,7 +66,16 @@ interface KnowledgeSearchResult {
 // ---------------------------------------------------------------------------
 
 // Supported file extensions (must match backend _SUPPORTED_EXTS)
-const SUPPORTED_EXTS = [".pdf", ".docx", ".txt", ".md", ".markdown", ".html", ".htm", ".csv"];
+const SUPPORTED_EXTS = [
+  ".pdf",
+  ".docx",
+  ".txt",
+  ".md",
+  ".markdown",
+  ".html",
+  ".htm",
+  ".csv",
+];
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 
 async function readErrorDetail(response: Response): Promise<string> {
@@ -91,22 +100,33 @@ async function apiGetStats(): Promise<KnowledgeStats> {
   };
 }
 
-async function apiUploadDocument(
-  file: File,
+interface BatchUploadResult {
+  filename: string;
+  success: boolean;
+  chunks_added?: number;
+  doc_id?: string;
+  error?: string;
+}
+
+async function apiUploadDocumentsBatch(
+  files: File[],
   title: string,
   year: string,
-): Promise<{ chunks_added: number; doc_id: string }> {
+): Promise<BatchUploadResult[]> {
   const form = new FormData();
-  form.append("file", file);
+  for (const f of files) {
+    form.append("files", f, f.name);
+  }
   if (title) form.append("title", title);
   if (year) form.append("year", year);
 
-  const resp = await fetch(`${getBackendBaseURL()}/api/knowledge/documents`, {
-    method: "POST",
-    body: form,
-  });
+  const resp = await fetch(
+    `${getBackendBaseURL()}/api/knowledge/documents/batch`,
+    { method: "POST", body: form },
+  );
   if (!resp.ok) throw new Error(await readErrorDetail(resp));
-  return resp.json();
+  const json = await resp.json();
+  return json.results as BatchUploadResult[];
 }
 
 async function apiDeleteDocument(docId: string): Promise<void> {
@@ -120,7 +140,7 @@ async function apiDeleteDocument(docId: string): Promise<void> {
 
 async function apiSearch(
   query: string,
-  topK: number = 5,
+  topK = 5,
 ): Promise<KnowledgeSearchResult[]> {
   const resp = await fetch(`${getBackendBaseURL()}/api/knowledge/search`, {
     method: "POST",
@@ -144,7 +164,9 @@ export function KnowledgeSettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<KnowledgeDocument | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<KnowledgeDocument | null>(
+    null,
+  );
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -167,7 +189,12 @@ export function KnowledgeSettingsPage() {
 
   const handleUploadSuccess = useCallback(
     (chunksAdded: number) => {
-      toast.success(t.settings.knowledge.uploadSuccess.replace("{count}", String(chunksAdded)));
+      toast.success(
+        t.settings.knowledge.uploadSuccess.replace(
+          "{count}",
+          String(chunksAdded),
+        ),
+      );
       setUploadOpen(false);
       void loadAll();
     },
@@ -185,10 +212,16 @@ export function KnowledgeSettingsPage() {
         void loadAll();
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        toast.error(t.settings.knowledge.deleteFailed.replace("{message}", msg));
+        toast.error(
+          t.settings.knowledge.deleteFailed.replace("{message}", msg),
+        );
       }
     },
-    [loadAll, t.settings.knowledge.deleteSuccess, t.settings.knowledge.deleteFailed],
+    [
+      loadAll,
+      t.settings.knowledge.deleteSuccess,
+      t.settings.knowledge.deleteFailed,
+    ],
   );
 
   return (
@@ -218,7 +251,9 @@ export function KnowledgeSettingsPage() {
               onClick={() => void loadAll()}
               disabled={loading}
             >
-              <RefreshCwIcon className={`size-4 ${loading ? "animate-spin" : ""}`} />
+              <RefreshCwIcon
+                className={`size-4 ${loading ? "animate-spin" : ""}`}
+              />
               {t.settings.knowledge.refreshButton}
             </Button>
             <Button size="sm" onClick={() => setUploadOpen(true)}>
@@ -278,16 +313,20 @@ export function KnowledgeSettingsPage() {
         >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>{t.settings.knowledge.deleteConfirmTitle}</DialogTitle>
+              <DialogTitle>
+                {t.settings.knowledge.deleteConfirmTitle}
+              </DialogTitle>
               <DialogDescription>
                 {t.settings.knowledge.deleteConfirmDescription}
               </DialogDescription>
             </DialogHeader>
             {deleteTarget && (
               <div className="bg-muted rounded-md p-3 text-sm">
-                <div className="font-medium">{deleteTarget.title || deleteTarget.doc_id}</div>
+                <div className="font-medium">
+                  {deleteTarget.title || deleteTarget.doc_id}
+                </div>
                 {deleteTarget.source && (
-                  <div className="text-muted-foreground mt-1 break-all text-xs">
+                  <div className="text-muted-foreground mt-1 text-xs break-all">
                     {deleteTarget.source}
                   </div>
                 )}
@@ -332,7 +371,7 @@ function StatCard({
     <div className="flex flex-col gap-1">
       <div className="text-muted-foreground text-xs">{label}</div>
       <div className="text-2xl font-semibold">
-        {loading ? "…" : value ?? 0}
+        {loading ? "…" : (value ?? 0)}
       </div>
     </div>
   );
@@ -390,13 +429,11 @@ function DocumentTable({
               </td>
               <td className="px-3 py-2">{doc.chunk_count}</td>
               <td className="px-3 py-2 text-right">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onDelete(doc)}
-                >
+                <Button variant="ghost" size="sm" onClick={() => onDelete(doc)}>
                   <Trash2Icon className="size-4" />
-                  <span className="sr-only">{t.settings.knowledge.deleteButton}</span>
+                  <span className="sr-only">
+                    {t.settings.knowledge.deleteButton}
+                  </span>
                 </Button>
               </td>
             </tr>
@@ -422,7 +459,7 @@ function UploadDialog({
 }) {
   const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [title, setTitle] = useState("");
   const [year, setYear] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -433,42 +470,93 @@ function UploadDialog({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) {
-      setFile(f);
-      setError(null);
+    const selected = e.target.files;
+    if (selected && selected.length > 0) {
+      const newFiles = Array.from(selected);
+      // Validate and collect errors for all files
+      const rejected: string[] = [];
+      const accepted: File[] = [];
+      for (const f of newFiles) {
+        const fn = f.name.toLowerCase();
+        const isValidExt = SUPPORTED_EXTS.some((ext) => fn.endsWith(ext));
+        if (!isValidExt) {
+          rejected.push(
+            t.settings.knowledge.unsupportedType.replace(
+              "{ext}",
+              SUPPORTED_EXTS.join(", "),
+            ) + ` (${f.name})`,
+          );
+          continue;
+        }
+        if (f.size > MAX_FILE_SIZE) {
+          rejected.push(
+            t.settings.knowledge.fileTooLarge.replace(
+              "{size}",
+              String(Math.round(f.size / 1024 / 1024)),
+            ) + ` (${f.name})`,
+          );
+          continue;
+        }
+        accepted.push(f);
+      }
+      // Avoid duplicate filenames
+      setFiles((prev) => {
+        const existing = new Set(prev.map((f) => f.name));
+        const merged = [...prev];
+        for (const f of accepted) {
+          if (!existing.has(f.name)) {
+            merged.push(f);
+            existing.add(f.name);
+          }
+        }
+        return merged;
+      });
+      if (rejected.length > 0) {
+        setError(rejected.join("\n"));
+      } else {
+        setError(null);
+      }
     }
+    // Reset input so selecting the same file again still fires onChange
+    e.target.value = "";
+  };
+
+  const handleRemoveFile = (idx: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const handleUpload = async () => {
-    if (!file) {
+    if (files.length === 0) {
       setError(t.settings.knowledge.uploadHint);
-      return;
-    }
-    // Client-side file type validation
-    const fileName = file.name.toLowerCase();
-    const isValidExt = SUPPORTED_EXTS.some((ext) => fileName.endsWith(ext));
-    if (!isValidExt) {
-      setError(t.settings.knowledge.unsupportedType.replace("{ext}", SUPPORTED_EXTS.join(", ")));
-      return;
-    }
-    // Client-side file size validation
-    if (file.size > MAX_FILE_SIZE) {
-      setError(
-        t.settings.knowledge.fileTooLarge.replace(
-          "{size}",
-          String(Math.round(file.size / 1024 / 1024)),
-        ),
-      );
       return;
     }
     setUploading(true);
     setError(null);
     try {
-      const result = await apiUploadDocument(file, title, year);
-      onSuccess(result.chunks_added);
+      const results = await apiUploadDocumentsBatch(files, title, year);
+      const totalChunks = results
+        .filter((r) => r.success)
+        .reduce((sum, r) => sum + (r.chunks_added ?? 0), 0);
+      const failed = results.filter((r) => !r.success);
+      if (failed.length > 0) {
+        const failedMsgs = failed
+          .map((r) => `${r.filename}: ${r.error ?? "unknown error"}`)
+          .join("; ");
+        if (results.every((r) => !r.success)) {
+          throw new Error(failedMsgs);
+        } else {
+          // Partial success
+          toast.error(
+            t.settings.knowledge.batchPartialFailed.replace(
+              "{message}",
+              failedMsgs,
+            ),
+          );
+        }
+      }
+      onSuccess(totalChunks);
       // Reset
-      setFile(null);
+      setFiles([]);
       setTitle("");
       setYear("");
     } catch (e) {
@@ -483,7 +571,7 @@ function UploadDialog({
   const handleOpenChange = (next: boolean) => {
     if (!next) {
       // Reset on close
-      setFile(null);
+      setFiles([]);
       setTitle("");
       setYear("");
       setError(null);
@@ -496,15 +584,18 @@ function UploadDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t.settings.knowledge.uploadButton}</DialogTitle>
-          <DialogDescription>{t.settings.knowledge.uploadHint}</DialogDescription>
+          <DialogDescription>
+            {t.settings.knowledge.uploadHint}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* File picker */}
+          {/* File picker (supports multiple files) */}
           <div className="space-y-2">
             <input
               ref={fileInputRef}
               type="file"
+              multiple
               className="hidden"
               accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,.csv"
               onChange={handleFileChange}
@@ -515,9 +606,43 @@ function UploadDialog({
               disabled={uploading}
               className="w-full justify-start"
             >
-              <FileIcon className="size-4" />
-              {file ? file.name : t.settings.knowledge.uploadButton}
+              <UploadIcon className="size-4" />
+              {files.length > 0
+                ? t.settings.knowledge.batchFilesSelected.replace(
+                    "{count}",
+                    String(files.length),
+                  )
+                : t.settings.knowledge.batchSelectFiles}
             </Button>
+            {/* Selected files list */}
+            {files.length > 0 && (
+              <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border p-2">
+                {files.map((f, idx) => (
+                  <div
+                    key={`${f.name}-${idx}`}
+                    className="flex items-center justify-between gap-2 text-sm"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <FileIcon className="text-muted-foreground size-4 shrink-0" />
+                      <span className="truncate">{f.name}</span>
+                      <span className="text-muted-foreground shrink-0 text-xs">
+                        {(f.size / 1024).toFixed(0)} KB
+                      </span>
+                    </div>
+                    {!uploading && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="size-6 p-0"
+                        onClick={() => handleRemoveFile(idx)}
+                      >
+                        <Trash2Icon className="size-3" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Title */}
@@ -549,7 +674,9 @@ function UploadDialog({
 
           {error && (
             <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription className="whitespace-pre-line">
+                {error}
+              </AlertDescription>
             </Alert>
           )}
         </div>
@@ -560,13 +687,18 @@ function UploadDialog({
               {t.common.cancel}
             </Button>
           </DialogClose>
-          <Button onClick={() => void handleUpload()} disabled={uploading || !file}>
+          <Button
+            onClick={() => void handleUpload()}
+            disabled={uploading || files.length === 0}
+          >
             {uploading ? (
               <Loader2Icon className="size-4 animate-spin" />
             ) : (
               <UploadIcon className="size-4" />
             )}
-            {t.settings.knowledge.uploadButton}
+            {uploading
+              ? t.settings.knowledge.batchUploading
+              : t.settings.knowledge.uploadButton}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -614,7 +746,9 @@ function SearchTest({
 
   return (
     <div className="space-y-3 border-t pt-6">
-      <div className="text-base font-semibold">{t.settings.knowledge.searchTitle}</div>
+      <div className="text-base font-semibold">
+        {t.settings.knowledge.searchTitle}
+      </div>
       <div className="flex gap-2">
         <Input
           value={query}
@@ -623,7 +757,10 @@ function SearchTest({
           placeholder={t.settings.knowledge.searchPlaceholder}
           disabled={searching}
         />
-        <Button onClick={() => void handleSearch()} disabled={searching || !query.trim()}>
+        <Button
+          onClick={() => void handleSearch()}
+          disabled={searching || !query.trim()}
+        >
           {searching ? (
             <Loader2Icon className="size-4 animate-spin" />
           ) : (
@@ -641,15 +778,15 @@ function SearchTest({
         </Alert>
       )}
 
-      {results && results.length === 0 && (
+      {results?.length === 0 && (
         <div className="text-muted-foreground text-sm">
           {t.settings.knowledge.searchEmpty}
         </div>
       )}
 
-      {results && results.length > 0 && (
+      {(results?.length ?? 0) > 0 && (
         <div className="space-y-3">
-          {results.map((r, i) => (
+          {results?.map((r, i) => (
             <div key={`${r.source}-${i}`} className="rounded-lg border p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-muted-foreground truncate text-xs">
@@ -659,7 +796,9 @@ function SearchTest({
                   score: {r.score.toFixed(4)}
                 </Badge>
               </div>
-              <p className="line-clamp-4 text-sm leading-relaxed">{r.content}</p>
+              <p className="line-clamp-4 text-sm leading-relaxed">
+                {r.content}
+              </p>
               {r.entities.methods.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {r.entities.methods.map((m) => (

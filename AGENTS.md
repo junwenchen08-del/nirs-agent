@@ -95,7 +95,17 @@ cd backend && make format     # ruff format
 cd frontend && pnpm dev       # Dev server with Turbopack (port 3000)
 cd frontend && pnpm check     # Lint + type check (run before committing)
 cd frontend && pnpm test      # Unit tests
+
+# Deterministic NIR algorithm package
+cd nir_core && pytest -m "not slow"  # Fast development gate
+cd nir_core && pytest -m slow        # Compute-intensive model/selection regressions
+cd nir_core && pytest                # Complete fast + slow suite
 ```
+
+The NIR evaluation control room lives at `/workspace/evaluations`. Its Gateway
+batch endpoint owner-checks explicit thread/scenario mappings and reuses the
+same deterministic evaluator as `backend/make eval-nir`; browser-local history
+contains only the latest 12 aggregate summaries.
 
 Rule of thumb: **root `make` = the full application**; **`backend/Makefile` and `frontend/`
 (`pnpm`) = per-module work.**

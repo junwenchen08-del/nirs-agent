@@ -90,7 +90,11 @@ export function SettingsDialog(props: SettingsDialogProps) {
       },
       { id: "tools", label: t.settings.sections.tools, icon: WrenchIcon },
       { id: "skills", label: t.settings.sections.skills, icon: SparklesIcon },
-      { id: "knowledge", label: t.settings.sections.knowledge, icon: LibraryIcon },
+      {
+        id: "knowledge",
+        label: t.settings.sections.knowledge,
+        icon: LibraryIcon,
+      },
       { id: "about", label: t.settings.sections.about, icon: InfoIcon },
     ],
     [

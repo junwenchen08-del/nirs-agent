@@ -1,0 +1,308 @@
+"""Runtime enforcement and automatic advancement for NIR workflows."""
+
+from __future__ import annotations
+
+import json
+import logging
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, replace
+from typing import Any, override
+
+from langchain.agents import AgentState
+from langchain.agents.middleware import AgentMiddleware
+from langchain_core.messages import ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
+from langgraph.types import Command
+
+from deerflow.agents.thread_state import NIRWorkflowState
+from deerflow.community.nir.workflow import NIRWorkflowError, record_tool_observation, transition_workflow
+from deerflow.trace_context import DEERFLOW_TRACE_METADATA_KEY
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _ToolPolicy:
+    stages: frozenset[str]
+    task_types: frozenset[str]
+
+
+_MODEL_TASKS = frozenset({"analysis", "calibration", "compare"})
+_DATA_TASKS = frozenset({"analysis", "calibration", "compare", "prediction", "inspection"})
+_EXECUTION_TASKS = frozenset({"analysis", "calibration", "compare", "prediction"})
+
+_TOOL_POLICIES: dict[str, _ToolPolicy] = {
+    "nir_load_data": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
+    "nir_inspect": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
+    "nir_preprocess": _ToolPolicy(frozenset({"execution"}), _EXECUTION_TASKS),
+    "nir_train_model": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
+    "nir_analyze": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
+    "nir_compare": _ToolPolicy(frozenset({"execution"}), _MODEL_TASKS),
+    "nir_predict": _ToolPolicy(frozenset({"execution"}), frozenset({"prediction"})),
+    "nir_reflect": _ToolPolicy(frozenset({"knowledge", "review"}), _MODEL_TASKS),
+    "nir_search_knowledge": _ToolPolicy(frozenset({"execution", "knowledge"}), frozenset({"knowledge", *_MODEL_TASKS})),
+    "nir_register_model": _ToolPolicy(frozenset({"approved"}), _MODEL_TASKS),
+}
+_OBSERVED_NIR_TOOLS = frozenset({*_TOOL_POLICIES, "nir_workflow"})
+
+_MODELING_TOOLS = frozenset({"nir_train_model", "nir_analyze", "nir_compare"})
+
+
+def _knowledge_evidence_ids(payload: Mapping[str, Any]) -> list[str]:
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return []
+    evidence: list[str] = []
+    for result in results:
+        identifier: Any = result if isinstance(result, str) else None
+        if isinstance(result, Mapping):
+            for key in ("id", "document_id", "source", "path", "title"):
+                if result.get(key):
+                    identifier = result[key]
+                    break
+        if identifier is not None:
+            normalized = str(identifier).strip()
+            if normalized and normalized not in evidence:
+                evidence.append(normalized)
+        if len(evidence) == 10:
+            break
+    return evidence
+
+
+def _state_from_request(request: ToolCallRequest) -> Mapping[str, Any]:
+    runtime = request.runtime
+    if runtime is not None and isinstance(runtime.state, Mapping):
+        return runtime.state
+    return request.state if isinstance(request.state, Mapping) else {}
+
+
+def _denied_message(
+    request: ToolCallRequest,
+    *,
+    code: str,
+    error: str,
+    workflow: Mapping[str, Any] | None,
+    policy: _ToolPolicy | None = None,
+) -> ToolMessage:
+    tool_name = str(request.tool_call.get("name", "unknown_tool"))
+    payload = {
+        "status": "error",
+        "code": code,
+        "error": error,
+        "tool": tool_name,
+        "stage": workflow.get("stage") if workflow else None,
+        "task_type": workflow.get("task_type") if workflow else None,
+        "allowed_stages": sorted(policy.stages) if policy else [],
+        "next_action": workflow.get("next_action") if workflow else "start_workflow",
+    }
+    return ToolMessage(
+        content=json.dumps(payload, ensure_ascii=False),
+        tool_call_id=str(request.tool_call.get("id", "missing_id")),
+        name=tool_name,
+        status="error",
+    )
+
+
+def _authorize(request: ToolCallRequest) -> ToolMessage | None:
+    tool_name = str(request.tool_call.get("name", ""))
+    policy = _TOOL_POLICIES.get(tool_name)
+    if policy is None:
+        return None
+
+    workflow = _state_from_request(request).get("nir_workflow")
+    if not isinstance(workflow, Mapping):
+        return _denied_message(
+            request,
+            code="nir_workflow_required",
+            error="Start a NIR workflow with nir_workflow(action='start', ...) before calling NIR domain tools.",
+            workflow=None,
+            policy=policy,
+        )
+
+    stage = str(workflow.get("stage", ""))
+    task_type = str(workflow.get("task_type", ""))
+    if stage not in policy.stages:
+        return _denied_message(
+            request,
+            code="nir_workflow_stage_denied",
+            error=f"Tool {tool_name!r} is not allowed during NIR workflow stage {stage!r}.",
+            workflow=workflow,
+            policy=policy,
+        )
+    if task_type not in policy.task_types:
+        return _denied_message(
+            request,
+            code="nir_workflow_task_denied",
+            error=f"Tool {tool_name!r} is not compatible with NIR task type {task_type!r}.",
+            workflow=workflow,
+            policy=policy,
+        )
+    return None
+
+
+def _tool_message(result: ToolMessage | Command) -> ToolMessage | None:
+    if isinstance(result, ToolMessage):
+        return result
+    if not isinstance(result.update, Mapping):
+        return None
+    messages = result.update.get("messages")
+    if not isinstance(messages, list):
+        return None
+    return next((message for message in reversed(messages) if isinstance(message, ToolMessage)), None)
+
+
+def _success_payload(result: ToolMessage | Command) -> dict[str, Any] | None:
+    message = _tool_message(result)
+    if message is None or message.status == "error" or not isinstance(message.content, str):
+        return None
+    try:
+        payload = json.loads(message.content)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("status") == "error":
+        return None
+    return payload
+
+
+def _model_attempt_update(
+    tool_name: str,
+    workflow: NIRWorkflowState,
+    payload: Mapping[str, Any],
+) -> NIRWorkflowState | None:
+    result = payload.get("best") if tool_name == "nir_compare" else payload
+    if not isinstance(result, Mapping) or not isinstance(result.get("passed"), bool):
+        return None
+
+    model_path = payload.get("model_path") or payload.get("model")
+    metrics_path = payload.get("metrics_path") or payload.get("metrics")
+    if tool_name == "nir_compare":
+        metrics_path = payload.get("all_metrics")
+    return transition_workflow(
+        workflow,
+        action="record_attempt",
+        attempt_passed=result["passed"],
+        grade=str(result.get("grade")) if result.get("grade") is not None else None,
+        model_path=str(model_path) if model_path else None,
+        metrics_path=str(metrics_path) if metrics_path else None,
+        notes=f"Automatically recorded successful {tool_name} result.",
+    )
+
+
+def _next_workflow(
+    tool_name: str,
+    workflow: NIRWorkflowState,
+    payload: Mapping[str, Any],
+) -> NIRWorkflowState | None:
+    if tool_name in _MODELING_TOOLS:
+        return _model_attempt_update(tool_name, workflow, payload)
+    if tool_name == "nir_search_knowledge":
+        return transition_workflow(
+            workflow,
+            action="knowledge_retrieved",
+            evidence_ids=_knowledge_evidence_ids(payload),
+            notes="Knowledge retrieval completed successfully.",
+        )
+    if tool_name == "nir_register_model" and payload.get("status") == "registered":
+        return transition_workflow(
+            workflow,
+            action="registered",
+            notes=f"Registered model {payload.get('model_id', '')}".strip(),
+        )
+    return None
+
+
+def _attach_workflow_update(result: ToolMessage | Command, workflow: NIRWorkflowState) -> ToolMessage | Command:
+    if isinstance(result, ToolMessage):
+        return Command(update={"nir_workflow": workflow, "messages": [result]})
+    if isinstance(result.update, Mapping):
+        return replace(result, update={**result.update, "nir_workflow": workflow})
+    logger.warning("Could not persist automatic NIR workflow update: Command.update is not a mapping")
+    return result
+
+
+def _runtime_context_value(request: ToolCallRequest, key: str) -> str | None:
+    runtime = request.runtime
+    context = runtime.context if runtime is not None else None
+    if not isinstance(context, Mapping):
+        return None
+    value = context.get(key)
+    return str(value) if value else None
+
+
+def _record_observation(request: ToolCallRequest, result: ToolMessage | Command) -> ToolMessage | Command:
+    tool_name = str(request.tool_call.get("name", ""))
+    if tool_name not in _OBSERVED_NIR_TOOLS:
+        return result
+
+    current = _state_from_request(request).get("nir_workflow")
+    if not isinstance(current, dict):
+        return result
+
+    workflow = current
+    if isinstance(result, Command) and isinstance(result.update, Mapping):
+        candidate = result.update.get("nir_workflow")
+        if isinstance(candidate, dict):
+            workflow = candidate
+    message = _tool_message(result)
+    payload: dict[str, Any] = {}
+    if message is not None and isinstance(message.content, str):
+        try:
+            decoded = json.loads(message.content)
+            if isinstance(decoded, dict):
+                payload = decoded
+        except (TypeError, ValueError):
+            pass
+    status = "error" if message is not None and (message.status == "error" or payload.get("status") == "error") else "success"
+    observed = record_tool_observation(
+        workflow,
+        name=tool_name,
+        status=status,
+        stage_before=str(current.get("stage")) if current.get("stage") else None,
+        stage_after=str(workflow.get("stage")) if workflow.get("stage") else None,
+        code=str(payload["code"]) if payload.get("code") else None,
+        call_id=str(request.tool_call.get("id")) if request.tool_call.get("id") else None,
+        run_id=_runtime_context_value(request, "run_id"),
+        trace_id=_runtime_context_value(request, DEERFLOW_TRACE_METADATA_KEY),
+    )
+    return _attach_workflow_update(result, observed)
+
+
+def _advance(request: ToolCallRequest, result: ToolMessage | Command) -> ToolMessage | Command:
+    payload = _success_payload(result)
+    if payload is None:
+        return result
+    workflow = _state_from_request(request).get("nir_workflow")
+    if not isinstance(workflow, dict):
+        return result
+    try:
+        updated = _next_workflow(str(request.tool_call.get("name", "")), workflow, payload)
+    except NIRWorkflowError:
+        logger.exception("Automatic NIR workflow transition failed")
+        return result
+    return _attach_workflow_update(result, updated) if updated is not None else result
+
+
+class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
+    """Enforce NIR workflow policy and persist deterministic tool outcomes."""
+
+    @override
+    def wrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], ToolMessage | Command],
+    ) -> ToolMessage | Command:
+        denied = _authorize(request)
+        if denied is not None:
+            return _record_observation(request, denied)
+        return _record_observation(request, _advance(request, handler(request)))
+
+    @override
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        denied = _authorize(request)
+        if denied is not None:
+            return _record_observation(request, denied)
+        return _record_observation(request, _advance(request, await handler(request)))

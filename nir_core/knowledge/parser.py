@@ -1,17 +1,19 @@
 """Document parser: PDF / Word / HTML / CSV / TXT / Markdown -> Markdown text.
 
 Adapted from yuxi-knowledge ``unified.py`` with MinIO / async dependencies
-stripped. Heavy-lifting dependencies (``pypdf``, ``python-docx``,
-``markdownify``, ``pandas``) are imported lazily so the module can be
+stripped. Heavy-lifting dependencies (``pypdf``, ``python-docx``, and
+``markdownify``) are imported lazily so the module can be
 imported even when those packages are not installed — callers only pay the
 import cost for the format they actually parse.
 """
 
 from __future__ import annotations
 
+import csv
 import logging
 import re
 import unicodedata
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -138,10 +140,25 @@ def _parse_html(path: Path) -> str:
 
 def _parse_csv(path: Path) -> str:
     """CSV -> Markdown table (first 50 rows to avoid huge chunks)."""
-    import pandas as pd
 
-    df = pd.read_csv(path)
-    # Cap rows to keep chunks reasonable; full data rarely needed for RAG.
-    if len(df) > 50:
-        df = df.head(50)
-    return df.to_markdown(index=False)
+    def markdown_cell(value: str) -> str:
+        return value.replace("|", r"\|").replace("\r\n", "<br>").replace("\n", "<br>").replace("\r", "<br>")
+
+    with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+        reader = csv.reader(handle)
+        header = next(reader, None)
+        if not header:
+            return ""
+        rows = list(islice(reader, 50))
+
+    width = max(len(header), *(len(row) for row in rows)) if rows else len(header)
+
+    def normalized(row: list[str]) -> list[str]:
+        return [markdown_cell(value) for value in [*row, *([""] * (width - len(row)))][:width]]
+
+    lines = [
+        f"| {' | '.join(normalized(header))} |",
+        f"| {' | '.join(['---'] * width)} |",
+    ]
+    lines.extend(f"| {' | '.join(normalized(row))} |" for row in rows)
+    return "\n".join(lines)

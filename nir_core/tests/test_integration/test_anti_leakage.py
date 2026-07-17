@@ -11,7 +11,6 @@ Verifies that:
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from nir_core.models import PreprocessingStep
 from nir_core.preprocess.pipeline import PreprocessingPipeline
@@ -266,8 +265,13 @@ class TestRegressionCoefficients:
         assert np.all(np.isfinite(coef))
 
     def test_coef_predicts_correctly(self):
-        """y_pred ≈ X @ coef (for centered data)."""
-        from nir_core.model.pls import get_regression_coefficients, predict_pls, train_pls
+        """Raw-space coefficients and intercept reconstruct predictions."""
+        from nir_core.model.pls import (
+            get_regression_coefficients,
+            get_regression_intercept,
+            predict_pls,
+            train_pls,
+        )
 
         rng = np.random.RandomState(42)
         X = rng.rand(60, 30)
@@ -275,10 +279,11 @@ class TestRegressionCoefficients:
 
         model, _, _ = train_pls(X, y, n_components=5, cv_strategy="fixed")
         coef = get_regression_coefficients(model)
+        intercept = get_regression_intercept(model)
 
-        # Manual prediction using coefficients.
-        y_manual = X @ coef
+        # Manual prediction in the original, uncentered feature space.
+        y_manual = X @ coef + intercept
         y_model = predict_pls(model, X)
 
-        # Should be close (not exact due to PLS internal centering).
+        # The exported equation must exactly account for PLS centering.
         np.testing.assert_allclose(y_manual, y_model, atol=1e-6)

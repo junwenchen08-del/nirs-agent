@@ -69,6 +69,20 @@ The frontend is a stateful chat application. Users create **threads** (conversat
 4. TanStack Query manages server state; localStorage stores user settings
 5. Components subscribe to thread state and render updates
 
+`core/messages/utils.ts::getMessageGroups` is intentionally tolerant of
+out-of-order LangGraph tool results. Orphan `tool` messages are attached to the
+most recent visible group, and a leading orphan opens an
+`assistant:processing` group so replayed or early tool events remain visible
+without surfacing console errors to users.
+
+The NIR quality dashboard at `/workspace/evaluations` is intentionally outside
+the generic settings dialog. Users map owned completed thread IDs to versioned
+NIR scenarios, then Gateway performs the authoritative trace capture and
+deterministic scoring. The `core/nir-evaluations/` domain owns API contracts and
+the browser keeps only mappings plus the latest 12 aggregate summaries in
+user-scoped localStorage keys; complete evidence remains in the current response and can be
+exported as JSON.
+
 `/goal` is a built-in composer command, not a skill activation. `src/components/workspace/input-box.tsx` intercepts `/goal`, `/goal clear`, and `/goal <condition>` before normal chat submission, calling Gateway `GET/PUT/DELETE /api/threads/{thread_id}/goal`. Setting `/goal <condition>` also submits the condition text as the next user task so the agent starts running immediately; status and clear do not start a run. Goal requests are tied to the current `threadId` with an `AbortController`, so switching threads or unmounting the composer aborts in-flight goal requests and stale responses cannot update the new thread's goal state. The chat pages render `GoalStatus` above the composer from `AgentThreadState.goal`, with local optimistic state until the next stream `values` update arrives.
 
 ### Key Patterns

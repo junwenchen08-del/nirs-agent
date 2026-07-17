@@ -52,6 +52,28 @@ def test_parse_csv_truncates_large_file(tmp_path: Path) -> None:
     assert "0" in result      # row 1 value
 
 
+def test_parse_csv_handles_bom_quotes_pipes_and_ragged_rows(tmp_path: Path) -> None:
+    """CSV conversion remains valid Markdown without pandas or tabulate."""
+    p = tmp_path / "complex.csv"
+    p.write_text(
+        '\ufeffname,description,value\n"sample, one","SNV | MSC",1\nshort,row\n',
+        encoding="utf-8",
+    )
+
+    result = parse_document(p)
+
+    assert result.splitlines()[0] == "| name | description | value |"
+    assert "| sample, one | SNV \\| MSC | 1 |" in result
+    assert "| short | row |  |" in result
+
+
+def test_parse_empty_csv_returns_empty_text(tmp_path: Path) -> None:
+    p = tmp_path / "empty.csv"
+    p.write_text("", encoding="utf-8")
+
+    assert parse_document(p) == ""
+
+
 def test_parse_html(tmp_path: Path) -> None:
     """HTML files are converted to Markdown."""
     pytest.importorskip("markdownify")

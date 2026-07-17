@@ -1,4 +1,4 @@
-"""Middleware for explicit slash skill activation."""
+"""Middleware for explicit slash and deterministic routed skill activation."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import html
 import logging
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -41,6 +42,7 @@ class _Activation:
     skill_content: str
     content_hash: str
     remaining_text: str
+    mode: str = "explicit"
     required_secrets: tuple[SecretRequirement, ...] = ()
 
 
@@ -48,6 +50,26 @@ class _Activation:
 class _ActivationResolution:
     activation: _Activation | None = None
     failure_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SkillAutoRoute:
+    """Deterministic text patterns that activate one installed skill."""
+
+    skill_name: str
+    patterns: tuple[str, ...]
+    state_key: str | None = None
+    state_status_field: str = "stage"
+    terminal_statuses: tuple[str, ...] = ()
+
+    def matches(self, text: str, state: dict | None = None) -> bool:
+        if self.state_key and state:
+            route_state = state.get(self.state_key)
+            if route_state:
+                status = route_state.get(self.state_status_field) if isinstance(route_state, dict) else None
+                if status not in self.terminal_statuses:
+                    return True
+        return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in self.patterns)
 
 
 def is_slash_skill_activation_reminder(message: object) -> bool:
@@ -66,17 +88,19 @@ def _is_user_activation_target(message: object) -> bool:
 
 
 class SkillActivationMiddleware(AgentMiddleware):
-    """Inject full SKILL.md content when the user explicitly types /skill-name."""
+    """Inject full SKILL.md content for explicit or deterministic activation."""
 
     def __init__(
         self,
         *,
         available_skills: set[str] | None = None,
         app_config: AppConfig | None = None,
+        auto_routes: tuple[SkillAutoRoute, ...] = (),
     ) -> None:
         super().__init__()
         self._available_skills = set(available_skills) if available_skills is not None else None
         self._app_config = app_config
+        self._auto_routes = auto_routes
 
     def _storage(self) -> SkillStorage:
         if self._app_config is not None:
@@ -97,46 +121,72 @@ class SkillActivationMiddleware(AgentMiddleware):
             raise FileNotFoundError(resolved_file)
         return resolved_file.read_text(encoding="utf-8")
 
-    def _resolve_activation(self, text: str) -> _ActivationResolution | None:
+    def _resolve_activation(self, text: str, state: dict | None = None) -> _ActivationResolution | None:
         reference = parse_slash_skill_reference(text)
+        mode = "explicit"
         if reference is None:
-            return None
+            route = next(
+                (candidate for candidate in self._auto_routes if candidate.matches(text, state)),
+                None,
+            )
+            if route is None:
+                return None
+            skill_name = route.skill_name
+            remaining_text = text
+            mode = "automatic"
+        else:
+            skill_name = reference.name
+            remaining_text = reference.remaining_text
 
         storage = self._storage()
         skills = storage.load_skills(enabled_only=False)
-        skill = next((candidate for candidate in skills if candidate.name == reference.name), None)
+        skill = next((candidate for candidate in skills if candidate.name == skill_name), None)
         if skill is None:
-            return _ActivationResolution(failure_message=f"Skill `/{reference.name}` is not installed.")
+            if mode == "automatic":
+                return None
+            return _ActivationResolution(failure_message=f"Skill `/{skill_name}` is not installed.")
         if not skill.enabled:
-            return _ActivationResolution(failure_message=f"Skill `/{reference.name}` is installed but disabled. Enable it before using slash activation.")
-        if self._available_skills is not None and reference.name not in self._available_skills:
-            return _ActivationResolution(failure_message=f"Skill `/{reference.name}` is not available for this agent.")
+            if mode == "automatic":
+                return None
+            return _ActivationResolution(failure_message=f"Skill `/{skill_name}` is installed but disabled. Enable it before using slash activation.")
+        if self._available_skills is not None and skill_name not in self._available_skills:
+            if mode == "automatic":
+                return None
+            return _ActivationResolution(failure_message=f"Skill `/{skill_name}` is not available for this agent.")
 
-        resolved = resolve_slash_skill(
-            text,
-            skills,
-            available_skills=self._available_skills,
-            container_base_path=storage.get_container_root(),
-        )
-        if resolved is None:
-            return _ActivationResolution(failure_message=f"Skill `/{reference.name}` could not be resolved.")
+        if mode == "explicit":
+            resolved = resolve_slash_skill(
+                text,
+                skills,
+                available_skills=self._available_skills,
+                container_base_path=storage.get_container_root(),
+            )
+            if resolved is None:
+                return _ActivationResolution(failure_message=f"Skill `/{skill_name}` could not be resolved.")
+            container_file_path = resolved.container_file_path
+            remaining_text = resolved.remaining_text
+        else:
+            container_file_path = skill.get_container_file_path(storage.get_container_root())
 
         try:
-            skill_content = self._read_skill_content(resolved.skill.skill_file, storage.get_skills_root_path())
+            skill_content = self._read_skill_content(skill.skill_file, storage.get_skills_root_path())
         except (OSError, ValueError):
-            logger.exception("Failed to read slash-activated skill %s", resolved.skill.name)
-            return _ActivationResolution(failure_message=f"Skill `/{reference.name}` could not be loaded safely. Please check the skill installation.")
+            logger.exception("Failed to read activated skill %s", skill.name)
+            if mode == "automatic":
+                return None
+            return _ActivationResolution(failure_message=f"Skill `/{skill_name}` could not be loaded safely. Please check the skill installation.")
 
         content_hash = hashlib.sha256(skill_content.encode("utf-8")).hexdigest()
         return _ActivationResolution(
             activation=_Activation(
-                skill_name=resolved.skill.name,
-                category=str(resolved.skill.category),
-                container_file_path=resolved.container_file_path,
+                skill_name=skill.name,
+                category=str(skill.category),
+                container_file_path=container_file_path,
                 skill_content=skill_content,
                 content_hash=content_hash,
-                remaining_text=resolved.remaining_text,
-                required_secrets=tuple(resolved.skill.required_secrets or ()),
+                remaining_text=remaining_text,
+                mode=mode,
+                required_secrets=tuple(skill.required_secrets or ()),
             )
         )
 
@@ -149,8 +199,11 @@ class SkillActivationMiddleware(AgentMiddleware):
         escaped_category = html.escape(activation.category, quote=True)
         escaped_path = html.escape(activation.container_file_path, quote=True)
         escaped_content_hash = html.escape(activation.content_hash, quote=True)
-        return f"""<slash_skill_activation>
-The user explicitly activated the `{activation.skill_name}` skill for this turn.
+        activation_reason = (
+            f"The user explicitly activated the `{activation.skill_name}` skill for this turn." if activation.mode == "explicit" else f"The runtime deterministically routed this request to the `{activation.skill_name}` domain skill."
+        )
+        return f"""<slash_skill_activation mode="{activation.mode}">
+{activation_reason}
 Treat the task text as:
 <user_request>
 {escaped_user_request}
@@ -181,7 +234,11 @@ Follow this skill before choosing a general workflow. Load supporting resources 
         previous = messages[target_index - 1]
         return is_slash_skill_activation_reminder(previous)
 
-    def _find_activation_target(self, messages: list) -> tuple[int, HumanMessage, _ActivationResolution] | None:
+    def _find_activation_target(
+        self,
+        messages: list,
+        state: dict | None = None,
+    ) -> tuple[int, HumanMessage, _ActivationResolution] | None:
         if not messages:
             return None
 
@@ -196,7 +253,7 @@ Follow this skill before choosing a general workflow. Load supporting resources 
             return None
 
         content = get_original_user_content_text(target.content, target.additional_kwargs)
-        resolution = self._resolve_activation(content)
+        resolution = self._resolve_activation(content, state)
         if resolution is None:
             return None
         return target_index, target, resolution
@@ -209,23 +266,26 @@ Follow this skill before choosing a general workflow. Load supporting resources 
         if journal is None:
             return
         try:
+            changes = {
+                "skill_name": activation.skill_name,
+                "category": activation.category,
+                "path": activation.container_file_path,
+                "content_hash": activation.content_hash,
+            }
+            if activation.mode != "explicit":
+                changes["mode"] = activation.mode
             journal.record_middleware(
                 "skill_activation",
                 name="SkillActivationMiddleware",
                 hook=hook,
                 action="activate",
-                changes={
-                    "skill_name": activation.skill_name,
-                    "category": activation.category,
-                    "path": activation.container_file_path,
-                    "content_hash": activation.content_hash,
-                },
+                changes=changes,
             )
         except Exception:
             logger.debug("Failed to record slash skill activation audit event", exc_info=True)
 
     def _prepare_model_request(self, request: ModelRequest, *, hook: str) -> ModelRequest | AIMessage | None:
-        target_and_resolution = self._find_activation_target(list(request.messages))
+        target_and_resolution = self._find_activation_target(list(request.messages), request.state)
         if target_and_resolution is None:
             return None
 
@@ -238,8 +298,9 @@ Follow this skill before choosing a general workflow. Load supporting resources 
             return None
 
         logger.info(
-            "SkillActivationMiddleware: activating slash skill %s category=%s path=%s hash=%s",
+            "SkillActivationMiddleware: activating skill %s mode=%s category=%s path=%s hash=%s",
             activation.skill_name,
+            activation.mode,
             activation.category,
             activation.container_file_path,
             activation.content_hash,

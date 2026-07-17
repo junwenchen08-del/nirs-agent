@@ -13,6 +13,10 @@ test:
 test-blocking-io:
 	PYTHONPATH=. PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run pytest tests/blocking_io -q --tb=short
 
+eval-nir:
+	@if [ -z "$(TRACES)" ]; then echo 'usage: make eval-nir TRACES=path/to/traces.json'; exit 1; fi
+	PYTHONPATH=. PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run python scripts/run_nir_evals.py --scenarios evals/nir/scenarios.json --traces "$(TRACES)" --output-dir .deer-flow/nir-evals
+
 lint:
 	uvx ruff check .
 	uvx ruff format --check .

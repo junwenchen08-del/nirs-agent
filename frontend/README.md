@@ -147,6 +147,14 @@ src/
 - Environment validation can be skipped with `SKIP_ENV_VALIDATION=1` (useful for Docker)
 - Backend API URLs are optional; nginx proxy is used by default in development
 
+## NIR Evaluation Dashboard
+
+`/workspace/evaluations` provides an owner-scoped batch regression dashboard
+for completed NIR agent threads. The Gateway supplies the versioned scenario
+catalog and performs authoritative deterministic scoring; the frontend shows
+quality, safety, latency, token usage, check-level evidence, and a browser-local
+12-run trend, with JSON evidence export for offline review.
+
 ## License
 
 MIT License. See [LICENSE](../LICENSE) for details.

@@ -9,6 +9,7 @@ written back to state.
 
 from __future__ import annotations
 
+import json
 import posixpath
 from collections.abc import Awaitable, Callable, Collection
 from html import escape
@@ -37,6 +38,7 @@ _AUTHORITY_CONTRACT = "\n".join(
     ]
 )
 _DELEGATION_STABLE_FIELDS = ("description", "subagent_type", "status", "result_brief", "result_sha256", "result_ref")
+_NIR_TRACE_FIELDS = frozenset({"run_ids", "trace_ids", "tool_observations"})
 
 
 def _normalize_skills_root(skills_container_path: str | None) -> str:
@@ -58,6 +60,16 @@ def _bound_text(text: str, cap: int) -> str:
     return f"{text[:head]}{omitted_marker}{text[-tail:]}"
 
 
+def _nir_workflow_prompt_projection(workflow: dict) -> dict:
+    projected = {key: value for key, value in workflow.items() if key not in _NIR_TRACE_FIELDS}
+    history = projected.get("history")
+    if isinstance(history, list):
+        projected["history"] = [event for event in history if not isinstance(event, dict) or event.get("action") != "tool_call"]
+    observations = workflow.get("tool_observations")
+    projected["tool_observation_count"] = len(observations) if isinstance(observations, list) else 0
+    return projected
+
+
 def _insert_after_leading_system_messages(messages: list, injected: list) -> list:
     index = 0
     while index < len(messages) and isinstance(messages[index], SystemMessage):
@@ -65,7 +77,12 @@ def _insert_after_leading_system_messages(messages: list, injected: list) -> lis
     return [*messages[:index], *injected, *messages[index:]]
 
 
-def _render_durable_context_data(summary_text: str | None, ledger: list, skills: list) -> str:
+def _render_durable_context_data(
+    summary_text: str | None,
+    ledger: list,
+    skills: list,
+    nir_workflow: dict | None = None,
+) -> str:
     data_parts: list[str] = []
     if summary_text:
         bounded_summary = _bound_text(str(summary_text), _SUMMARY_RENDER_CHAR_BUDGET)
@@ -78,6 +95,10 @@ def _render_durable_context_data(summary_text: str | None, ledger: list, skills:
     skill_block = render_skill_context(skills or [])
     if skill_block:
         data_parts.append(skill_block)
+
+    if nir_workflow:
+        workflow_json = json.dumps(_nir_workflow_prompt_projection(nir_workflow), ensure_ascii=False, sort_keys=True)
+        data_parts.append("## Active NIR workflow state\n" + escape(_bound_text(workflow_json, 6000), quote=False))
 
     if not data_parts:
         return ""
@@ -168,6 +189,7 @@ class DurableContextMiddleware(AgentMiddleware[AgentState]):
             state.get("summary_text"),
             state.get("delegations") or [],
             state.get("skill_context") or [],
+            state.get("nir_workflow"),
         )
         if not data_block:
             return request

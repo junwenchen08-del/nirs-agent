@@ -71,6 +71,7 @@ def test_cars_on_small_data(small_synthetic_data):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_spa_returns_nonempty_subset(synthetic_data):
     """SPA must return a non-empty subset."""
     X, y = synthetic_data.X, synthetic_data.y
@@ -82,6 +83,7 @@ def test_spa_returns_nonempty_subset(synthetic_data):
     assert all(0 <= i < X.shape[1] for i in indices)
 
 
+@pytest.mark.slow
 def test_spa_reproducible(synthetic_data):
     """SPA is deterministic (no RNG) -> identical results across calls."""
     X, y = synthetic_data.X, synthetic_data.y
@@ -90,6 +92,7 @@ def test_spa_reproducible(synthetic_data):
     assert i1 == i2
 
 
+@pytest.mark.slow
 def test_spa_default_n_max(synthetic_data):
     """n_max defaults to min(10, max(3, n_wavelengths // 3))."""
     X, y = synthetic_data.X, synthetic_data.y

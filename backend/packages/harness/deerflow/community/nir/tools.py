@@ -12,6 +12,7 @@ implementations. It has been split into focused sub-modules:
                         nir_register_model
 - ``reflect``         — nir_reflect
 - ``knowledge``       — nir_search_knowledge (+ HTTP fallback)
+- ``workflow``        — durable NIR workflow state and approval gates
 
 This file remains as a re-export facade so existing imports of the form
 ``from deerflow.community.nir.tools import nir_reflect_tool`` and the
@@ -42,11 +43,11 @@ from ._report import _build_report
 # paths in config.yaml keep working.
 from .io_tools import nir_inspect_tool, nir_load_data_tool, nir_predict_tool
 from .knowledge import (
+    _RETRY_INTERVAL,
     _get_knowledge_http_url,
     _knowledge_http_call_count,
     _knowledge_http_url,
     _knowledge_search_mode,
-    _RETRY_INTERVAL,
     _search_knowledge_via_http,
     nir_search_knowledge_tool,
 )
@@ -58,7 +59,7 @@ from .modeling import (
 )
 from .preprocess import nir_preprocess_tool
 from .reflect import nir_reflect_tool
-
+from .workflow import nir_workflow_tool
 
 __all__ = [
     # Tools
@@ -72,6 +73,7 @@ __all__ = [
     "nir_compare_tool",
     "nir_register_model_tool",
     "nir_search_knowledge_tool",
+    "nir_workflow_tool",
     # Helpers
     "_resolve",
     "_resolve_writable_dir",
@@ -83,4 +85,11 @@ __all__ = [
     "_KNOWN_DOMAINS",
     "_build_report",
     "logger",
+    # Legacy knowledge helpers retained for downstream monkeypatching.
+    "_RETRY_INTERVAL",
+    "_get_knowledge_http_url",
+    "_knowledge_http_call_count",
+    "_knowledge_http_url",
+    "_knowledge_search_mode",
+    "_search_knowledge_via_http",
 ]

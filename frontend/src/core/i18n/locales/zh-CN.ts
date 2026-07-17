@@ -181,6 +181,7 @@ export const zhCN: Translations = {
     demoChats: "演示对话",
     agents: "智能体",
     agentsDisabledTooltip: "功能未启用",
+    evaluations: "NIR 评测",
   },
 
   // Agents
@@ -233,6 +234,7 @@ export const zhCN: Translations = {
   breadcrumb: {
     workspace: "工作区",
     chats: "对话",
+    evaluations: "NIR 评测",
   },
 
   // Workspace
@@ -247,6 +249,47 @@ export const zhCN: Translations = {
     logout: "退出登录",
     gatewayUnavailable: "网关暂时不可用。",
     gatewayUnavailableRetrying: "正在后台重试…",
+  },
+
+  nirEvaluations: {
+    eyebrow: "近红外智能体质量实验室",
+    title: "评测控制台",
+    description:
+      "将已完成的近红外对话映射到回归场景，对完整工具轨迹进行评分，并统一观察安全性、质量、延迟和成本。",
+    scenarios: "个场景",
+    deterministic: "确定性评分",
+    mappingTitle: "回归批次",
+    mappingDescription:
+      "每个场景在一次运行中只能出现一次，Gateway 会校验线程所有权和 checkpoint 证据。",
+    threadId: "线程",
+    threadPlaceholder: "粘贴已完成的线程 ID",
+    scenario: "预期场景",
+    selectScenario: "选择场景",
+    remove: "移除用例",
+    addCase: "添加用例",
+    run: "执行评测",
+    running: "评测中…",
+    loadError: "无法加载 NIR 评测场景目录",
+    runError: "NIR 评测执行失败",
+    duplicateScenario: "同一批次中一个场景只能出现一次。",
+    recentTrend: "近期质量趋势",
+    trendDescription: "最近 12 次浏览器本地记录，琥珀色柱表示存在策略违规。",
+    noHistory: "执行首个回归批次以建立质量基线。",
+    older: "较早",
+    latest: "最新",
+    passRate: "通过率",
+    averageScore: "平均分",
+    policyViolations: "策略违规",
+    tokens: "Token 总量",
+    duration: "耗时",
+    results: "场景证据",
+    passed: "通过",
+    failed: "失败",
+    trace: "追踪",
+    noTraceId: "未记录追踪 ID",
+    exportEvidence: "导出证据",
+    clearResult: "清除",
+    noResults: "请至少配置一个已完成的 NIR 线程并执行评测，以查看轨迹证据。",
   },
 
   // Conversation
@@ -556,9 +599,14 @@ export const zhCN: Translations = {
       yearPlaceholder: "如 2023",
       loading: "加载中...",
       error: "出错了",
-      serverUnreachable: "知识库服务器不可达。请在主机上启动：python nir_core/knowledge/_search_server.py",
+      serverUnreachable:
+        "知识库服务器不可达。请在主机上启动：python nir_core/knowledge/_search_server.py",
       noYear: "—",
       entitiesLabel: "实体",
+      batchSelectFiles: "选择文件（可多选）",
+      batchFilesSelected: "已选择 {count} 个文件",
+      batchUploading: "上传中...",
+      batchPartialFailed: "部分文件上传失败：{message}",
     },
     notification: {
       title: "通知",

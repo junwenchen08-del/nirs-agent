@@ -12,6 +12,7 @@ I/O, preprocessing-only, and reflection tools.
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Annotated
 
 import numpy as np
@@ -23,6 +24,192 @@ from ._common import _err, _json_default, _ok, _parse_pipeline_step, _resolve, _
 from ._knowledge_hint import _build_knowledge_hint
 from ._report import _build_report
 
+_WAVELENGTH_SELECTION_METHODS = ("none", "cars", "spa", "manual")
+
+
+def _parse_wavelength_selection_params(params: str | dict | None) -> dict:
+    """Parse optional wavelength-selection params from JSON or a dict."""
+    if params is None:
+        return {}
+    if isinstance(params, dict):
+        return dict(params)
+    if isinstance(params, str):
+        stripped = params.strip()
+        if not stripped:
+            return {}
+        import json
+
+        parsed = json.loads(stripped)
+        if not isinstance(parsed, dict):
+            raise ValueError("wavelength_selection_params must be a JSON object")
+        return parsed
+    raise ValueError("wavelength_selection_params must be None, a dict, or a JSON object string")
+
+
+def _normalise_wavelength_selection_method(method: str | None) -> str:
+    selected = (method or "none").strip().lower()
+    if selected in {"", "all", "full", "full_wavelength", "full-wavelength"}:
+        return "none"
+    if selected not in _WAVELENGTH_SELECTION_METHODS:
+        raise ValueError(f"Unknown wavelength_selection {method!r}; use one of: {', '.join(_WAVELENGTH_SELECTION_METHODS)}")
+    return selected
+
+
+def _coerce_index_list(values, *, n_wavelengths: int) -> list[int]:
+    indices = sorted(set(int(v) for v in values))
+    if not indices:
+        raise ValueError("manual wavelength selection produced no indices")
+    bad = [i for i in indices if i < 0 or i >= n_wavelengths]
+    if bad:
+        raise ValueError(f"manual wavelength indices out of range: {bad[:10]}")
+    return indices
+
+
+def _parse_wavelength_range_string(value: str) -> list[tuple[float, float]]:
+    ranges: list[tuple[float, float]] = []
+    for chunk in value.split(","):
+        token = chunk.strip()
+        if not token:
+            continue
+        if ":" in token:
+            left, right = token.split(":", 1)
+        elif "-" in token:
+            left, right = token.split("-", 1)
+        else:
+            raise ValueError(f"Invalid wavelength range {token!r}; expected 'start-end' or 'start:end'")
+        lo = float(left.strip())
+        hi = float(right.strip())
+        ranges.append((min(lo, hi), max(lo, hi)))
+    return ranges
+
+
+def _normalise_wavelength_ranges(raw_ranges) -> list[tuple[float, float]]:
+    if raw_ranges is None:
+        return []
+    if isinstance(raw_ranges, str):
+        return _parse_wavelength_range_string(raw_ranges)
+    ranges: list[tuple[float, float]] = []
+    for item in raw_ranges:
+        if isinstance(item, str):
+            ranges.extend(_parse_wavelength_range_string(item))
+        elif isinstance(item, dict):
+            lo = item.get("min", item.get("start", item.get("from")))
+            hi = item.get("max", item.get("end", item.get("to")))
+            if lo is None or hi is None:
+                raise ValueError(f"Invalid wavelength range object {item!r}")
+            ranges.append((min(float(lo), float(hi)), max(float(lo), float(hi))))
+        else:
+            if len(item) != 2:
+                raise ValueError(f"Invalid wavelength range {item!r}")
+            lo, hi = float(item[0]), float(item[1])
+            ranges.append((min(lo, hi), max(lo, hi)))
+    return ranges
+
+
+def _manual_wavelength_indices(params: dict, *, n_wavelengths: int, wv: np.ndarray | None) -> list[int]:
+    if "indices" in params:
+        return _coerce_index_list(params["indices"], n_wavelengths=n_wavelengths)
+
+    raw_ranges = params.get("ranges", params.get("wavelength_ranges", params.get("range")))
+    ranges = _normalise_wavelength_ranges(raw_ranges)
+    if not ranges:
+        raise ValueError("manual wavelength selection requires 'indices' or wavelength 'ranges'")
+    if wv is None:
+        raise ValueError("manual wavelength ranges require wavelength vector 'wv' in the input data")
+
+    wv_arr = np.asarray(wv, dtype=float).ravel()
+    selected: list[int] = []
+    for lo, hi in ranges:
+        selected.extend(int(i) for i in np.where((wv_arr >= lo) & (wv_arr <= hi))[0])
+    return _coerce_index_list(selected, n_wavelengths=n_wavelengths)
+
+
+def _selection_metadata(method: str, params: dict, indices: list[int], *, n_original: int, wv: np.ndarray | None) -> dict:
+    selected_wv = None
+    selected_indices = None if method == "none" else [int(i) for i in indices]
+    if method != "none" and wv is not None:
+        wv_arr = np.asarray(wv, dtype=float).ravel()
+        selected_wv = [float(wv_arr[i]) for i in indices]
+    return {
+        "method": method,
+        "params": params,
+        "n_original": int(n_original),
+        "n_selected": int(len(indices)),
+        "selected_indices": selected_indices,
+        "selected_wavelengths": selected_wv,
+    }
+
+
+def _apply_wavelength_selection(
+    X_tr,
+    X_val,
+    X_te,
+    y_tr,
+    *,
+    wv: np.ndarray | None,
+    wavelength_selection: str | None,
+    wavelength_selection_params: str | dict | None,
+    cv_folds: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, dict]:
+    """Fit wavelength selection on train only, then slice all splits."""
+    method = _normalise_wavelength_selection_method(wavelength_selection)
+    params = _parse_wavelength_selection_params(wavelength_selection_params)
+
+    X_tr = np.asarray(X_tr, dtype=float)
+    X_val = np.asarray(X_val, dtype=float)
+    X_te = np.asarray(X_te, dtype=float)
+    n_original = int(X_tr.shape[1])
+
+    if method == "none":
+        all_indices = list(range(n_original))
+        return X_tr, X_val, X_te, wv, _selection_metadata("none", {}, all_indices, n_original=n_original, wv=wv)
+
+    if method == "cars":
+        from nir_core.model.selection import cars_wavelength_selection
+
+        _, selected_indices = cars_wavelength_selection(
+            X_tr,
+            y_tr,
+            n_mc_samples=int(params.get("n_mc_samples", 50)),
+            n_folds=int(params.get("n_folds", cv_folds)),
+            random_state=int(params.get("random_state", 42)),
+        )
+    elif method == "spa":
+        from nir_core.model.selection import spa_wavelength_selection
+
+        n_max = params.get("n_max")
+        _, selected_indices = spa_wavelength_selection(
+            X_tr,
+            y_tr,
+            n_min=int(params.get("n_min", 1)),
+            n_max=None if n_max is None else int(n_max),
+        )
+    else:
+        selected_indices = _manual_wavelength_indices(params, n_wavelengths=n_original, wv=wv)
+
+    selected_indices = _coerce_index_list(selected_indices, n_wavelengths=n_original)
+    selected_wv_arr = np.asarray(wv, dtype=float).ravel()[selected_indices] if wv is not None else None
+    metadata = _selection_metadata(method, params, selected_indices, n_original=n_original, wv=wv)
+    return X_tr[:, selected_indices], X_val[:, selected_indices], X_te[:, selected_indices], selected_wv_arr, metadata
+
+
+def _build_model_artifact(model, *, method: str, preprocessing_pipeline, preprocessing_desc: str, wavelength_selection: dict):
+    """Return a serialisable model artifact, preserving old plain-model files when possible."""
+    if preprocessing_pipeline is None and wavelength_selection.get("method") == "none":
+        return model
+    return {
+        "format": "nir_model_artifact",
+        "version": 2,
+        "model": model,
+        "method": method,
+        "preprocessing": {
+            "description": preprocessing_desc,
+            "pipeline": preprocessing_pipeline,
+            "apply_on_predict": preprocessing_pipeline is not None,
+        },
+        "wavelength_selection": wavelength_selection,
+    }
+
 
 # ---------------------------------------------------------------------------
 # Shared helper: train one model with a given method and return predictions.
@@ -30,15 +217,23 @@ from ._report import _build_report
 
 
 def _train_one_model(method: str, X_tr, y_tr, *, max_components: int, cv_folds: int, cv_strategy: str = "auto"):
-    """Train PLS/PCR/SVR on the given training set.
+    """Train a model with the given method on the provided training set.
 
-    Returns ``(model, best_n, cv_results, (y_pred_tr, y_pred_val, y_pred_te))``
-    callable form — callers do the actual prediction with the returned model
-    to keep this function pure-ish.
+    Supports all available modelling methods:
+    - Linear: pls, pcr, ridge, lasso, elasticnet
+    - Tree-based: rf (Random Forest), et (Extra Trees), gbm (Gradient Boosting)
+    - Instance-based: svr, knn
+    - Deep learning: mlp (neural network), cnn (1D-CNN, requires PyTorch)
 
-    Older nir_core versions do not accept ``cv_strategy``; we fall back
-    transparently on TypeError.
+    Returns ``(model, best_n, cv_results, predict_fn)`` — callers do the
+    actual prediction with the returned model to keep this function pure-ish.
+
+    For PLS/PCR (which pre-date cv_strategy), we fall back transparently
+    on TypeError for backward compatibility.
     """
+    # ------------------------------------------------------------------
+    # Classic chemometric methods (PLS / PCR) — have n_components search.
+    # ------------------------------------------------------------------
     if method == "pls":
         from nir_core.model.pls import predict_pls, train_pls
 
@@ -85,6 +280,10 @@ def _train_one_model(method: str, X_tr, y_tr, *, max_components: int, cv_folds: 
                 random_state=42,
             )
         return model, best_n, cv_results, predict_pcr
+
+    # ------------------------------------------------------------------
+    # SVR — grid-searched C/gamma.
+    # ------------------------------------------------------------------
     if method == "svr":
         from nir_core.model.svr import predict_svr, train_svr
 
@@ -104,12 +303,137 @@ def _train_one_model(method: str, X_tr, y_tr, *, max_components: int, cv_folds: 
                 random_state=42,
             )
         return model, None, cv_results, predict_svr
-    raise ValueError(f"Unknown method {method!r}; use pls/pcr/svr")
+
+    # ------------------------------------------------------------------
+    # Tree-based ensembles (RF / ET / GBM) — grid-searched, scale-invariant.
+    # ------------------------------------------------------------------
+    if method == "rf":
+        from nir_core.model.rf import predict_rf, train_rf
+
+        model, cv_results = train_rf(
+            X_tr,
+            y_tr,
+            cv_folds=cv_folds,
+            cv_strategy=cv_strategy,
+            random_state=42,
+        )
+        return model, None, cv_results, predict_rf
+    if method == "et":
+        from nir_core.model.rf import predict_et, train_et
+
+        model, cv_results = train_et(
+            X_tr,
+            y_tr,
+            cv_folds=cv_folds,
+            cv_strategy=cv_strategy,
+            random_state=42,
+        )
+        return model, None, cv_results, predict_et
+    if method == "gbm":
+        from nir_core.model.gbm import predict_gbm, train_gbm
+
+        model, cv_results = train_gbm(
+            X_tr,
+            y_tr,
+            cv_folds=cv_folds,
+            cv_strategy=cv_strategy,
+            random_state=42,
+        )
+        return model, None, cv_results, predict_gbm
+
+    # ------------------------------------------------------------------
+    # Regularized linear (Ridge / Lasso / ElasticNet).
+    # ------------------------------------------------------------------
+    if method == "ridge":
+        from nir_core.model.linear_reg import predict_ridge, train_ridge
+
+        model, cv_results = train_ridge(
+            X_tr,
+            y_tr,
+            cv_folds=cv_folds,
+            cv_strategy=cv_strategy,
+            random_state=42,
+        )
+        return model, None, cv_results, predict_ridge
+    if method == "lasso":
+        from nir_core.model.linear_reg import predict_lasso, train_lasso
+
+        model, cv_results = train_lasso(
+            X_tr,
+            y_tr,
+            cv_folds=cv_folds,
+            cv_strategy=cv_strategy,
+            random_state=42,
+        )
+        return model, None, cv_results, predict_lasso
+    if method == "elasticnet":
+        from nir_core.model.linear_reg import predict_elasticnet, train_elasticnet
+
+        model, cv_results = train_elasticnet(
+            X_tr,
+            y_tr,
+            cv_folds=cv_folds,
+            cv_strategy=cv_strategy,
+            random_state=42,
+        )
+        return model, None, cv_results, predict_elasticnet
+
+    # ------------------------------------------------------------------
+    # KNN — distance-based, standardised internally.
+    # ------------------------------------------------------------------
+    if method == "knn":
+        from nir_core.model.knn import predict_knn, train_knn
+
+        model, cv_results = train_knn(
+            X_tr,
+            y_tr,
+            cv_folds=cv_folds,
+            cv_strategy=cv_strategy,
+            random_state=42,
+        )
+        return model, None, cv_results, predict_knn
+
+    # ------------------------------------------------------------------
+    # Deep learning: MLP (sklearn) and CNN (PyTorch).
+    # ------------------------------------------------------------------
+    if method == "mlp":
+        from nir_core.model.mlp import predict_mlp, train_mlp
+
+        model, cv_results = train_mlp(
+            X_tr,
+            y_tr,
+            cv_folds=cv_folds,
+            cv_strategy=cv_strategy,
+            random_state=42,
+        )
+        return model, None, cv_results, predict_mlp
+    if method == "cnn":
+        from nir_core.model.cnn import predict_cnn, train_cnn
+
+        model, cv_results = train_cnn(
+            X_tr,
+            y_tr,
+            cv_folds=cv_folds,
+            cv_strategy=cv_strategy,
+            random_state=42,
+        )
+        return model, None, cv_results, predict_cnn
+
+    raise ValueError(f"Unknown method {method!r}; use one of: pls/pcr/svr/rf/et/gbm/ridge/lasso/elasticnet/knn/mlp/cnn")
 
 
 def _extract_rmsecv(cv_results, best_n) -> float | None:
-    """Pull the RMSECV corresponding to ``best_n`` out of cv_results."""
-    _rmse_cv = cv_results.get("mean_rmse_cv") if isinstance(cv_results, dict) else None
+    """Pull the RMSECV corresponding to ``best_n`` out of cv_results.
+
+    Handles three cv_results layouts:
+    - PLS/PCR: ``mean_rmse_cv`` is a list indexed by ``n_components``.
+    - CNN: ``mean_rmse_cv`` is a float.
+    - RF/GBM/Ridge/Lasso/KNN/MLP/SVR: ``best_rmse`` is a float (no
+      component search), so we fall back to it.
+    """
+    if not isinstance(cv_results, dict):
+        return None
+    _rmse_cv = cv_results.get("mean_rmse_cv")
     if isinstance(_rmse_cv, list) and _rmse_cv:
         _nc_list = cv_results.get("n_components", [])
         if best_n in _nc_list:
@@ -117,6 +441,10 @@ def _extract_rmsecv(cv_results, best_n) -> float | None:
         return float(min(_rmse_cv))
     if isinstance(_rmse_cv, (int, float)):
         return float(_rmse_cv)
+    # Fallback: methods with grid search store best_rmse.
+    _best_rmse = cv_results.get("best_rmse")
+    if isinstance(_best_rmse, (int, float)) and np.isfinite(_best_rmse):
+        return float(_best_rmse)
     return None
 
 
@@ -180,7 +508,7 @@ def _write_plots_and_report(
     if method == "pls":
         try:
             from nir_core.model.pls import compute_vip, get_regression_coefficients
-            from nir_core.plotting.model_diag import plot_vip, plot_regression_coefficients
+            from nir_core.plotting.model_diag import plot_regression_coefficients, plot_vip
 
             vip_scores = compute_vip(model, X_tr, y_tr)
             coef = get_regression_coefficients(model)
@@ -190,8 +518,8 @@ def _write_plots_and_report(
                 if b64:
                     with open(os.path.join(out_dir, fname), "wb") as f:
                         f.write(base64.b64decode(b64))
-        except Exception:
-            pass  # VIP plot failure is non-fatal.
+        except Exception as exc:
+            warnings.warn(f"VIP plot generation failed: {type(exc).__name__}: {exc}", RuntimeWarning, stacklevel=2)
 
     report = _build_report(
         spec_data,
@@ -226,26 +554,37 @@ def nir_train_model_tool(
     max_components: int = 20,
     cv_folds: int = 10,
     cv_strategy: str = "auto",
+    wavelength_selection: str = "none",
+    wavelength_selection_params: str | None = None,
     model_output: str = "/mnt/user-data/outputs/model.pkl",
     metrics_output: str = "/mnt/user-data/outputs/metrics.json",
     domain: str = "default",
     tool_call_id: Annotated[str, InjectedToolCallId] = "",  # noqa: ARG001
 ) -> str:
-    """Train a chemometric calibration model (PLS / PCR / SVR).
+    """Train a chemometric / ML / DL calibration model.
+
+    Supports 12 modelling methods:
+    - Classic: ``pls`` / ``pcr`` / ``svr``
+    - Tree-based: ``rf`` (Random Forest) / ``et`` (Extra Trees) / ``gbm`` (Gradient Boosting)
+    - Regularized linear: ``ridge`` / ``lasso`` / ``elasticnet``
+    - Instance-based: ``knn``
+    - Deep learning: ``mlp`` (neural network) / ``cnn`` (1D-CNN, requires PyTorch)
 
     ★ v3 改进: 接受可选的 ``pipeline_steps`` JSON 参数实现防泄露预处理。
     当提供 ``pipeline_steps`` 时，工具内部执行：划分数据 → 仅在训练集
     拟合预处理参数 → 变换全部集合 → 建模。避免了分步模式中先全局预处理
     后划分导致的数据泄露问题。
 
-    自动执行: 三集分离（可选内置防泄露预处理）→ 内部CV选成分数 →
+    自动执行: 三集分离（可选内置防泄露预处理）→ 内部CV选成分数/超参数 →
     全指标评估（RMSEC/RMSECV/RMSEP, R², RPD, bias, slope）→ VIP
     可解释性输出 → 模型序列化 → 指标JSON。
 
     Args:
         input_path: Virtual path to the .npz file (must contain ``X`` and
             ``y``). Can be raw data or pre-preprocessed data.
-        method: Modelling method: ``pls`` / ``pcr`` / ``svr``.
+        method: Modelling method: ``pls`` / ``pcr`` / ``svr`` / ``rf`` /
+            ``et`` / ``gbm`` / ``ridge`` / ``lasso`` / ``elasticnet`` /
+            ``knn`` / ``mlp`` / ``cnn``.
         pipeline_steps: ★ v3: JSON array of preprocessing steps. Each step
             can be a plain method name string (``"snv"``) or a dict with
             a method name and optional hyper-parameters dict. When provided,
@@ -258,13 +597,20 @@ def nir_train_model_tool(
         cv_folds: Number of CV folds for component selection.
         cv_strategy: ★ v3: ``"auto"`` (default, adapts to sample size),
             ``"loocv"`` (Leave-One-Out), or ``"fixed"`` (use cv_folds).
+        wavelength_selection: Optional train-only wavelength selection:
+            ``"none"`` (default), ``"cars"``, ``"spa"``, or ``"manual"``.
+        wavelength_selection_params: Optional JSON object with method params.
+            CARS accepts ``n_mc_samples``, ``n_folds``, ``random_state``; SPA
+            accepts ``n_min``/``n_max``; manual accepts ``indices`` or
+            wavelength ``ranges``.
         model_output: Virtual path for the serialised model (.pkl).
         metrics_output: Virtual path for the metrics JSON file.
         domain: Application domain for quality-gate thresholds.
 
     Returns:
         JSON with method, n_components, R2_val, RPD, RMSEC, RMSECV, RMSEP,
-        VIP summary, model_path, metrics_path, quality assessment, and
+        VIP summary, coefficient summary (including the raw-space PLS
+        intercept), model_path, metrics_path, quality assessment, and
         knowledge_hint.
 
         ★ knowledge_hint: When non-null (unknown domain or R²_val < 0.7),
@@ -274,19 +620,24 @@ def nir_train_model_tool(
     """
     try:
         import json
-        import joblib
 
+        import joblib
         from nir_core.model.evaluation import compute_metrics, split_dataset
         from nir_core.utils.metrics import evaluate_quality
 
-        # Defensive: newer nir_core exposes compute_vip / get_regression_coefficients;
+        # Defensive: newer nir_core exposes PLS interpretability helpers;
         # older sandboxes may not. Import lazily and tolerate ImportError so the
         # tool still runs end-to-end on the older wheel.
         try:
-            from nir_core.model.pls import compute_vip, get_regression_coefficients
+            from nir_core.model.pls import (
+                compute_vip,
+                get_regression_coefficients,
+                get_regression_intercept,
+            )
         except ImportError:
             compute_vip = None
             get_regression_coefficients = None
+            get_regression_intercept = None
 
         real_in = _resolve(runtime, input_path, read_only=True)
         data_dict = dict(np.load(real_in, allow_pickle=True))
@@ -336,9 +687,18 @@ def nir_train_model_tool(
                 X_te = best_pipe.transform(X_te, wv)
                 preprocessing_desc = best_pipe.description()
 
-        model, best_n, cv_results, predict_fn = _train_one_model(
-            method, X_tr, y_tr, max_components=max_components, cv_folds=cv_folds, cv_strategy=cv_strategy
+        X_tr, X_val, X_te, model_wv, wavelength_selection_meta = _apply_wavelength_selection(
+            X_tr,
+            X_val,
+            X_te,
+            y_tr,
+            wv=wv,
+            wavelength_selection=wavelength_selection,
+            wavelength_selection_params=wavelength_selection_params,
+            cv_folds=cv_folds,
         )
+
+        model, best_n, cv_results, predict_fn = _train_one_model(method, X_tr, y_tr, max_components=max_components, cv_folds=cv_folds, cv_strategy=cv_strategy)
         y_pred_tr = predict_fn(model, X_tr)
         y_pred_val = predict_fn(model, X_val)
         y_pred_te = predict_fn(model, X_te)
@@ -348,8 +708,11 @@ def nir_train_model_tool(
             "n_components": best_n,
             "domain": domain,
             "n_samples": int(X.shape[0]),
+            "n_wavelengths_original": int(wavelength_selection_meta["n_original"]),
+            "n_wavelengths_model": int(wavelength_selection_meta["n_selected"]),
             "preprocessing": preprocessing_desc,
             "preprocessing_steps": steps_list if pipeline_steps is not None else [],
+            "wavelength_selection": wavelength_selection_meta,
             "train": compute_metrics(y_tr, y_pred_tr),
             "val": compute_metrics(y_val, y_pred_val),
             "test": compute_metrics(y_te, y_pred_te),
@@ -367,21 +730,26 @@ def nir_train_model_tool(
         if method == "pls":
             try:
                 vip_scores = compute_vip(model, X_tr, y_tr)
+                top_local = [int(i) for i in np.argsort(vip_scores)[-10:][::-1]]
+                selected_indices = wavelength_selection_meta.get("selected_indices") or list(range(len(vip_scores)))
+                top_original = [int(selected_indices[i]) for i in top_local if i < len(selected_indices)]
                 vip_summary = {
                     "max": float(np.max(vip_scores)),
                     "mean": float(np.mean(vip_scores)),
                     "n_above_1": int(np.sum(vip_scores > 1.0)),
-                    "top_10_indices": [int(i) for i in np.argsort(vip_scores)[-10:][::-1]],
+                    "top_10_indices": top_original,
+                    "top_10_model_indices": top_local,
                 }
                 coef = get_regression_coefficients(model)
                 coef_summary = {
                     "max_abs": float(np.max(np.abs(coef))),
                     "mean_abs": float(np.mean(np.abs(coef))),
+                    "intercept": get_regression_intercept(model),
                 }
                 metrics["vip_summary"] = vip_summary
                 metrics["coef_summary"] = coef_summary
-            except Exception:
-                pass  # VIP computation failure is non-fatal.
+            except Exception as exc:
+                warnings.warn(f"VIP/coefficient computation failed: {type(exc).__name__}: {exc}", RuntimeWarning, stacklevel=2)
 
         # Quality assessment.
         quality = evaluate_quality(metrics, domain=domain, n_samples=int(X.shape[0]))
@@ -393,13 +761,22 @@ def nir_train_model_tool(
 
             val_diag = compute_residual_diagnostics(y_val, y_pred_val)
             metrics["diagnostics"] = val_diag
-        except Exception:
-            pass  # Diagnostics failure is non-fatal.
+        except Exception as exc:
+            warnings.warn(f"Residual diagnostics failed: {type(exc).__name__}: {exc}", RuntimeWarning, stacklevel=2)
 
         # Serialise model + metrics.
         real_model = _resolve(runtime, model_output, read_only=False)
         os.makedirs(os.path.dirname(real_model), exist_ok=True)
-        joblib.dump(model, real_model)
+        joblib.dump(
+            _build_model_artifact(
+                model,
+                method=method,
+                preprocessing_pipeline=best_pipe,
+                preprocessing_desc=preprocessing_desc,
+                wavelength_selection=wavelength_selection_meta,
+            ),
+            real_model,
+        )
 
         real_metrics = _resolve(runtime, metrics_output, read_only=False)
         os.makedirs(os.path.dirname(real_metrics), exist_ok=True)
@@ -426,7 +803,7 @@ def nir_train_model_tool(
             model=model,
             X_tr=X_tr,
             y_tr=y_tr,
-            wv=wv,
+            wv=model_wv,
         )
 
         out_virtual = os.path.dirname(model_output)
@@ -448,6 +825,7 @@ def nir_train_model_tool(
                 "method": method,
                 "n_components": best_n,
                 "preprocessing": preprocessing_desc,
+                "wavelength_selection": wavelength_selection_meta,
                 "R2_val": round(metrics["R2_val"], 4),
                 "RPD": round(metrics["RPD"], 4),
                 "RMSEC": round(metrics["RMSEC"], 4),
@@ -491,6 +869,8 @@ def nir_analyze_tool(
     data_path: str,
     auto_preprocess: bool = True,
     method: str = "pls",
+    wavelength_selection: str = "none",
+    wavelength_selection_params: str | None = None,
     output_dir: str = "/mnt/user-data/outputs/nir_analysis",
     domain: str = "default",
     tool_call_id: Annotated[str, InjectedToolCallId] = "",  # noqa: ARG001
@@ -510,7 +890,12 @@ def nir_analyze_tool(
         auto_preprocess: If True, run nested-CV preprocessing selection over
             the default candidate pipelines and use the winner. If False,
             use raw spectra directly.
-        method: Modelling method: ``pls`` / ``pcr`` / ``svr``.
+        method: Modelling method: ``pls`` / ``pcr`` / ``svr`` / ``rf`` /
+            ``et`` / ``gbm`` / ``ridge`` / ``lasso`` / ``elasticnet`` /
+            ``knn`` / ``mlp`` / ``cnn``.
+        wavelength_selection: Optional train-only wavelength selection:
+            ``"none"`` (default), ``"cars"``, ``"spa"``, or ``"manual"``.
+        wavelength_selection_params: Optional JSON object with method params.
         output_dir: Virtual directory for outputs (report, model, metrics).
         domain: Application domain for quality-gate thresholds.
 
@@ -526,8 +911,8 @@ def nir_analyze_tool(
     """
     try:
         import json
-        import joblib
 
+        import joblib
         from nir_core.io.loaders import auto_detect_and_load
         from nir_core.model.evaluation import (
             compute_metrics,
@@ -577,16 +962,26 @@ def nir_analyze_tool(
                 random_state=42,
                 wv=data.wv,
             )
-            p = best_pipe.__class__(best_pipe.steps).fit(X_tr, data.wv)
-            X_tr = p.transform(X_tr, data.wv)
-            X_val = p.transform(X_val, data.wv)
-            X_te = p.transform(X_te, data.wv)
+            best_pipe = best_pipe.__class__(best_pipe.steps).fit(X_tr, data.wv)
+            X_tr = best_pipe.transform(X_tr, data.wv)
+            X_val = best_pipe.transform(X_val, data.wv)
+            X_te = best_pipe.transform(X_te, data.wv)
+
+        preprocessing_desc = best_pipe.description() if best_pipe else "none"
+        X_tr, X_val, X_te, _model_wv, wavelength_selection_meta = _apply_wavelength_selection(
+            X_tr,
+            X_val,
+            X_te,
+            y_tr,
+            wv=data.wv,
+            wavelength_selection=wavelength_selection,
+            wavelength_selection_params=wavelength_selection_params,
+            cv_folds=5,
+        )
 
         # Train (method-aware; nested_cv_preprocessing always uses PLS for
         # the inner component search, but the final model honours `method`).
-        model, best_n, cv_results, predict_fn = _train_one_model(
-            method, X_tr, y_tr, max_components=10, cv_folds=5, cv_strategy="auto"
-        )
+        model, best_n, cv_results, predict_fn = _train_one_model(method, X_tr, y_tr, max_components=10, cv_folds=5, cv_strategy="auto")
         y_pred_te = predict_fn(model, X_te)
         y_pred_val = predict_fn(model, X_val)
         y_pred_tr = predict_fn(model, X_tr)
@@ -596,8 +991,11 @@ def nir_analyze_tool(
             "n_components": best_n,
             "domain": domain,
             "n_samples": int(X.shape[0]),
+            "n_wavelengths_original": int(wavelength_selection_meta["n_original"]),
+            "n_wavelengths_model": int(wavelength_selection_meta["n_selected"]),
             "auto_preprocess": auto_preprocess,
-            "preprocessing": (best_pipe.description() if best_pipe else "none"),
+            "preprocessing": preprocessing_desc,
+            "wavelength_selection": wavelength_selection_meta,
             "train": compute_metrics(y_tr, y_pred_tr),
             "val": compute_metrics(y_val, y_pred_val),
             "test": compute_metrics(y_te, y_pred_te),
@@ -609,6 +1007,13 @@ def nir_analyze_tool(
         quality = evaluate_quality(metrics, domain=domain, n_samples=int(X.shape[0]))
         metrics["quality"] = quality
 
+        try:
+            from nir_core.diagnostics import compute_residual_diagnostics
+
+            metrics["diagnostics"] = compute_residual_diagnostics(y_val, y_pred_val)
+        except Exception as exc:
+            warnings.warn(f"Residual diagnostics failed: {type(exc).__name__}: {exc}", RuntimeWarning, stacklevel=2)
+
         # Save model + metrics + plots + report.
         model_path = os.path.join(real_outdir, "model.pkl")
         metrics_path = os.path.join(real_outdir, "metrics.json")
@@ -618,7 +1023,16 @@ def nir_analyze_tool(
         cv_path = os.path.join(real_outdir, "cv_curve.png")
         report_path = os.path.join(real_outdir, "report.md")
 
-        joblib.dump(model, model_path)
+        joblib.dump(
+            _build_model_artifact(
+                model,
+                method=method,
+                preprocessing_pipeline=best_pipe,
+                preprocessing_desc=preprocessing_desc,
+                wavelength_selection=wavelength_selection_meta,
+            ),
+            model_path,
+        )
         with open(metrics_path, "w", encoding="utf-8") as f:
             json.dump(metrics, f, ensure_ascii=False, indent=2, default=_json_default)
 
@@ -683,7 +1097,8 @@ def nir_analyze_tool(
                 "status": "ok",
                 "method": method,
                 "n_components": best_n,
-                "preprocessing": (best_pipe.description() if best_pipe else "none"),
+                "preprocessing": preprocessing_desc,
+                "wavelength_selection": wavelength_selection_meta,
                 "R2_val": round(metrics["R2_val"], 4),
                 "RPD": round(metrics["RPD"], 4),
                 "RMSEP": round(metrics["RMSEP"], 4),
@@ -737,7 +1152,9 @@ def nir_compare_tool(
             is a list of steps; each step can be a method name string or a
             dict with a method name and optional hyper-parameters dict.
             Use "[]" for raw spectra (no preprocessing).
-        method: Modelling method: pls / pcr / svr.
+        method: Modelling method: ``pls`` / ``pcr`` / ``svr`` / ``rf`` /
+            ``et`` / ``gbm`` / ``ridge`` / ``lasso`` / ``elasticnet`` /
+            ``knn`` / ``mlp`` / ``cnn``.
         domain: Application domain for quality-gate thresholds.
         output_dir: Virtual directory for comparison outputs.
 
@@ -796,10 +1213,10 @@ def nir_compare_tool(
 
             try:
                 if pipe is not None:
-                    pipe.fit(X_tr)
-                    X_tr_p = pipe.transform(X_tr)
-                    X_val_p = pipe.transform(X_val)
-                    X_te_p = pipe.transform(X_te)
+                    pipe.fit(X_tr, data.wv)
+                    X_tr_p = pipe.transform(X_tr, data.wv)
+                    X_val_p = pipe.transform(X_val, data.wv)
+                    X_te_p = pipe.transform(X_te, data.wv)
                     pp_desc = pipe.description()
                 else:
                     X_tr_p, X_val_p, X_te_p = X_tr, X_val, X_te
@@ -815,9 +1232,7 @@ def nir_compare_tool(
                 continue
 
             # Train.
-            model, best_n, cv_results, predict_fn = _train_one_model(
-                method, X_tr_p, y_tr, max_components=20, cv_folds=10, cv_strategy="auto"
-            )
+            model, best_n, cv_results, predict_fn = _train_one_model(method, X_tr_p, y_tr, max_components=20, cv_folds=10, cv_strategy="auto")
             y_pred_tr = predict_fn(model, X_tr_p)
             y_pred_val = predict_fn(model, X_val_p)
             y_pred_te = predict_fn(model, X_te_p)
@@ -839,6 +1254,12 @@ def nir_compare_tool(
             m["RMSEC"] = m["train"]["RMSE"]
             m["RMSECV"] = _extract_rmsecv(cv_results, best_n)
             m["quality"] = evaluate_quality(m, domain=domain, n_samples=int(X.shape[0]))
+            try:
+                from nir_core.diagnostics import compute_residual_diagnostics
+
+                m["diagnostics"] = compute_residual_diagnostics(y_val, y_pred_val)
+            except Exception as exc:
+                warnings.warn(f"Residual diagnostics failed: {type(exc).__name__}: {exc}", RuntimeWarning, stacklevel=2)
 
             # Store y_ref/y_pred for gallery plot.
             m_with_arrays = dict(m)
@@ -853,23 +1274,24 @@ def nir_compare_tool(
                 )
             )
 
-            summaries.append(
-                {
-                    "pipeline": methods,
-                    "description": pp_desc,
-                    "n_components": best_n,
-                    "R2_val": round(m["R2_val"], 4),
-                    "RPD": round(m["RPD"], 4),
-                    "RMSEP": round(m["RMSEP"], 4),
-                    "RMSECV": round(m["RMSECV"], 4) if m["RMSECV"] else None,
-                    "grade": m["quality"]["grade"],
-                    "passed": m["quality"]["passed"],
-                }
-            )
+            summary_idx = len(summaries)
+            summary = {
+                "pipeline": methods,
+                "description": pp_desc,
+                "n_components": best_n,
+                "R2_val": round(m["R2_val"], 4),
+                "RPD": round(m["RPD"], 4),
+                "RMSEP": round(m["RMSEP"], 4),
+                "RMSECV": round(m["RMSECV"], 4) if m["RMSECV"] else None,
+                "grade": m["quality"]["grade"],
+                "passed": m["quality"]["passed"],
+                "diagnostics": m.get("diagnostics"),
+            }
+            summaries.append(summary)
 
             if m["RPD"] > best_rpd:
                 best_rpd = m["RPD"]
-                best_idx = i
+                best_idx = summary_idx
 
         if not summaries:
             return _err("All pipelines failed; no models to compare.")
@@ -919,6 +1341,14 @@ def nir_compare_tool(
         with open(all_metrics_path, "w", encoding="utf-8") as f:
             _json.dump(summaries, f, ensure_ascii=False, indent=2, default=_json_default)
 
+        knowledge_hint = _build_knowledge_hint(
+            domain=domain,
+            grade=best.get("grade"),
+            passed=best.get("passed"),
+            r2_val=best.get("R2_val"),
+            diagnostics=best.get("diagnostics"),
+        )
+
         return _ok(
             {
                 "status": "ok",
@@ -929,6 +1359,7 @@ def nir_compare_tool(
                 "gallery": output_dir + "/comparison_gallery.html",
                 "summary": output_dir + "/comparison_summary.md",
                 "all_metrics": output_dir + "/all_metrics.json",
+                "knowledge_hint": knowledge_hint,
             }
         )
     except Exception as exc:  # noqa: BLE001
@@ -968,6 +1399,12 @@ def nir_register_model_tool(
     Returns:
         JSON with the assigned version tag and registry summary.
     """
+    from .workflow import registration_is_approved
+
+    workflow_state = (runtime.state or {}).get("nir_workflow")
+    if not registration_is_approved(workflow_state):
+        return _err("Model registration requires an approved NIR workflow. Ask the user for explicit approval, then call nir_workflow(action='approve') before registering.")
+
     try:
         import hashlib
         import json as _json
@@ -984,7 +1421,7 @@ def nir_register_model_tool(
         os.makedirs(os.path.dirname(real_registry), exist_ok=True)
 
         # Load metrics from file.
-        with open(real_metrics, "r", encoding="utf-8") as f:
+        with open(real_metrics, encoding="utf-8") as f:
             metrics = _json.load(f)
 
         # Compute a data hash from the model file (best-effort fingerprint).

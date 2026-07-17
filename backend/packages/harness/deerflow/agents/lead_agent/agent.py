@@ -298,9 +298,31 @@ def build_middlewares(
     # Deterministically load a full SKILL.md when the user starts the turn with
     # /skill-name. This keeps the base system prompt metadata-only while giving
     # explicit user activation priority over model-side relevance guessing.
-    from deerflow.agents.middlewares.skill_activation_middleware import SkillActivationMiddleware
+    from deerflow.agents.middlewares.skill_activation_middleware import SkillActivationMiddleware, SkillAutoRoute
 
-    middlewares.append(SkillActivationMiddleware(available_skills=available_skills, app_config=resolved_app_config))
+    nir_route = SkillAutoRoute(
+        skill_name="nir-coordinator",
+        patterns=(
+            r"近红外(?:光谱)?",
+            r"\b(?:FT-?NIR|NIR spectroscopy)\b",
+            r"\b(?:SNV|MSC|RMSEP|RPD)\b.*(?:光谱|spectr|calibrat|model)",
+        ),
+        state_key="nir_workflow",
+        terminal_statuses=("completed", "blocked"),
+    )
+    middlewares.append(
+        SkillActivationMiddleware(
+            available_skills=available_skills,
+            app_config=resolved_app_config,
+            auto_routes=(nir_route,),
+        )
+    )
+
+    # NIR tools are governed by the checkpointed domain workflow rather than
+    # relying on the model to remember stage, retry, and approval constraints.
+    from deerflow.agents.middlewares.nir_workflow_middleware import NIRWorkflowMiddleware
+
+    middlewares.append(NIRWorkflowMiddleware())
 
     # Capture completed task delegations and loaded skill files before
     # summarization can compact them, then inject durable context channels

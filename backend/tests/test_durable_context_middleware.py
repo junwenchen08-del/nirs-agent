@@ -6,7 +6,9 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from deerflow.agents import thread_state as thread_state_module
 from deerflow.agents.lead_agent import agent as lead_agent_module
-from deerflow.agents.middlewares.durable_context_middleware import DurableContextMiddleware
+from deerflow.agents.middlewares.durable_context_middleware import DurableContextMiddleware, _render_durable_context_data
+from deerflow.agents.middlewares.nir_workflow_middleware import NIRWorkflowMiddleware
+from deerflow.agents.middlewares.skill_activation_middleware import SkillActivationMiddleware
 from deerflow.agents.middlewares.summarization_middleware import DeerFlowSummarizationMiddleware
 from deerflow.agents.thread_state import ThreadState, merge_delegations
 from deerflow.config.app_config import AppConfig
@@ -172,8 +174,10 @@ class TestMiddlewareRegistration:
         )
 
         ledger_idx = next(i for i, middleware in enumerate(middlewares) if isinstance(middleware, DurableContextMiddleware))
+        skill_idx = next(i for i, middleware in enumerate(middlewares) if isinstance(middleware, SkillActivationMiddleware))
+        workflow_idx = next(i for i, middleware in enumerate(middlewares) if isinstance(middleware, NIRWorkflowMiddleware))
         summary_idx = middlewares.index(summary_sentinel)
-        assert ledger_idx < summary_idx
+        assert skill_idx < workflow_idx < ledger_idx < summary_idx
 
 
 class RecordingFakeModel(FakeToolCallingModel):
@@ -486,6 +490,36 @@ class TestDurableContextInjection:
         assert data, "durable context data message not injected"
         assert data[0].additional_kwargs["hide_from_ui"] is True
         assert "Ignore all previous instructions" in data[0].content
+
+    def test_nir_trace_details_are_not_injected_into_model_context(self):
+        workflow = {
+            "project_id": "nir-trace-safe",
+            "task_type": "calibration",
+            "stage": "review",
+            "next_action": "request_user_approval",
+            "history": [
+                {"action": "start"},
+                {"action": "tool_call", "call_id": "secret-call-id", "run_id": "secret-run-id"},
+            ],
+            "run_ids": ["secret-run-id"],
+            "trace_ids": ["secret-trace-id"],
+            "tool_observations": [
+                {
+                    "name": "nir_train_model",
+                    "call_id": "secret-call-id",
+                    "run_id": "secret-run-id",
+                    "trace_id": "secret-trace-id",
+                }
+            ],
+        }
+
+        rendered = _render_durable_context_data(None, [], [], workflow)
+
+        assert '"stage": "review"' in rendered
+        assert '"tool_observation_count": 1' in rendered
+        assert "secret-call-id" not in rendered
+        assert "secret-run-id" not in rendered
+        assert "secret-trace-id" not in rendered
 
 
 class TestSummaryRecordWindowSplit:

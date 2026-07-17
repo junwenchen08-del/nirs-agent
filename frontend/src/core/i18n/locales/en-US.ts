@@ -188,6 +188,7 @@ export const enUS: Translations = {
     demoChats: "Demo chats",
     agents: "Agents",
     agentsDisabledTooltip: "Feature not enabled",
+    evaluations: "NIR evaluations",
   },
 
   // Agents
@@ -247,6 +248,7 @@ export const enUS: Translations = {
   breadcrumb: {
     workspace: "Workspace",
     chats: "Chats",
+    evaluations: "NIR evaluations",
   },
 
   // Workspace
@@ -261,6 +263,49 @@ export const enUS: Translations = {
     logout: "Log out",
     gatewayUnavailable: "Gateway is temporarily unavailable.",
     gatewayUnavailableRetrying: "Retrying in the background…",
+  },
+
+  nirEvaluations: {
+    eyebrow: "NIR agent quality lab",
+    title: "Evaluation control room",
+    description:
+      "Map completed NIR conversations to regression scenarios, score their full tool trajectory, and keep safety, quality, latency, and cost visible in one place.",
+    scenarios: "scenarios",
+    deterministic: "Deterministic scoring",
+    mappingTitle: "Regression batch",
+    mappingDescription:
+      "Each scenario can appear once per run. Thread ownership and checkpoint evidence are verified by the Gateway.",
+    threadId: "Thread",
+    threadPlaceholder: "Paste a completed thread ID",
+    scenario: "Expected scenario",
+    selectScenario: "Select a scenario",
+    remove: "Remove case",
+    addCase: "Add case",
+    run: "Run evaluation",
+    running: "Evaluating…",
+    loadError: "Failed to load the NIR scenario catalog",
+    runError: "Failed to run the NIR evaluation",
+    duplicateScenario: "A scenario can only appear once in the same batch.",
+    recentTrend: "Recent quality trend",
+    trendDescription:
+      "The latest 12 browser-local runs. Amber bars indicate policy violations.",
+    noHistory: "Run the first regression batch to establish a baseline.",
+    older: "Older",
+    latest: "Latest",
+    passRate: "Pass rate",
+    averageScore: "Average score",
+    policyViolations: "Policy violations",
+    tokens: "Total tokens",
+    duration: "Duration",
+    results: "Scenario evidence",
+    passed: "passed",
+    failed: "failed",
+    trace: "Trace",
+    noTraceId: "No trace ID recorded",
+    exportEvidence: "Export evidence",
+    clearResult: "Clear",
+    noResults:
+      "Configure at least one completed NIR thread and run an evaluation to inspect its evidence.",
   },
 
   // Conversation
@@ -548,7 +593,8 @@ export const enUS: Translations = {
       title: "Knowledge Base",
       description:
         "Manage documents in the NIR knowledge base. Uploaded papers are parsed, chunked, entity-extracted, and vector-indexed for retrieval by the agent.",
-      empty: "Knowledge base is empty. Click the button above to upload your first document.",
+      empty:
+        "Knowledge base is empty. Click the button above to upload your first document.",
       statsDocuments: "Documents",
       statsChunks: "Chunks",
       uploadButton: "Upload Document",
@@ -580,9 +626,14 @@ export const enUS: Translations = {
       yearPlaceholder: "e.g. 2023",
       loading: "Loading...",
       error: "Error",
-      serverUnreachable: "Knowledge server unreachable. Start it on the host: python nir_core/knowledge/_search_server.py",
+      serverUnreachable:
+        "Knowledge server unreachable. Start it on the host: python nir_core/knowledge/_search_server.py",
       noYear: "—",
       entitiesLabel: "Entities",
+      batchSelectFiles: "Select files (multiple)",
+      batchFilesSelected: "{count} file(s) selected",
+      batchUploading: "Uploading...",
+      batchPartialFailed: "Some files failed to upload: {message}",
     },
     notification: {
       title: "Notification",

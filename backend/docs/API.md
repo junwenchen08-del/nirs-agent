@@ -63,6 +63,70 @@ GET /api/langgraph/threads/{thread_id}/state
 }
 ```
 
+#### Export NIR Evaluation Trace
+
+Export the latest checkpointed NIR workflow as the versioned JSON envelope
+accepted by `make eval-nir`. The route is owner-checked and performs no LLM call
+or model training.
+
+```http
+GET /api/threads/{thread_id}/nir-evaluation-trace?scenario_id=calibration-register
+```
+
+**Response:**
+
+```json
+{
+  "version": 1,
+  "traces": [
+    {
+      "scenario_id": "calibration-register",
+      "routed_skill": "nir-coordinator",
+      "workflow": {"task_type": "calibration", "stage": "completed"},
+      "tool_calls": [],
+      "run_ids": ["run-id"],
+      "trace_id": "request-trace-id",
+      "duration_ms": 2500,
+      "input_tokens": 800,
+      "output_tokens": 350
+    }
+  ]
+}
+```
+
+#### List NIR Evaluation Scenarios
+
+Return the same versioned acceptance catalog used by the CLI evaluator and the
+workspace dashboard.
+
+```http
+GET /api/nir/evaluations/scenarios
+```
+
+#### Run NIR Batch Evaluation
+
+Capture and score up to 100 owned threads in one deterministic batch. A
+scenario may appear only once per request. The response contains both the
+aggregate scorecard and the normalized traces used to calculate it.
+
+```http
+POST /api/nir/evaluations/run
+Content-Type: application/json
+
+{
+  "entries": [
+    {
+      "thread_id": "thread-id",
+      "scenario_id": "calibration-register"
+    }
+  ]
+}
+```
+
+The endpoint performs no LLM call or model training. Every entry is checked
+against the authenticated user's thread ownership before its checkpoint is
+read.
+
 ### Runs
 
 #### Create Run
@@ -506,6 +570,66 @@ DELETE /api/threads/{thread_id}/uploads/{filename}
   "success": true,
   "message": "Deleted document.pdf"
 }
+```
+
+### NIR Knowledge Base
+
+Manage the NIR retrieval knowledge base used by `nir_search_knowledge`.
+The host knowledge server may require `NIR_KNOWLEDGE_TOKEN`; the Gateway
+forwards that token to the server as a bearer token when it is set.
+
+#### List Knowledge Documents
+
+```http
+GET /api/knowledge/documents
+```
+
+#### Knowledge Stats
+
+```http
+GET /api/knowledge/stats
+```
+
+#### Search Knowledge
+
+```http
+POST /api/knowledge/search
+Content-Type: application/json
+
+{
+  "query": "SNV vs MSC for soil NIR",
+  "top_k": 5
+}
+```
+
+#### Upload Knowledge Document
+
+```http
+POST /api/knowledge/documents
+Content-Type: multipart/form-data
+```
+
+**Request Body:**
+- `file`: One PDF, DOCX, TXT, Markdown, HTML, or CSV file.
+- `title` (optional): Display title stored with document chunks.
+- `year` (optional): Publication year metadata.
+
+#### Batch Upload Knowledge Documents
+
+```http
+POST /api/knowledge/documents/batch
+Content-Type: multipart/form-data
+```
+
+**Request Body:**
+- `files`: Up to 20 supported documents.
+- `title` (optional): Shared title metadata.
+- `year` (optional): Shared year metadata.
+
+#### Delete Knowledge Document
+
+```http
+DELETE /api/knowledge/documents/{doc_id}
 ```
 
 ### Thread Cleanup

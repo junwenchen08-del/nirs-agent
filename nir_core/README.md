@@ -48,6 +48,42 @@ cfg = get_nir_config()
 print(cfg.quality.get_thresholds("soil", n_samples=50))
 ```
 
+For a fitted PLS model, export a prediction equation in the original,
+uncentered spectral space with both coefficients and intercept:
+
+```python
+from nir_core.model.pls import get_regression_coefficients, get_regression_intercept
+
+coefficients = get_regression_coefficients(model)
+intercept = get_regression_intercept(model)
+y_pred = X @ coefficients + intercept
+```
+
+CSV knowledge documents are converted to bounded Markdown tables using the
+Python standard library; pandas and tabulate are not required for CSV import.
+
+The default tree-model searches are bounded for interactive agent runs and
+small NIR calibration sets: eight GBM candidates and four Random Forest /
+Extra Trees candidates. They avoid very deep or oversized forests that are
+both slow and prone to overfitting.
+
+## Testing
+
+```bash
+# Fast development gate: skips compute-intensive training and feature selection.
+pytest -m "not slow"
+
+# Slow training, feature-selection, and persistence regressions only.
+pytest -m slow
+
+# Complete suite (fast + slow).
+pytest
+```
+
+Expensive model modules share one deterministic fitted result across assertions.
+Reproducibility tests still perform an independent second fit, so fixture reuse
+does not hide random-seed regressions.
+
 ## Configuration
 
 NIR config is managed inside the package (`nir_core/config.py`), NOT in
