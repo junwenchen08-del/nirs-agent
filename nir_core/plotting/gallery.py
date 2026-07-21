@@ -6,8 +6,6 @@ including a metrics table and embedded predicted-vs-reference plots.
 
 from __future__ import annotations
 
-import base64
-
 from nir_core.models import ModelResult
 from nir_core.plotting.model_diag import plot_predicted_vs_reference
 
@@ -100,9 +98,7 @@ def generate_comparison_gallery(results: list[ModelResult]) -> str:
         "<th>#</th><th>方法 Method</th><th>主成分 Components</th>"
         "<th>RMSEP</th><th>R²</th><th>RPD</th>"
         "</tr></thead>"
-        "<tbody>"
-        + "\n".join(rows_html)
-        + "</tbody>"
+        "<tbody>" + "\n".join(rows_html) + "</tbody>"
         "</table>"
     )
 

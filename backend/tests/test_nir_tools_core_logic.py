@@ -110,6 +110,7 @@ def test_train_model_cars_selection_persists_artifact_metadata(tmp_path: Path):
     assert persisted["wavelength_selection"] == payload["wavelength_selection"]
     assert artifact["format"] == "nir_model_artifact"
     assert artifact["wavelength_selection"] == payload["wavelength_selection"]
+    assert artifact["monitoring_reference"]["method"] == "pca_t2_q"
 
 
 def test_partitioned_model_uses_named_external_split(tmp_path: Path):
@@ -586,9 +587,9 @@ def test_model_family_selection_detects_nonlinear_candidate_improvement():
 
 def test_nir_predict_applies_artifact_wavelength_selection(tmp_path: Path):
     """Prediction accepts a full-width X matrix and slices train-selected columns."""
-    import joblib
     from sklearn.linear_model import LinearRegression
 
+    from deerflow.community.nir._common import _write_trusted_model_artifact
     from deerflow.community.nir.io_tools import nir_predict_tool
 
     rng = np.random.RandomState(13)
@@ -600,7 +601,7 @@ def test_nir_predict_applies_artifact_wavelength_selection(tmp_path: Path):
     model_file = tmp_path / "model.pkl"
     data_file = tmp_path / "predict.npz"
     np.savez(data_file, X=X)
-    joblib.dump(
+    _write_trusted_model_artifact(
         {
             "format": "nir_model_artifact",
             "version": 1,
@@ -612,7 +613,7 @@ def test_nir_predict_applies_artifact_wavelength_selection(tmp_path: Path):
                 "n_selected": len(selected_indices),
             },
         },
-        model_file,
+        str(model_file),
     )
 
     virtual_model = "/mnt/user-data/outputs/model.pkl"
@@ -641,11 +642,11 @@ def test_nir_predict_applies_artifact_wavelength_selection(tmp_path: Path):
 
 def test_nir_predict_applies_fitted_artifact_preprocessing(tmp_path: Path):
     """Version-2 artifacts reproduce train-time preprocessing for raw spectra."""
-    import joblib
     from nir_core.models import PreprocessingStep
     from nir_core.preprocess.pipeline import PreprocessingPipeline
     from sklearn.linear_model import LinearRegression
 
+    from deerflow.community.nir._common import _write_trusted_model_artifact
     from deerflow.community.nir.io_tools import nir_predict_tool
 
     rng = np.random.RandomState(21)
@@ -659,7 +660,7 @@ def test_nir_predict_applies_fitted_artifact_preprocessing(tmp_path: Path):
     model_file = tmp_path / "model-v2.pkl"
     data_file = tmp_path / "raw-predict.npz"
     np.savez(data_file, X=X_predict)
-    joblib.dump(
+    _write_trusted_model_artifact(
         {
             "format": "nir_model_artifact",
             "version": 2,
@@ -671,7 +672,7 @@ def test_nir_predict_applies_fitted_artifact_preprocessing(tmp_path: Path):
             },
             "wavelength_selection": {"method": "none"},
         },
-        model_file,
+        str(model_file),
     )
 
     resolved = {

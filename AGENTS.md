@@ -102,6 +102,18 @@ cd nir_core && pytest -m slow        # Compute-intensive model/selection regress
 cd nir_core && pytest                # Complete fast + slow suite
 ```
 
+CI mirrors these gates in `.github/workflows/nir-core-tests.yml`: production
+Ruff checks plus separate fast and slow jobs. NIR NPZ boundaries never enable
+pickle. Prediction accepts only NIR-generated model artifacts under
+`/mnt/user-data/outputs` after SHA-256 manifest verification; deployments may
+require HMAC signing with `NIR_ARTIFACT_SIGNING_KEY` and
+`NIR_REQUIRE_SIGNED_ARTIFACTS=1`. Version-3 single-target and multi-target
+artifacts persist a training-only PCA T²/Q monitoring reference so prediction
+reports actual applicability-domain drift rather than self-reference distance.
+Model registration uses locked atomic JSON replacement and records separate
+training-data and artifact SHA-256 hashes. Production quality gates do not
+relax for small samples, and significant bias prevents passage.
+
 The NIR evaluation control room lives at `/workspace/evaluations`. Its Gateway
 batch endpoint owner-checks explicit thread/scenario mappings and reuses the
 same deterministic evaluator as `backend/make eval-nir`; browser-local history

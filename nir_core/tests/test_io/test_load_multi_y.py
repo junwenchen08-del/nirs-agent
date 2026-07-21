@@ -33,7 +33,7 @@ def test_load_csv_multiple_reference_columns_with_names(tmp_path: Path) -> None:
 
     output = tmp_path / "multi.npz"
     save_npz(data, str(output))
-    archive = np.load(output, allow_pickle=True)
+    archive = np.load(output, allow_pickle=False)
     assert archive["y"].shape == (2, 3)
     assert archive["y_names"].tolist() == ["protein", "moisture", "oil"]
 

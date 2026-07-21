@@ -10,15 +10,21 @@ sandbox/runtime imports that every tool already needs.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import os
+from pathlib import Path, PurePosixPath
 
 import numpy as np
 
 from deerflow.tools.types import Runtime
 
 logger = logging.getLogger(__name__)
+
+_MODEL_MANIFEST_SUFFIX = ".manifest.json"
+_MODEL_OUTPUT_PREFIX = ("/", "mnt", "user-data", "outputs")
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +89,117 @@ def _resolve_writable_dir(runtime: Runtime, virtual_dir: str) -> str:
     real_dir = _resolve(runtime, virtual_dir, read_only=False)
     os.makedirs(real_dir, exist_ok=True)
     return real_dir
+
+
+# ---------------------------------------------------------------------------
+# Safe artifact helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_npz_safely(path: str) -> dict[str, np.ndarray]:
+    """Load a numeric/string NPZ archive without enabling pickle.
+
+    Object arrays require Python pickle and are therefore not accepted at the
+    user-data boundary. New NIR archives store labels as Unicode arrays.
+    """
+    try:
+        with np.load(path, allow_pickle=False) as archive:
+            return {name: archive[name] for name in archive.files}
+    except ValueError as exc:
+        if "Object arrays cannot be loaded" in str(exc):
+            raise ValueError("Unsafe legacy NPZ: object arrays require pickle. Re-export the archive with the current NIR loader so labels are stored as Unicode arrays.") from exc
+        raise
+
+
+def _model_manifest_path(real_model_path: str) -> Path:
+    return Path(real_model_path + _MODEL_MANIFEST_SUFFIX)
+
+
+def _artifact_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _sha256_file(path: str) -> str:
+    """Return a streaming SHA-256 digest for lineage/provenance records."""
+    return _artifact_digest(Path(path))
+
+
+def _write_trusted_model_artifact(artifact, real_model_path: str) -> None:
+    """Atomically write a joblib artifact and its integrity manifest."""
+    import joblib
+
+    destination = Path(real_model_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".tmp")
+    joblib.dump(artifact, temporary)
+    os.replace(temporary, destination)
+
+    digest = _artifact_digest(destination)
+    manifest: dict[str, object] = {
+        "schema_version": 1,
+        "artifact_type": "nir_model_artifact",
+        "sha256": digest,
+        "size_bytes": destination.stat().st_size,
+    }
+    signing_key = os.environ.get("NIR_ARTIFACT_SIGNING_KEY")
+    if signing_key:
+        manifest["hmac_sha256"] = hmac.new(signing_key.encode("utf-8"), digest.encode("ascii"), hashlib.sha256).hexdigest()
+
+    manifest_path = _model_manifest_path(real_model_path)
+    manifest_tmp = manifest_path.with_name(manifest_path.name + ".tmp")
+    manifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(manifest_tmp, manifest_path)
+
+
+def _load_trusted_model_artifact(real_model_path: str, virtual_model_path: str):
+    """Verify model provenance/integrity before invoking joblib.load.
+
+    The outputs directory is writable only by trusted NIR tool execution in
+    the supported workflow. Uploaded/workspace pickle files are rejected.
+    Production deployments can additionally require an HMAC by setting
+    ``NIR_REQUIRE_SIGNED_ARTIFACTS=1`` and ``NIR_ARTIFACT_SIGNING_KEY``.
+    """
+    import joblib
+
+    virtual = PurePosixPath(virtual_model_path.replace("\\", "/"))
+    if virtual.parts[:4] != _MODEL_OUTPUT_PREFIX:
+        raise ValueError("Untrusted model path: prediction accepts only models generated under /mnt/user-data/outputs. Register or retrain the model first.")
+
+    model_path = Path(real_model_path)
+    manifest_path = _model_manifest_path(real_model_path)
+    if not manifest_path.is_file():
+        raise ValueError("Unverified model artifact: integrity manifest is missing. Retrain or re-register this legacy model with the current NIR tools.")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid model integrity manifest.") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise ValueError("Unsupported model integrity manifest.")
+
+    expected_digest = manifest.get("sha256")
+    actual_digest = _artifact_digest(model_path)
+    if not isinstance(expected_digest, str) or not hmac.compare_digest(expected_digest, actual_digest):
+        raise ValueError("Model artifact integrity check failed.")
+    if manifest.get("size_bytes") != model_path.stat().st_size:
+        raise ValueError("Model artifact size does not match its integrity manifest.")
+
+    signing_key = os.environ.get("NIR_ARTIFACT_SIGNING_KEY")
+    require_signed = os.environ.get("NIR_REQUIRE_SIGNED_ARTIFACTS", "").strip().lower() in {"1", "true", "yes"}
+    signature = manifest.get("hmac_sha256")
+    if require_signed and (not signing_key or not isinstance(signature, str)):
+        raise ValueError("A signed NIR model is required, but no valid signing configuration or signature was found.")
+    if signature is not None:
+        if not signing_key:
+            raise ValueError("Model is signed, but NIR_ARTIFACT_SIGNING_KEY is not configured.")
+        expected_signature = hmac.new(signing_key.encode("utf-8"), actual_digest.encode("ascii"), hashlib.sha256).hexdigest()
+        if not isinstance(signature, str) or not hmac.compare_digest(signature, expected_signature):
+            raise ValueError("Model artifact signature verification failed.")
+
+    return joblib.load(model_path)
 
 
 # ---------------------------------------------------------------------------

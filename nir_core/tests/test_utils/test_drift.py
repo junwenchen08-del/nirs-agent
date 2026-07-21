@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 
 from nir_core.models import ModelResult
-from nir_core.utils.drift import compute_drift_index, compute_mahalanobis_drift
+from nir_core.utils.drift import (
+    compute_drift_index,
+    compute_mahalanobis_drift,
+    compute_reference_drift,
+    fit_monitoring_reference,
+)
 
 
 def _make_train(n: int = 100, n_wv: int = 20, seed: int = 0) -> np.ndarray:
@@ -91,3 +96,23 @@ def test_compute_drift_index_fallback_without_rpd():
     mr = ModelResult(method="pls", metrics={"R2": 0.9})  # no RPD
     idx = compute_drift_index(mr, X_new)
     assert 0.0 <= idx <= 1.0
+
+
+def test_reference_drift_detects_shift_against_training_domain():
+    X_train = _make_train(n=160, n_wv=16, seed=11)
+    reference = fit_monitoring_reference(X_train)
+    clean = _make_train(n=30, n_wv=16, seed=12)
+    shifted = clean + 6.0
+
+    clean_result = compute_reference_drift(reference, clean)
+    shifted_result = compute_reference_drift(reference, shifted)
+
+    assert clean_result["available"] is True
+    assert shifted_result["drift_score"] > clean_result["drift_score"]
+    assert shifted_result["drift_score"] >= 0.9
+
+
+def test_reference_drift_rejects_wrong_feature_count():
+    reference = fit_monitoring_reference(_make_train(n=80, n_wv=10))
+    with pytest.raises(ValueError, match="expects 10"):
+        compute_reference_drift(reference, _make_train(n=5, n_wv=9, seed=3))

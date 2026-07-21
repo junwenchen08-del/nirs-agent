@@ -240,12 +240,19 @@ CARS 的 Monte Carlo 子集使用 80% 训练样本，ARS 按权重从完整变�
 并始终与全波长 CV 基线比较，避免选择后性能反而下降。SPA 会在
 `n_min` 大于可用波长数时直接报错，而不是静默返回不满足约束的子集。
 
-启用预处理或波长选择时，保存的 `.pkl` v2 artifact 会包含模型、已拟合的
+保存的 `.pkl` v3 artifact 会包含模型、已拟合的
 预处理流水线和选择元数据。`nir_predict` 默认接收原始光谱，先复用训练时的
 预处理，再按 `selected_indices` 裁剪；输入已完成同一预处理时可设置
 `input_preprocessed=true` 跳过流水线。metrics 和返回值会包含
 `wavelength_selection`、`wavelength_selection_decision`、候选方案的调优证据、
 `n_wavelengths_original`、`n_wavelengths_model`。测试集/外部测试集不参与是否采用波长选择的决策。
+
+模型产物还保存训练模型空间中的 PCA T²/Q 适用域参考。`nir_predict` 会在完成训练时的
+预处理和波长选择后，将新样本与该训练参考比较，并分别报告高杠杆漂移和未建模残差漂移；
+不再使用新批次与自身比较的伪漂移指标。预测只接受 `/mnt/user-data/outputs` 下由 NIR 工具生成、
+带 SHA-256 完整性清单的模型。生产环境可通过 `NIR_ARTIFACT_SIGNING_KEY` 和
+`NIR_REQUIRE_SIGNED_ARTIFACTS=1` 强制 HMAC 签名。NPZ 标签使用 Unicode 数组，读取始终保持
+`allow_pickle=False`；旧 object-array NPZ 需要用当前加载器重新导出。
 
 ## 自主建模算法选择
 
@@ -287,7 +294,7 @@ PLS 改善至少 1% 才会被采用。最终测试集或官方外部测试集不
 
 ## 质量门禁
 
-质量门禁阈值按应用领域分级，小样本自动放宽：
+质量门禁阈值按应用领域分级。生产评估不会因样本少而自动降低标准：
 
 | 领域 | R²_min | RPD_min | 说明 |
 |------|--------|---------|------|
@@ -298,7 +305,8 @@ PLS 改善至少 1% 才会被采用。最终测试集或官方外部测试集不
 | soil | 0.70 | 2.0 | 土壤（难度大） |
 | default | 0.80 | 3.0 | 默认 |
 
-样本量 < 100 时自动放宽（R² - 0.10, RPD - 0.5）。
+仅探索性调用可显式设置 `allow_small_sample_relaxation=True`，对样本量 < 100 使用
+R² - 0.10、RPD - 0.5 的宽松阈值。显著 bias 即使在 R²/RPD 达标时也会阻止模型通过。
 
 ---
 
@@ -426,6 +434,9 @@ python scripts/validate_phase1.py
 pytest tests/test_preprocess/test_snv.py -v
 pytest tests/test_model/test_pls.py -v
 ```
+
+`.github/workflows/nir-core-tests.yml` 在每个非草稿 PR 上独立执行生产代码 Ruff、快速测试集和
+慢速计算回归，避免仅运行后端测试时漏掉算法包回归。
 
 后端还提供无需调用外部模型的 NIR 智能体轨迹评测，以及用于真实/回放会话的统一
 评分入口：

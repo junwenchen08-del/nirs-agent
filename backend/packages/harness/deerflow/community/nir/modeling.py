@@ -23,7 +23,17 @@ from nir_core.io.sniffers import inspect_file
 
 from deerflow.tools.types import Runtime
 
-from ._common import _err, _json_default, _ok, _parse_pipeline_step, _resolve, _resolve_writable_dir
+from ._common import (
+    _err,
+    _json_default,
+    _load_npz_safely,
+    _ok,
+    _parse_pipeline_step,
+    _resolve,
+    _resolve_writable_dir,
+    _sha256_file,
+    _write_trusted_model_artifact,
+)
 from ._knowledge_hint import _build_knowledge_hint
 from ._report import _build_report
 
@@ -197,13 +207,28 @@ def _apply_wavelength_selection(
     return X_tr[:, selected_indices], X_val[:, selected_indices], X_te[:, selected_indices], selected_wv_arr, metadata
 
 
-def _build_model_artifact(model, *, method: str, preprocessing_pipeline, preprocessing_desc: str, wavelength_selection: dict):
-    """Return a serialisable model artifact, preserving old plain-model files when possible."""
-    if preprocessing_pipeline is None and wavelength_selection.get("method") == "none":
+def _build_model_artifact(
+    model,
+    *,
+    method: str,
+    preprocessing_pipeline,
+    preprocessing_desc: str,
+    wavelength_selection: dict,
+    X_reference: np.ndarray | None = None,
+):
+    """Return a deployable model artifact with a compact monitoring reference."""
+    monitoring_reference = None
+    if X_reference is not None:
+        reference_array = np.asarray(X_reference)
+        if reference_array.ndim == 2 and reference_array.shape[0] >= 3:
+            from nir_core.utils.drift import fit_monitoring_reference
+
+            monitoring_reference = fit_monitoring_reference(reference_array)
+    if preprocessing_pipeline is None and wavelength_selection.get("method") == "none" and monitoring_reference is None:
         return model
     return {
         "format": "nir_model_artifact",
-        "version": 2,
+        "version": 3 if monitoring_reference is not None else 2,
         "model": model,
         "method": method,
         "preprocessing": {
@@ -212,6 +237,7 @@ def _build_model_artifact(model, *, method: str, preprocessing_pipeline, preproc
             "apply_on_predict": preprocessing_pipeline is not None,
         },
         "wavelength_selection": wavelength_selection,
+        "monitoring_reference": monitoring_reference,
     }
 
 
@@ -1177,7 +1203,6 @@ def nir_train_model_tool(
     try:
         import json
 
-        import joblib
         from nir_core.model.evaluation import compute_metrics, split_dataset
         from nir_core.utils.metrics import evaluate_quality
 
@@ -1196,7 +1221,7 @@ def nir_train_model_tool(
             get_regression_intercept = None
 
         real_in = _resolve(runtime, input_path, read_only=True)
-        data_dict = dict(np.load(real_in, allow_pickle=True))
+        data_dict = _load_npz_safely(real_in)
         X = np.asarray(data_dict["X"], dtype=float)
         y = np.asarray(data_dict["y"], dtype=float).ravel()
         wv = np.asarray(data_dict["wv"], dtype=float).ravel() if data_dict.get("wv") is not None and data_dict["wv"].size else None
@@ -1260,6 +1285,7 @@ def nir_train_model_tool(
         y_pred_te = predict_fn(model, X_te)
 
         metrics = {
+            "training_data_hash": _sha256_file(real_in),
             "method": method,
             "n_components": best_n,
             "domain": domain,
@@ -1323,13 +1349,14 @@ def nir_train_model_tool(
         # Serialise model + metrics.
         real_model = _resolve(runtime, model_output, read_only=False)
         os.makedirs(os.path.dirname(real_model), exist_ok=True)
-        joblib.dump(
+        _write_trusted_model_artifact(
             _build_model_artifact(
                 model,
                 method=method,
                 preprocessing_pipeline=best_pipe,
                 preprocessing_desc=preprocessing_desc,
                 wavelength_selection=wavelength_selection_meta,
+                X_reference=X_tr,
             ),
             real_model,
         )
@@ -1838,7 +1865,6 @@ def nir_train_auto_split_model_tool(
     try:
         import json
 
-        import joblib
         import pandas as pd
         from nir_core.io.loaders import load_csv
         from nir_core.model.evaluation import compute_metrics
@@ -1995,6 +2021,7 @@ def nir_train_auto_split_model_tool(
                 partition_metrics[partition_name]["group_values"] = group_values
 
         metrics = {
+            "training_data_hash": _sha256_file(real_in),
             "protocol": "deterministic_auto_split_holdout",
             "validation_scope": "independent_holdout_not_external",
             "target": target_name,
@@ -2035,13 +2062,14 @@ def nir_train_auto_split_model_tool(
 
         real_model = _resolve(runtime, model_output, read_only=False)
         os.makedirs(os.path.dirname(real_model), exist_ok=True)
-        joblib.dump(
+        _write_trusted_model_artifact(
             _build_model_artifact(
                 final_model,
                 method=chosen_model["method"],
                 preprocessing_pipeline=final_pipe,
                 preprocessing_desc=final_pipe.description(),
                 wavelength_selection=selection_meta,
+                X_reference=X_final,
             ),
             real_model,
         )
@@ -2128,6 +2156,7 @@ def nir_train_partitioned_model_tool(
     wv_row: int | None = 0,
     pipeline_steps: str = '["snv", {"method": "derivative1", "params": {"window": 15, "order": 2}}, "autoscale"]',
     method: str = "auto",
+    domain: str = "default",
     max_components: int = 20,
     compare_cars: bool | None = None,
     cars_params: str = '{"n_mc_samples": 50, "n_folds": 5, "random_state": 42}',
@@ -2159,6 +2188,7 @@ def nir_train_partitioned_model_tool(
         y_col: 0-based numeric target-column index in the CSV.
         x_cols: Spectral-column selector passed to nir_core, for example ``"9:"``.
         wv_row: Wavelength/header row index for mixed text/numeric CSV layouts.
+        domain: Application domain used for quality-gate thresholds.
         pipeline_steps: JSON preprocessing pipeline, fitted on Cal only during selection.
         method: ``auto`` (default) or an explicit supported model family.
         max_components: Maximum PLS latent variables considered on Tuning.
@@ -2182,7 +2212,6 @@ def nir_train_partitioned_model_tool(
     try:
         import json
 
-        import joblib
         import pandas as pd
         from nir_core.io.loaders import load_csv
         from nir_core.model.evaluation import compute_metrics
@@ -2324,6 +2353,7 @@ def nir_train_partitioned_model_tool(
             "selected_wavelengths": None if chosen["method"] == "none" else [float(wv[index]) for index in selected_indices],
         }
         metrics = {
+            "training_data_hash": _sha256_file(real_in),
             "method": chosen_model["method"],
             "n_components": None if best_n is None else int(best_n),
             "n_samples": int(X.shape[0]),
@@ -2352,18 +2382,19 @@ def nir_train_partitioned_model_tool(
         metrics["RMSEC"] = metrics["train"]["RMSE"]
         metrics["RMSECV"] = float(chosen_model["RMSE_tuning"])
         metrics["RMSEP"] = metrics["test"]["RMSE"]
-        quality = evaluate_quality(metrics, domain="food", n_samples=int(final_train_mask.sum()))
+        quality = evaluate_quality(metrics, domain=domain, n_samples=int(final_train_mask.sum()))
         metrics["quality"] = quality
 
         real_model = _resolve(runtime, model_output, read_only=False)
         os.makedirs(os.path.dirname(real_model), exist_ok=True)
-        joblib.dump(
+        _write_trusted_model_artifact(
             _build_model_artifact(
                 final_model,
                 method=chosen_model["method"],
                 preprocessing_pipeline=final_pipe,
                 preprocessing_desc=final_pipe.description(),
                 wavelength_selection=selection_meta,
+                X_reference=X_final,
             ),
             real_model,
         )
@@ -2579,7 +2610,6 @@ def nir_train_multi_model_tool(
         import base64
         import json
 
-        import joblib
         from nir_core.diagnostics import compute_residual_diagnostics
         from nir_core.model.evaluation import compute_metrics, split_dataset
         from nir_core.models import SpectralData
@@ -2594,7 +2624,7 @@ def nir_train_multi_model_tool(
         from nir_core.utils.metrics import evaluate_quality
 
         real_in = _resolve(runtime, input_path, read_only=True)
-        data_dict = dict(np.load(real_in, allow_pickle=True))
+        data_dict = _load_npz_safely(real_in)
         X = np.asarray(data_dict["X"], dtype=float)
         y = np.asarray(data_dict["y"], dtype=float)
         wv = np.asarray(data_dict["wv"], dtype=float).ravel() if data_dict.get("wv") is not None and data_dict["wv"].size else None
@@ -2625,6 +2655,7 @@ def nir_train_multi_model_tool(
         models: list = []
         selections: list[dict] = []
         preprocessing_artifacts: list[dict] = []
+        monitoring_references: list[dict | None] = []
         per_component: list[dict] = []
         knowledge_hints: list[dict] = []
         test_predictions: list[np.ndarray] = []
@@ -2672,6 +2703,12 @@ def nir_train_multi_model_tool(
             pred_tr = np.asarray(predict_fn(model, X_tr), dtype=float).ravel()
             pred_val = np.asarray(predict_fn(model, X_val), dtype=float).ravel()
             pred_te = np.asarray(predict_fn(model, X_te), dtype=float).ravel()
+            if X_tr.shape[0] >= 3:
+                from nir_core.utils.drift import fit_monitoring_reference
+
+                monitoring_references.append(fit_monitoring_reference(X_tr))
+            else:
+                monitoring_references.append(None)
 
             item = {
                 "name": name,
@@ -2759,6 +2796,7 @@ def nir_train_multi_model_tool(
         }
         overall["passed"] = overall["n_passed"] == overall["n_total"]
         metrics = {
+            "training_data_hash": _sha256_file(real_in),
             "method": method,
             "n_targets": len(names),
             "component_names": names,
@@ -2786,8 +2824,9 @@ def nir_train_multi_model_tool(
             "method": method,
             "preprocessing": preprocessing_artifact,
             "wavelength_selection": selections,
+            "monitoring_reference": monitoring_references,
         }
-        joblib.dump(artifact, real_model)
+        _write_trusted_model_artifact(artifact, real_model)
         with open(real_metrics, "w", encoding="utf-8") as file:
             json.dump(metrics, file, ensure_ascii=False, indent=2, default=_json_default)
         _write_multi_report(real_output_dir, metrics)
@@ -2896,7 +2935,6 @@ def nir_analyze_tool(
         (nir_train_model + nir_reflect) for a reflection loop.
     """
     try:
-        import joblib
         from nir_core.io.loaders import auto_detect_and_load, load_mat
         from nir_core.io.sniffers import detect_format
         from nir_core.model.evaluation import (
@@ -2911,7 +2949,7 @@ def nir_analyze_tool(
 
         # Load (npz or raw file).
         if data_path.endswith(".npz"):
-            data_dict = dict(np.load(real_in, allow_pickle=True))
+            data_dict = _load_npz_safely(real_in)
             from nir_core.models import SpectralData
 
             data = SpectralData(
@@ -3033,6 +3071,7 @@ def nir_analyze_tool(
         y_pred_tr = predict_fn(model, X_tr)
 
         metrics = {
+            "training_data_hash": _sha256_file(real_in),
             "method": selected_method,
             "n_components": best_n,
             "domain": domain,
@@ -3073,13 +3112,14 @@ def nir_analyze_tool(
         cv_path = os.path.join(real_outdir, "cv_curve.png")
         report_path = os.path.join(real_outdir, "report.md")
 
-        joblib.dump(
+        _write_trusted_model_artifact(
             _build_model_artifact(
                 model,
                 method=selected_method,
                 preprocessing_pipeline=best_pipe,
                 preprocessing_desc=preprocessing_desc,
                 wavelength_selection=wavelength_selection_meta,
+                X_reference=X_tr,
             ),
             model_path,
         )
@@ -3690,10 +3730,11 @@ def nir_register_model_tool(
         with open(real_metrics, encoding="utf-8") as f:
             metrics = _json.load(f)
 
-        # Compute a data hash from the model file (best-effort fingerprint).
+        # Compute a cryptographic artifact fingerprint. Training-data lineage
+        # remains a separate field and is populated when metrics provide it.
         with open(real_model, "rb") as f:
             model_bytes = f.read()
-        data_hash = hashlib.md5(model_bytes).hexdigest()
+        artifact_hash = hashlib.sha256(model_bytes).hexdigest()
 
         # Extract preprocessing steps from metrics if available.
         pp_steps = []
@@ -3711,8 +3752,9 @@ def nir_register_model_tool(
             method=metrics.get("method", "unknown"),
             metrics=metrics,
             preprocessing_steps=pp_steps,
-            data_hash=data_hash,
+            data_hash=str(metrics.get("training_data_hash", "unknown")),
             model_path=model_path,
+            artifact_hash=artifact_hash,
         )
 
         # Return a summary (no matrix data).

@@ -16,7 +16,7 @@ from langchain.tools import InjectedToolCallId, tool
 
 from deerflow.tools.types import Runtime
 
-from ._common import _err, _ok, _resolve
+from ._common import _err, _load_npz_safely, _load_trusted_model_artifact, _ok, _resolve
 
 
 def _unwrap_model_artifact(artifact):
@@ -26,8 +26,9 @@ def _unwrap_model_artifact(artifact):
             artifact.get("model"),
             artifact.get("preprocessing") or {},
             artifact.get("wavelength_selection") or {},
+            artifact.get("monitoring_reference"),
         )
-    return artifact, {}, {}
+    return artifact, {}, {}, None
 
 
 def _apply_artifact_preprocessing(
@@ -465,12 +466,10 @@ def nir_predict_tool(
         drift info. Individual predictions are saved to output_path if given.
     """
     try:
-        import joblib
-
         real_model = _resolve(runtime, model_path, read_only=True)
         real_data = _resolve(runtime, data_path, read_only=True)
-        artifact = joblib.load(real_model)
-        data_dict = dict(np.load(real_data, allow_pickle=True))
+        artifact = _load_trusted_model_artifact(real_model, model_path)
+        data_dict = _load_npz_safely(real_data)
         X = np.asarray(data_dict["X"], dtype=float)
         wv = np.asarray(data_dict["wv"], dtype=float).ravel() if data_dict.get("wv") is not None and data_dict["wv"].size else None
 
@@ -478,6 +477,7 @@ def nir_predict_tool(
             models = artifact.get("models") or []
             names = [str(name) for name in artifact.get("component_names") or []]
             selections = artifact.get("wavelength_selection") or []
+            monitoring_references = artifact.get("monitoring_reference") or []
             preprocessing_config = artifact.get("preprocessing") or {}
             n_targets = int(artifact.get("n_targets", len(models)))
             if not (len(models) == len(names) == len(selections) == n_targets):
@@ -485,6 +485,7 @@ def nir_predict_tool(
 
             predictions: list[np.ndarray] = []
             preprocessing_applied: list[bool] = []
+            drift_results: list[dict] = []
             for index, model_item in enumerate(models):
                 if isinstance(preprocessing_config, list):
                     if len(preprocessing_config) != n_targets:
@@ -501,6 +502,19 @@ def nir_predict_tool(
                 X_component = _apply_artifact_wavelength_selection(X_component, selections[index])
                 predictions.append(np.asarray(model_item.predict(X_component), dtype=float).ravel())
                 preprocessing_applied.append(applied)
+                if detect_drift and len(monitoring_references) == n_targets and monitoring_references[index]:
+                    from nir_core.utils.drift import compute_reference_drift
+
+                    component_drift = compute_reference_drift(monitoring_references[index], X_component)
+                    drift_results.append(
+                        {
+                            "name": names[index],
+                            "drift_score": component_drift["drift_score"],
+                            "flagged_indices": component_drift["flagged_indices"].tolist(),
+                            "t2_limit": component_drift["t2_limit"],
+                            "q_limit": component_drift["q_limit"],
+                        }
+                    )
 
             y_pred_multi = np.column_stack(predictions)
             result = {
@@ -524,13 +538,16 @@ def nir_predict_tool(
                 "wavelength_selection": selections,
             }
             if detect_drift:
-                from nir_core.utils.drift import compute_mahalanobis_drift
-
-                drift = compute_mahalanobis_drift(X, X, threshold=3.0)
-                result["drift"] = {
-                    "note": "Self-reference drift on raw spectra (no training matrix supplied).",
-                    "drift_score": float(drift["drift_score"]),
-                }
+                result["drift"] = (
+                    {
+                        "available": True,
+                        "method": "pca_t2_q",
+                        "per_component": drift_results,
+                        "drift_score": max((item["drift_score"] for item in drift_results), default=0.0),
+                    }
+                    if drift_results
+                    else {"available": False, "reason": "legacy_artifact_has_no_training_reference"}
+                )
             if output_path:
                 real_out = _resolve(runtime, output_path, read_only=False)
                 os.makedirs(os.path.dirname(real_out), exist_ok=True)
@@ -544,7 +561,7 @@ def nir_predict_tool(
                 result["output_path"] = output_path
             return _ok(result)
 
-        model, preprocessing, wavelength_selection = _unwrap_model_artifact(artifact)
+        model, preprocessing, wavelength_selection, monitoring_reference = _unwrap_model_artifact(artifact)
         if model is None:
             return _err("Model artifact is missing the fitted model object.")
         X, preprocessing_applied = _apply_artifact_preprocessing(
@@ -572,15 +589,22 @@ def nir_predict_tool(
         }
 
         if detect_drift:
-            from nir_core.utils.drift import compute_mahalanobis_drift
+            if monitoring_reference:
+                from nir_core.utils.drift import compute_reference_drift
 
-            # Use the input data itself as the reference distribution
-            # (best available proxy when no separate training matrix exists).
-            drift = compute_mahalanobis_drift(X, X, threshold=3.0)
-            result["drift"] = {
-                "note": "Self-reference drift (no training matrix supplied); supply training X for a true drift estimate.",
-                "drift_score": float(drift["drift_score"]),
-            }
+                drift = compute_reference_drift(monitoring_reference, X)
+                result["drift"] = {
+                    "available": True,
+                    "method": drift["method"],
+                    "drift_score": drift["drift_score"],
+                    "flagged_indices": drift["flagged_indices"].tolist(),
+                    "t2_flagged_indices": drift["t2_flagged_indices"].tolist(),
+                    "q_flagged_indices": drift["q_flagged_indices"].tolist(),
+                    "t2_limit": drift["t2_limit"],
+                    "q_limit": drift["q_limit"],
+                }
+            else:
+                result["drift"] = {"available": False, "reason": "legacy_artifact_has_no_training_reference"}
 
         if output_path:
             real_out = _resolve(runtime, output_path, read_only=False)

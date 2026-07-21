@@ -219,6 +219,14 @@ from deerflow.config import get_app_config
   also persist the fitted preprocessing pipeline, so `nir_predict` can apply
   train-time preprocessing and then the same spectral columns to raw samples;
   `input_preprocessed=true` explicitly bypasses the preprocessing step.
+  Model artifacts are written atomically with a SHA-256 manifest and prediction
+  rejects pickle files outside `/mnt/user-data/outputs` or without a valid
+  manifest. Optional HMAC signing can be required in production. NPZ reads use
+  `allow_pickle=False`, so labels must be stored as Unicode rather than object
+  arrays. Version-3 artifacts persist a compact PCA Hotelling T²/Q reference
+  fitted in final model space; `nir_predict` scores new samples against that
+  training domain and reports legacy artifacts as drift-unavailable instead of
+  comparing a batch with itself.
   Multi-component calibration uses the separate `nir_train_multi_model` tool
   under the `multi_modeling` workflow task. Explicit CSV `y_cols` are persisted
   as a two-dimensional y matrix with `y_names`; all targets share one split,

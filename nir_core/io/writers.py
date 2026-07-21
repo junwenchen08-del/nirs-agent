@@ -44,8 +44,10 @@ def save_npz(data: SpectralData, filepath: str) -> None:
         if data.wv is not None
         else np.empty(0, dtype=float)
     )
-    sample_names = np.asarray(data.sample_names, dtype=object)
-    y_names = np.asarray(data.y_names or [], dtype=object)
+    # Unicode arrays are deliberately used instead of object arrays so readers
+    # can keep ``allow_pickle=False`` at the user-data trust boundary.
+    sample_names = np.asarray(data.sample_names, dtype=str)
+    y_names = np.asarray(data.y_names or [], dtype=str)
 
     np.savez_compressed(
         filepath,
@@ -54,8 +56,8 @@ def save_npz(data: SpectralData, filepath: str) -> None:
         y_names=y_names,
         wv=wv,
         sample_names=sample_names,
-        source_file=np.asarray(data.source_file, dtype=object),
-        original_format=np.asarray(data.original_format, dtype=object),
+        source_file=np.asarray(data.source_file, dtype=str),
+        original_format=np.asarray(data.original_format, dtype=str),
     )
 
 

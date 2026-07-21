@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
-from nir_core.utils.registry import ModelRegistry
+from nir_core.utils.registry import ModelRegistry, RegistryCorruptionError
 
 
 @pytest.fixture
@@ -170,3 +171,47 @@ def test_wavelength_indices_stored(registry: ModelRegistry):
     )
     rec = registry.load_latest("m5")
     assert rec["wavelength_indices"] == [0, 5, 10]
+
+
+def test_corrupt_registry_fails_closed(tmp_path: Path):
+    path = tmp_path / "registry.json"
+    path.write_text("{not-json", encoding="utf-8")
+    registry = ModelRegistry(str(path))
+
+    with pytest.raises(RegistryCorruptionError, match="Cannot read model registry"):
+        registry.list_versions("anything")
+
+
+def test_registry_stores_separate_training_and_artifact_hashes(registry: ModelRegistry):
+    registry.register(
+        model_id="traceable",
+        method="pls",
+        metrics={"RPD": 3.0},
+        preprocessing_steps=[],
+        data_hash="training-sha256",
+        artifact_hash="artifact-sha256",
+        model_path="model.pkl",
+    )
+    record = registry.load_latest("traceable")
+    assert record["training_data_hash"] == "training-sha256"
+    assert record["artifact_sha256"] == "artifact-sha256"
+
+
+def test_concurrent_registrations_are_not_lost(registry: ModelRegistry):
+    def register(index: int) -> str:
+        return registry.register(
+            model_id="concurrent",
+            method="pls",
+            metrics={"RPD": float(index)},
+            preprocessing_steps=[],
+            data_hash=f"training-{index}",
+            artifact_hash=f"artifact-{index}",
+            model_path=f"model-{index}.pkl",
+        )
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        versions = list(executor.map(register, range(12)))
+
+    records = registry.list_versions("concurrent")
+    assert len(records) == 12
+    assert len(set(versions)) == 12

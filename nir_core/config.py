@@ -35,17 +35,22 @@ class QualityThresholds:
     )
 
     def get_thresholds(
-        self, domain: str = "default", n_samples: int | None = None
+        self,
+        domain: str = "default",
+        n_samples: int | None = None,
+        *,
+        allow_small_sample_relaxation: bool = False,
     ) -> dict[str, Any]:
         """Return effective thresholds.
 
-        For small samples (<100), thresholds are relaxed by R2-0.10 / RPD-0.5
-        (floored at 0.60 / 1.5) to avoid over-retrying on small datasets.
+        Production thresholds are never weakened merely because evidence is
+        scarce. Exploratory callers may explicitly request the historical
+        small-sample relaxation.
         """
         base = self.domain_thresholds.get(domain, self.domain_thresholds["default"])
         r2 = float(base["min_r2"])
         rpd = float(base["min_rpd"])
-        if n_samples is not None and n_samples < 100:
+        if allow_small_sample_relaxation and n_samples is not None and n_samples < 100:
             r2 = max(0.60, r2 - 0.10)
             rpd = max(1.5, rpd - 0.5)
         return {
@@ -54,6 +59,11 @@ class QualityThresholds:
             "max_retries": self.max_retries,
             "domain": domain,
             "n_samples": n_samples,
+            "small_sample_relaxation": bool(
+                allow_small_sample_relaxation
+                and n_samples is not None
+                and n_samples < 100
+            ),
         }
 
 

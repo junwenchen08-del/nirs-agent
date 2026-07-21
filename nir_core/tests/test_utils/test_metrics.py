@@ -85,7 +85,17 @@ def test_compute_metrics_has_all_keys():
     y_true = np.array([1.0, 2.0, 3.0])
     y_pred = np.array([1.1, 2.1, 2.9])
     m = compute_metrics(y_true, y_pred)
-    assert set(m.keys()) == {"RMSE", "R2", "RPD", "bias", "slope", "MAE"}
+    assert set(m.keys()) == {
+        "RMSE",
+        "R2",
+        "RPD",
+        "bias",
+        "slope",
+        "MAE",
+        "n",
+        "reference_mean",
+        "reference_std",
+    }
 
 
 def test_compute_matches_manual_numpy():
@@ -117,8 +127,13 @@ def test_compute_matches_manual_numpy():
 
 
 def test_evaluate_quality_excellent():
-    metrics = {"R2_val": 0.99, "RPD": 6.0, "RMSEP": 0.1, "RMSECV": 0.05,
-               "test": {"bias": 0.0}}
+    metrics = {
+        "R2_val": 0.99,
+        "RPD": 6.0,
+        "RMSEP": 0.1,
+        "RMSECV": 0.05,
+        "test": {"bias": 0.0},
+    }
     res = evaluate_quality(metrics, domain="default")
     assert res["grade"] == "excellent"
     assert res["passed"] is True

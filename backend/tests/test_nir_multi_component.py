@@ -38,7 +38,7 @@ def test_load_data_accepts_multiple_reference_columns(tmp_path: Path) -> None:
         )
 
     payload = json.loads(result)
-    archive = np.load(npz_file, allow_pickle=True)
+    archive = np.load(npz_file, allow_pickle=False)
     assert "error" not in payload
     assert payload["n_components"] == 3
     assert payload["y_names"] == ["protein", "moisture", "oil"]
@@ -61,7 +61,7 @@ def test_train_and_predict_multi_component_model(tmp_path: Path) -> None:
             X[:, 4] + X[:, 5] * 0.8,
         )
     )
-    names = np.asarray(["protein", "moisture", "oil"], dtype=object)
+    names = np.asarray(["protein", "moisture", "oil"], dtype=str)
     train_file = tmp_path / "train.npz"
     predict_file = tmp_path / "predict.npz"
     model_file = tmp_path / "multi-model.pkl"
@@ -122,13 +122,16 @@ def test_train_and_predict_multi_component_model(tmp_path: Path) -> None:
             model_path="/mnt/user-data/outputs/multi-model.pkl",
             data_path="/mnt/user-data/uploads/predict.npz",
             output_path="/mnt/user-data/outputs/predictions.csv",
-            detect_drift=False,
+            detect_drift=True,
         )
 
     prediction_payload = json.loads(prediction_result)
     assert prediction_payload["status"] == "ok"
     assert prediction_payload["n_targets"] == 3
     assert prediction_payload["component_names"] == names.tolist()
+    assert prediction_payload["drift"]["available"] is True
+    assert prediction_payload["drift"]["method"] == "pca_t2_q"
+    assert len(prediction_payload["drift"]["per_component"]) == 3
     assert len(prediction_payload["predictions_summary"]) == 3
     # Shared-preprocessing artifact (list format) must still report shared=True.
     assert prediction_payload["preprocessing"]["shared"] is True
@@ -174,7 +177,9 @@ def test_predict_multi_component_with_independent_preprocessing(tmp_path: Path) 
     }
     model_file = tmp_path / "independent.pkl"
     data_file = tmp_path / "predict.npz"
-    joblib.dump(artifact, model_file)
+    from deerflow.community.nir._common import _write_trusted_model_artifact
+
+    _write_trusted_model_artifact(artifact, str(model_file))
     np.savez(data_file, X=X_predict)
     paths = {
         "/mnt/user-data/outputs/independent.pkl": str(model_file),

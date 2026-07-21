@@ -10,7 +10,7 @@ from langchain.tools import InjectedToolCallId, tool
 
 from deerflow.tools.types import Runtime
 
-from ._common import _err, _ok, _parse_pipeline_step, _resolve
+from ._common import _err, _load_npz_safely, _ok, _parse_pipeline_step, _resolve
 
 
 @tool("nir_preprocess", parse_docstring=True)
@@ -108,7 +108,7 @@ def nir_preprocess_tool(
         real_out = _resolve(runtime, output_path, read_only=False)
         os.makedirs(os.path.dirname(real_out), exist_ok=True)
 
-        data_dict = dict(np.load(real_in, allow_pickle=True))
+        data_dict = _load_npz_safely(real_in)
         X = np.asarray(data_dict["X"], dtype=float)
 
         # Build and apply pipeline atomically.

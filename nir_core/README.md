@@ -96,4 +96,12 @@ set_nir_config(NirConfig.load("nir_config.json"))
 ```
 
 Quality thresholds are tiered by application domain (food_protein, food_moisture,
-soil, feed, pharma, default) and auto-relaxed for small samples (<100).
+soil, feed, pharma, default). Production evaluation never relaxes thresholds
+merely because the sample count is small. Exploratory callers must explicitly
+set `allow_small_sample_relaxation=True`; significant bias blocks passage even
+when R² and RPD meet their nominal thresholds.
+
+Model-space monitoring references use compact PCA Hotelling T² and Q-residual
+limits fitted on training spectra only. User-facing NPZ readers keep pickle
+disabled, and deployable model artifacts are loaded only after output-path and
+SHA-256 manifest verification (with optional required HMAC signing).

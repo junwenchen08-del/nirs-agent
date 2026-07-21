@@ -18,35 +18,96 @@ import re
 
 # NIR preprocessing methods (must align with nir_core PRESTEP_METHODS)
 _PREPROCESSING_METHODS = {
-    "snv", "msc", "sg_smooth", "savitzky-golay", "derivative", "derivative1",
-    "derivative2", "airpls", "asls", "detrend", "mean_center", "autoscale",
-    "normalize", "snv_detrend", "osc", "ems", "baseline_correction",
+    "snv",
+    "msc",
+    "sg_smooth",
+    "savitzky-golay",
+    "derivative",
+    "derivative1",
+    "derivative2",
+    "airpls",
+    "asls",
+    "detrend",
+    "mean_center",
+    "autoscale",
+    "normalize",
+    "snv_detrend",
+    "osc",
+    "ems",
+    "baseline_correction",
 }
 
 # Modeling methods
 _MODELING_METHODS = {
-    "pls", "pcr", "svr", "svr_rbf", "svr_linear", "svr_poly",
-    "ridge", "lasso", "elasticnet", "random_forest", "xgboost",
-    "ann", "cnn", "lstm", "plsr", "mlp", "lightgbm", "catboost",
+    "pls",
+    "pcr",
+    "svr",
+    "svr_rbf",
+    "svr_linear",
+    "svr_poly",
+    "ridge",
+    "lasso",
+    "elasticnet",
+    "random_forest",
+    "xgboost",
+    "ann",
+    "cnn",
+    "lstm",
+    "plsr",
+    "mlp",
+    "lightgbm",
+    "catboost",
 }
 
 # Variable selection / wavelength selection methods
 _VARIABLE_SELECTION = {
-    "spa", "cars", "uve", "vip", "mcuves", "irf", "boruta",
-    "genetic_algorithm", "ga", "sipl",
+    "spa",
+    "cars",
+    "uve",
+    "vip",
+    "mcuves",
+    "irf",
+    "boruta",
+    "genetic_algorithm",
+    "ga",
+    "sipl",
 }
 
 # Evaluation metrics
 _METRICS = {
-    "r2", "rmse", "rmsecv", "rmsep", "rpd", "rpdq", "bias", "slope",
-    "mae", "mse", "aicc", "sec", "sep",
+    "r2",
+    "rmse",
+    "rmsecv",
+    "rmsep",
+    "rpd",
+    "rpdq",
+    "bias",
+    "slope",
+    "mae",
+    "mse",
+    "aicc",
+    "sec",
+    "sep",
 }
 
 # Sample / dataset domains
 _DATASETS = {
-    "soil", "corn", "wheat", "rice", "barley", "oat",
-    "meat", "milk", "fruit", "coffee", "tea",
-    "pharmaceutical", "tablet", "powder", "forage", "silage",
+    "soil",
+    "corn",
+    "wheat",
+    "rice",
+    "barley",
+    "oat",
+    "meat",
+    "milk",
+    "fruit",
+    "coffee",
+    "tea",
+    "pharmaceutical",
+    "tablet",
+    "powder",
+    "forage",
+    "silage",
 }
 
 _ENTITIES: dict[str, set[str]] = {
@@ -132,9 +193,8 @@ def extract_entities(markdown: str) -> dict[str, list[str]]:
     text_lower = markdown.lower()
 
     # CJK Unicode range (for detecting whether \b word boundaries apply).
-    _is_cjk = lambda s: any(
-        "\u4e00" <= ch <= "\u9fff" for ch in s
-    )
+    def _is_cjk(value: str) -> bool:
+        return any("\u4e00" <= char <= "\u9fff" for char in value)
 
     def _find(terms: set[str], aliases: dict[str, str]) -> list[str]:
         found: set[str] = set()

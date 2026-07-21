@@ -12,6 +12,101 @@ import numpy as np
 from nir_core.models import ModelResult
 
 
+def fit_monitoring_reference(
+    X_train: np.ndarray,
+    *,
+    explained_variance: float = 0.99,
+    max_components: int = 20,
+    limit_quantile: float = 0.99,
+) -> dict:
+    """Fit a compact PCA applicability-domain reference in model space."""
+    X_train = np.asarray(X_train, dtype=float)
+    if X_train.ndim != 2 or X_train.shape[0] < 3 or X_train.shape[1] < 1:
+        raise ValueError("X_train must contain at least 3 rows and 1 feature")
+    if not 0.5 <= explained_variance <= 1.0:
+        raise ValueError("explained_variance must be in [0.5, 1.0]")
+    if not 0.5 < limit_quantile < 1.0:
+        raise ValueError("limit_quantile must be in (0.5, 1.0)")
+
+    mean = np.mean(X_train, axis=0)
+    centered = X_train - mean
+    _, singular_values, vt = np.linalg.svd(centered, full_matrices=False)
+    variances = singular_values**2
+    total = float(np.sum(variances))
+    if total <= np.finfo(float).eps:
+        n_components = 1
+    else:
+        cumulative = np.cumsum(variances) / total
+        n_components = int(np.searchsorted(cumulative, explained_variance) + 1)
+    n_components = max(
+        1,
+        min(n_components, int(max_components), X_train.shape[0] - 1, X_train.shape[1]),
+    )
+    components = vt[:n_components]
+    scores = centered @ components.T
+    score_covariance = np.atleast_2d(np.cov(scores, rowvar=False))
+    score_covariance_inv = np.linalg.pinv(score_covariance)
+    t2 = np.maximum(np.einsum("ij,jk,ik->i", scores, score_covariance_inv, scores), 0.0)
+    residual = centered - scores @ components
+    q_residual = np.sum(residual**2, axis=1)
+    epsilon = float(np.finfo(float).eps)
+    return {
+        "schema_version": 1,
+        "method": "pca_t2_q",
+        "n_train": int(X_train.shape[0]),
+        "n_features": int(X_train.shape[1]),
+        "n_components": int(n_components),
+        "mean": mean,
+        "components": components,
+        "score_covariance_inv": score_covariance_inv,
+        "t2_limit": max(float(np.quantile(t2, limit_quantile)), epsilon),
+        "q_limit": max(float(np.quantile(q_residual, limit_quantile)), epsilon),
+        "limit_quantile": float(limit_quantile),
+        "explained_variance_retained": float(np.sum(variances[:n_components]) / total)
+        if total > epsilon
+        else 1.0,
+    }
+
+
+def compute_reference_drift(reference: dict, X_new: np.ndarray) -> dict:
+    """Score new spectra against a fitted PCA T²/Q reference."""
+    if not isinstance(reference, dict) or reference.get("schema_version") != 1:
+        raise ValueError("Unsupported monitoring reference")
+    X_new = np.asarray(X_new, dtype=float)
+    if X_new.ndim != 2:
+        raise ValueError("X_new must be a 2-D array")
+    expected_features = int(reference["n_features"])
+    if X_new.shape[1] != expected_features:
+        raise ValueError(
+            f"X_new has {X_new.shape[1]} features; monitoring reference expects {expected_features}"
+        )
+
+    mean = np.asarray(reference["mean"], dtype=float)
+    components = np.asarray(reference["components"], dtype=float)
+    covariance_inv = np.asarray(reference["score_covariance_inv"], dtype=float)
+    centered = X_new - mean
+    scores = centered @ components.T
+    t2 = np.maximum(np.einsum("ij,jk,ik->i", scores, covariance_inv, scores), 0.0)
+    residual = centered - scores @ components
+    q_residual = np.sum(residual**2, axis=1)
+    t2_flags = t2 > float(reference["t2_limit"])
+    q_flags = q_residual > float(reference["q_limit"])
+    flagged = t2_flags | q_flags
+    return {
+        "method": "pca_t2_q",
+        "available": True,
+        "n_samples": int(X_new.shape[0]),
+        "drift_score": float(np.mean(flagged)) if flagged.size else 0.0,
+        "flagged_indices": np.flatnonzero(flagged).astype(int),
+        "t2_flagged_indices": np.flatnonzero(t2_flags).astype(int),
+        "q_flagged_indices": np.flatnonzero(q_flags).astype(int),
+        "t2": t2,
+        "q_residual": q_residual,
+        "t2_limit": float(reference["t2_limit"]),
+        "q_limit": float(reference["q_limit"]),
+    }
+
+
 def compute_mahalanobis_drift(
     X_train: np.ndarray,
     X_new: np.ndarray,
@@ -48,9 +143,7 @@ def compute_mahalanobis_drift(
     if X_train.ndim != 2 or X_new.ndim != 2:
         raise ValueError("X_train and X_new must be 2-D arrays.")
     if X_train.shape[1] != X_new.shape[1]:
-        raise ValueError(
-            "X_train and X_new must share the wavelength dimension."
-        )
+        raise ValueError("X_train and X_new must share the wavelength dimension.")
     n_new = X_new.shape[0]
     if n_new == 0:
         return {
@@ -115,9 +208,7 @@ def compute_drift_index(model_result: ModelResult, X_new: np.ndarray) -> float:
     cov = np.cov(diff, rowvar=False)
     cov = np.atleast_2d(cov)
     cov_inv = np.linalg.pinv(cov)
-    mahal_sq = np.maximum(
-        np.einsum("ij,jk,ik->i", diff, cov_inv, diff), 0.0
-    )
+    mahal_sq = np.maximum(np.einsum("ij,jk,ik->i", diff, cov_inv, diff), 0.0)
     mean_mahal = float(np.mean(np.sqrt(mahal_sq)))
 
     metrics = getattr(model_result, "metrics", {}) or {}

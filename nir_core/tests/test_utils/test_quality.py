@@ -9,8 +9,13 @@ import pytest
 from nir_core.utils.metrics import evaluate_quality
 
 
-def _metrics(r2: float, rpd: float, rmsep: float = 0.2,
-             rmsecv: float | None = None, bias_val: float = 0.0) -> dict:
+def _metrics(
+    r2: float,
+    rpd: float,
+    rmsep: float = 0.2,
+    rmsecv: float | None = None,
+    bias_val: float = 0.0,
+) -> dict:
     m: dict = {
         "R2_val": r2,
         "RPD": rpd,
@@ -62,18 +67,37 @@ def test_action_investigate_for_poor():
 
 
 def test_action_retry_on_overfitting_even_if_grade_good():
-    res = evaluate_quality(
-        _metrics(0.85, 3.2, rmsep=0.5, rmsecv=0.1), domain="default"
-    )
+    res = evaluate_quality(_metrics(0.85, 3.2, rmsep=0.5, rmsecv=0.1), domain="default")
     assert res["details"]["overfitting_risk"] is True
     assert res["action"] == "retry_preprocessing"
 
 
-def test_small_sample_relaxes_thresholds():
-    # n_samples=50 -> default relaxed to 0.70 / 2.5
+def test_small_sample_does_not_relax_production_thresholds():
     res = evaluate_quality(_metrics(0.72, 2.6), domain="default", n_samples=50)
+    assert res["grade"] == "fair"
+    assert res["passed"] is False
+    assert res["thresholds_used"]["small_sample_relaxation"] is False
+
+
+def test_small_sample_relaxation_requires_explicit_exploratory_opt_in():
+    res = evaluate_quality(
+        _metrics(0.72, 2.6),
+        domain="default",
+        n_samples=50,
+        allow_small_sample_relaxation=True,
+    )
     assert res["grade"] == "good"
-    assert res["passed"] is True
+    assert res["thresholds_used"]["small_sample_relaxation"] is True
+
+
+def test_significant_bias_blocks_otherwise_good_model():
+    metrics = _metrics(0.95, 4.5, rmsep=0.2, bias_val=0.5)
+    metrics["test"].update({"RMSE": 0.2, "n": 100, "reference_std": 1.0})
+    res = evaluate_quality(metrics, domain="default")
+    assert res["grade"] == "excellent"
+    assert res["details"]["bias_issue"] is True
+    assert res["passed"] is False
+    assert res["action"] == "investigate_data"
 
 
 def test_recommendation_is_chinese():

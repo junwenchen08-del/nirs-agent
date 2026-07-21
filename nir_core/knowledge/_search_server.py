@@ -64,11 +64,11 @@ _AUTH_TOKEN = os.environ.get("NIR_KNOWLEDGE_TOKEN", "")
 
 print(f"[knowledge-server] ChromaDB: {_cfg.chroma_path}")
 print(f"[knowledge-server] Model: {_model_path}")
-print(f"[knowledge-server] Retriever initialized")
+print("[knowledge-server] Retriever initialized")
 if _AUTH_TOKEN:
-    print(f"[knowledge-server] Auth: enabled (token from NIR_KNOWLEDGE_TOKEN)")
+    print("[knowledge-server] Auth: enabled (token from NIR_KNOWLEDGE_TOKEN)")
 else:
-    print(f"[knowledge-server] Auth: disabled (set NIR_KNOWLEDGE_TOKEN to enable)")
+    print("[knowledge-server] Auth: disabled (set NIR_KNOWLEDGE_TOKEN to enable)")
 
 
 # ---------------------------------------------------------------------------
@@ -98,18 +98,20 @@ def _do_search(query: str, top_k: int = 5) -> dict:
                     return [val]
             return []
 
-        output.append({
-            "content": r.chunk.content[:1000],
-            "source": r.chunk.source,
-            "score": round(r.score, 4),
-            "entities": {
-                "methods": _load("methods"),
-                "models": _load("models"),
-                "datasets": _load("datasets"),
-                "metrics": _load("metrics"),
-            },
-            "related_entities": r.related_entities,
-        })
+        output.append(
+            {
+                "content": r.chunk.content[:1000],
+                "source": r.chunk.source,
+                "score": round(r.score, 4),
+                "entities": {
+                    "methods": _load("methods"),
+                    "models": _load("models"),
+                    "datasets": _load("datasets"),
+                    "metrics": _load("metrics"),
+                },
+                "related_entities": r.related_entities,
+            }
+        )
 
     return {"results": output, "count": len(output), "query": query, "error": None}
 
@@ -120,13 +122,15 @@ def _do_list_documents() -> dict:
     # Normalise keys for JSON output
     out = []
     for d in docs:
-        out.append({
-            "doc_id": d.get("doc_id", ""),
-            "title": d.get("title", "") or d.get("doc_id", ""),
-            "source": d.get("source", ""),
-            "year": d.get("year"),
-            "chunk_count": d.get("chunk_count", 0),
-        })
+        out.append(
+            {
+                "doc_id": d.get("doc_id", ""),
+                "title": d.get("title", "") or d.get("doc_id", ""),
+                "source": d.get("source", ""),
+                "year": d.get("year"),
+                "chunk_count": d.get("chunk_count", 0),
+            }
+        )
     return {"documents": out, "count": len(out), "error": None}
 
 
@@ -158,7 +162,11 @@ def _do_add_document(
     try:
         raw = base64.b64decode(content_b64, validate=True)
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"Invalid base64 content: {exc}", "doc_id": None, "chunks_added": 0}
+        return {
+            "error": f"Invalid base64 content: {exc}",
+            "doc_id": None,
+            "chunks_added": 0,
+        }
 
     if len(raw) > _MAX_UPLOAD_BYTES:
         return {
@@ -186,11 +194,13 @@ def _do_add_document(
         )
         entities = extract_entities(markdown)
         for chunk in chunks:
-            chunk.metadata.update({
-                "title": title or doc_id,
-                "year": year,
-                **entities,
-            })
+            chunk.metadata.update(
+                {
+                    "title": title or doc_id,
+                    "year": year,
+                    **entities,
+                }
+            )
         count = _retriever.add_documents(chunks)
         return {
             "doc_id": doc_id,
@@ -218,7 +228,11 @@ def _do_add_document(
 def _do_delete_document(doc_id: str) -> dict:
     """Delete all chunks belonging to ``doc_id``."""
     success = _retriever.delete_document(doc_id)
-    return {"deleted": success, "doc_id": doc_id, "error": None if success else "delete failed"}
+    return {
+        "deleted": success,
+        "doc_id": doc_id,
+        "error": None if success else "delete failed",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -294,10 +308,15 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 self._send_json(200, _do_search(query, top_k))
             except Exception as exc:  # noqa: BLE001
-                self._send_json(500, {
-                    "results": [], "count": 0, "query": query,
-                    "error": f"{type(exc).__name__}: {exc}",
-                })
+                self._send_json(
+                    500,
+                    {
+                        "results": [],
+                        "count": 0,
+                        "query": query,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
             return
 
         if path == "/documents":
@@ -308,19 +327,27 @@ class _Handler(BaseHTTPRequestHandler):
             filename = req.get("filename", "")
             content_b64 = req.get("content_b64", "")
             if not filename or not content_b64:
-                self._send_json(400, {"error": "Missing 'filename' or 'content_b64' field"})
+                self._send_json(
+                    400, {"error": "Missing 'filename' or 'content_b64' field"}
+                )
                 return
             title = req.get("title")
             year = req.get("year")
             if isinstance(year, str) and year.isdigit():
                 year = int(year)
             try:
-                self._send_json(200, _do_add_document(filename, content_b64, title, year))
+                self._send_json(
+                    200, _do_add_document(filename, content_b64, title, year)
+                )
             except Exception as exc:  # noqa: BLE001
-                self._send_json(500, {
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "doc_id": None, "chunks_added": 0,
-                })
+                self._send_json(
+                    500,
+                    {
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "doc_id": None,
+                        "chunks_added": 0,
+                    },
+                )
             return
 
         self._send_json(404, {"error": "Not found"})
@@ -334,17 +361,21 @@ class _Handler(BaseHTTPRequestHandler):
 
         # /documents/{doc_id}
         if path.startswith("/documents/"):
-            doc_id = unquote(path[len("/documents/"):])
+            doc_id = unquote(path[len("/documents/") :])
             if not doc_id:
                 self._send_json(400, {"error": "Missing doc_id"})
                 return
             try:
                 self._send_json(200, _do_delete_document(doc_id))
             except Exception as exc:  # noqa: BLE001
-                self._send_json(500, {
-                    "deleted": False, "doc_id": doc_id,
-                    "error": f"{type(exc).__name__}: {exc}",
-                })
+                self._send_json(
+                    500,
+                    {
+                        "deleted": False,
+                        "doc_id": doc_id,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
             return
 
         self._send_json(404, {"error": "Not found"})
@@ -358,8 +389,10 @@ def main() -> None:
     host = "0.0.0.0"  # bind all interfaces so Docker can reach it
     server = HTTPServer((host, port), _Handler)
     print(f"[knowledge-server] Listening on http://{host}:{port}")
-    print(f"[knowledge-server] Endpoints: GET /health, GET /documents, GET /stats,")
-    print(f"[knowledge-server]             POST /search, POST /documents, DELETE /documents/{{doc_id}}")
+    print("[knowledge-server] Endpoints: GET /health, GET /documents, GET /stats,")
+    print(
+        "[knowledge-server]             POST /search, POST /documents, DELETE /documents/{doc_id}"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

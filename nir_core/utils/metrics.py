@@ -148,8 +148,10 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
         y_pred: Predicted values.
 
     Returns:
-        Dict with keys ``{"RMSE", "R2", "RPD", "bias", "slope", "MAE"}``.
+        Dict with prediction metrics plus ``n``, ``reference_mean`` and
+        ``reference_std`` for statistically scaled quality gates.
     """
+    y_true_arr = np.asarray(y_true, dtype=float).ravel()
     return {
         "RMSE": rmse(y_true, y_pred),
         "R2": r2_score(y_true, y_pred),
@@ -157,6 +159,11 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
         "bias": bias(y_true, y_pred),
         "slope": slope(y_true, y_pred),
         "MAE": mae(y_true, y_pred),
+        "n": int(y_true_arr.size),
+        "reference_mean": float(np.mean(y_true_arr)) if y_true_arr.size else 0.0,
+        "reference_std": float(np.std(y_true_arr, ddof=1))
+        if y_true_arr.size > 1
+        else 0.0,
     }
 
 
@@ -252,6 +259,8 @@ def evaluate_quality(
     metrics: dict,
     domain: str = "default",
     n_samples: int | None = None,
+    *,
+    allow_small_sample_relaxation: bool = False,
 ) -> dict:
     """Evaluate model quality against domain-aware thresholds.
 
@@ -275,8 +284,9 @@ def evaluate_quality(
     Args:
         metrics: Metric dict, possibly nested (e.g. ``test.bias``).
         domain: Application domain key (e.g. ``"soil"``, ``"food_moisture"``).
-        n_samples: Number of calibration samples; small (<100) relaxes
-            thresholds via ``QualityThresholds.get_thresholds``.
+        n_samples: Number of calibration samples.
+        allow_small_sample_relaxation: Explicit exploratory-mode opt-in for
+            relaxed thresholds. Production callers should keep the default.
 
     Returns:
         Dict with keys:
@@ -290,7 +300,11 @@ def evaluate_quality(
           bias_issue}``.
     """
     cfg = get_nir_config()
-    thresholds = cfg.quality.get_thresholds(domain=domain, n_samples=n_samples)
+    thresholds = cfg.quality.get_thresholds(
+        domain=domain,
+        n_samples=n_samples,
+        allow_small_sample_relaxation=allow_small_sample_relaxation,
+    )
     min_r2 = float(thresholds["min_r2"])
     min_rpd = float(thresholds["min_rpd"])
 
@@ -351,23 +365,44 @@ def evaluate_quality(
 
     # Bias issue detection (conservative; never flags a zero bias).
     test_bias = _extract_bias(metrics)
-    y_vals = metrics.get("y")
-    if y_vals is not None:
+    test_block = metrics.get("test") if isinstance(metrics.get("test"), dict) else {}
+    reference_std = test_block.get("reference_std")
+    test_n = test_block.get("n")
+    test_rmse = test_block.get("RMSE", rmsep)
+    try:
+        scale_limit = (
+            0.1 * abs(float(reference_std)) if reference_std is not None else 0.0
+        )
+        sampling_limit = (
+            2.0 * abs(float(test_rmse)) / np.sqrt(max(1, int(test_n)))
+            if test_rmse is not None and test_n is not None
+            else 0.0
+        )
+        bias_limit = max(scale_limit, sampling_limit)
+    except (TypeError, ValueError):
+        bias_limit = 0.0
+    if bias_limit == 0.0:
+        # Backward-compatible fallback for legacy metric dictionaries.
+        y_vals = metrics.get("y")
         try:
-            ref_central = float(np.mean(np.asarray(y_vals, dtype=float)))
+            ref_central = (
+                float(np.mean(np.asarray(y_vals, dtype=float)))
+                if y_vals is not None
+                else 1.0
+            )
         except (TypeError, ValueError):
             ref_central = 1.0
-    else:
-        ref_central = 1.0
-    if ref_central == 0.0:
-        ref_central = 1.0
-    bias_issue = (test_bias != 0.0) and (abs(test_bias) > 0.1 * abs(ref_central))
+        bias_limit = 0.1 * max(abs(ref_central), 1.0)
+    bias_issue = (test_bias != 0.0) and (abs(test_bias) > bias_limit)
 
     # Action mapping.
-    if grade in ("excellent", "good") and not overfitting:
+    passed = grade in ("excellent", "good") and not overfitting and not bias_issue
+    if passed:
         action = "proceed"
     elif overfitting:
         action = "retry_preprocessing"
+    elif bias_issue:
+        action = "investigate_data"
     elif grade == "fair":
         action = "retry_preprocessing"
     else:
@@ -388,7 +423,7 @@ def evaluate_quality(
 
     return {
         "grade": grade,
-        "passed": grade in ("excellent", "good"),
+        "passed": passed,
         "recommendation": recommendation,
         "action": action,
         "thresholds_used": thresholds,
@@ -397,5 +432,6 @@ def evaluate_quality(
             "RPD_status": rpd_status,
             "overfitting_risk": overfitting,
             "bias_issue": bias_issue,
+            "bias_limit": float(bias_limit),
         },
     }

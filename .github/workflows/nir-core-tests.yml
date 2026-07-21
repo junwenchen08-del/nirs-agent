@@ -1,0 +1,47 @@
+name: NIR Core Tests
+
+on:
+  push:
+    branches: [main, 2.0.x-dev]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: nir-core-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  nir-core-fast-gate:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+      - name: Install NIR core development dependencies
+        run: uv sync --project nir_core --extra dev
+      - name: Lint NIR core
+        run: uv run --project nir_core ruff check nir_core --exclude tests,scripts
+      - name: Run deterministic fast suite
+        run: uv run --project nir_core pytest -m "not slow" --quiet
+
+  nir-core-slow-gate:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+      - name: Install NIR core development dependencies
+        run: uv sync --project nir_core --extra dev
+      - name: Run compute-intensive regressions
+        run: uv run --project nir_core pytest -m slow --quiet
