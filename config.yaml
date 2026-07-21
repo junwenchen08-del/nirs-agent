@@ -906,6 +906,18 @@ tools:
     group: bash
     use: deerflow.community.nir.modeling:nir_train_model_tool
 
+  - name: nir_train_auto_split_model
+    group: bash
+    use: deerflow.community.nir.modeling:nir_train_auto_split_model_tool
+
+  - name: nir_train_partitioned_model
+    group: bash
+    use: deerflow.community.nir.modeling:nir_train_partitioned_model_tool
+
+  - name: nir_train_multi_model
+    group: bash
+    use: deerflow.community.nir.modeling:nir_train_multi_model_tool
+
   - name: nir_predict
     group: bash
     use: deerflow.community.nir.io_tools:nir_predict_tool
@@ -913,6 +925,10 @@ tools:
   - name: nir_analyze
     group: bash
     use: deerflow.community.nir.modeling:nir_analyze_tool
+
+  - name: nir_analyze_collection
+    group: bash
+    use: deerflow.community.nir.modeling:nir_analyze_collection_tool
 
   - name: nir_reflect
     group: bash
@@ -969,17 +985,19 @@ subagents:
       timeout_seconds: 600
 
     nir-modeler:
-      description: "化学计量学建模专家。建立并评估 PLS/PCR/SVR 校准模型。"
+      description: "化学计量学建模专家。建立并评估普通单成分、官方划分单成分或多成分校准模型。"
       system_prompt: |
         你是化学计量学建模专家。
-        ⛔ 绝对禁止：禁止自己写 Python/scipy/sklearn 代码或调用 bash 执行建模。所有建模必须通过调用 nir_train_model 工具完成。
-        职责：对预处理后的 .npz 数据建立回归模型并返回完整评估指标。
+        ⛔ 绝对禁止：禁止自己写 Python/scipy/sklearn 代码或调用 bash 执行建模。所有建模必须通过调用 nir_train_auto_split_model、nir_train_model、nir_train_partitioned_model 或 nir_train_multi_model 工具完成。
+        职责：对原始 CSV 或预处理后的 .npz 数据建立回归模型并返回完整评估指标。
         步骤：
         1. 用 read_file 读取 SKILL.md（如未读取）确认方法
-        2. 调用 nir_train_model 工具，传入 input_path、method（或 pipeline_steps 防泄露）、model_output、metrics_output、domain
-        3. 读取返回的 metrics，报告 R²_val、RPD、RMSEP
+        2. 单成分 CSV 如果含官方命名划分列（如 Set/Partition/Split，且包含 Cal/Tuning/Val Ext 等标签），必须直接调用一次 nir_train_partitioned_model；禁止先调用 nir_preprocess/nir_train_model/nir_analyze，也禁止对该结果进入 nir_reflect 重试循环
+        3. 无官方划分的普通单成分 CSV 必须调用一次 nir_train_auto_split_model(split_strategy="auto", compare_cars=false)，由工具按字段和样本规模自主选择 group/SPXY/y_stratified；不得把独立留出测试称为外部验证，也不得进入 nir_reflect 重试循环
+        4. 已标准化为 NPZ 且用户明确要求深度优化时才调用 nir_train_model；多成分、同时分析请求调用一次 nir_train_multi_model
+        5. 读取返回的 metrics，报告目标变量、实际划分策略、选择原因、分组字段或规模阈值、最终模型、R²、RPD、RMSE 和 bias；官方划分任务明确标注 external_test，无官方划分任务明确标注 holdout_test
         限制：只建模，不做预处理。不判断质量是否达标，只返回指标。禁止自己写 PLS/PCR/SVR 代码。
-      tools: [read_file, write_file, ls, nir_train_model]
+      tools: [read_file, write_file, ls, nir_train_auto_split_model, nir_train_model, nir_train_partitioned_model, nir_train_multi_model]
       skills: []
       model: inherit
       max_turns: 80
@@ -1130,7 +1148,9 @@ sandbox:
   # read_file and ls use head-truncation since their content is front-loaded.
   # Set to 0 to disable truncation.
   bash_output_max_chars: 20000
-  read_file_output_max_chars: 50000
+  # Keep ordinary file previews compact. Large generated reports should be
+  # presented as artifacts; agents should read metrics JSON or bounded ranges.
+  read_file_output_max_chars: 12000
   ls_output_max_chars: 20000
 
   # Maximum wall-clock seconds a single host bash command may run before it is
@@ -1342,19 +1362,20 @@ summarization:
   # Context retention policy after summarization
   # Specifies how much recent history to preserve
   keep:
-    # Keep the most recent 10 messages (recommended)
-    type: messages
-    value: 10
-    # Alternative: Keep specific token count
-    # type: tokens
-    # value: 3000
+    # Bound preserved recent context by tokens. A message-count policy can
+    # retain several 50k-character tool results and defeat summarization.
+    type: tokens
+    value: 8000
+    # Alternative: Keep the most recent message count
+    # type: messages
+    # value: 10
     # Alternative: Keep percentage of model's max input tokens
     # type: fraction
     # value: 0.3
 
   # Maximum tokens to keep when preparing messages for summarization
   # Set to null to skip trimming (not recommended for very long conversations)
-  trim_tokens_to_summarize: 15564
+  trim_tokens_to_summarize: 12000
 
   # Custom summary prompt template (null = use default LangChain prompt)
   # The prompt should guide the model to extract important context

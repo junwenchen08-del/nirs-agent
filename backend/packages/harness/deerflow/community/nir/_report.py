@@ -1,8 +1,8 @@
 """Markdown report builder for NIR analysis tools.
 
-Generates a Chinese-language analysis report with embedded base64 plot
-images, used by ``nir_train_model_tool`` / ``nir_analyze_tool`` /
-``nir_compare_tool``.
+Generates a compact Chinese-language analysis report that references the
+plot files written beside it.  Keeping binary PNG payloads out of Markdown
+prevents report reads from flooding the model context.
 """
 
 from __future__ import annotations
@@ -18,12 +18,23 @@ def _build_report(
     residuals_b64: str = "",
     cv_curve_b64: str = "",
 ) -> str:
-    """Build a Chinese Markdown analysis report with embedded plots."""
+    """Build a compact Chinese Markdown analysis report with plot references."""
     pp = best_pipe.description() if best_pipe else "无（使用原始光谱）"
+    model_decision = metrics.get("model_selection_decision")
+    model_decision_lines: list[str] = []
+    if isinstance(model_decision, dict):
+        candidates = metrics.get("model_candidates", [])
+        compared = ", ".join(str(item.get("method")) for item in candidates if isinstance(item, dict))
+        model_decision_lines = [
+            f"- 模型选择模式: {model_decision.get('mode', '-')}",
+            f"- 模型选择原因: {model_decision.get('reason', '-')}",
+            f"- 候选模型: {compared or '-'}",
+            f"- 最终模型: {model_decision.get('selected_method', metrics.get('method', '-'))}",
+        ]
     lines = [
         "# 近红外光谱分析报告",
         "",
-        "> 本报告由 `nir_analyze` 工具自动生成。所有图表已嵌入下方，无需额外调用 matplotlib 绘制。",
+        "> 本报告由 NIR 建模工具自动生成。图表作为同目录独立文件保存，避免在报告中嵌入大型 Base64 数据。",
         "",
         "## 1. 数据概览",
         f"- 样本数: {metrics['n_samples']}",
@@ -40,6 +51,7 @@ def _build_report(
         f"- R²(验证集): {metrics['R2_val']:.4f}",
         f"- RPD(测试集): {metrics['RPD']:.4f}",
         f"- RMSEP(测试集): {metrics['RMSEP']:.4f}",
+        *model_decision_lines,
         "",
         "## 4. 质量评估",
         f"- 等级: {quality['grade']}",
@@ -51,20 +63,20 @@ def _build_report(
         "## 5. 可视化",
     ]
 
-    def _embed(title: str, b64: str) -> list[str]:
+    def _plot_reference(title: str, b64: str, filename: str) -> list[str]:
         if not b64:
             return []
         return [
             f"### {title}",
             "",
-            f"![{title}](data:image/png;base64,{b64})",
+            f"- 图表文件: `{filename}`",
             "",
         ]
 
-    lines.extend(_embed("原始光谱", raw_spectra_b64))
-    lines.extend(_embed("预测 vs 参考值（测试集）", predicted_vs_reference_b64))
-    lines.extend(_embed("残差诊断", residuals_b64))
-    lines.extend(_embed("交叉验证选成分", cv_curve_b64))
+    lines.extend(_plot_reference("原始光谱", raw_spectra_b64, "raw_spectra.png"))
+    lines.extend(_plot_reference("预测 vs 参考值（测试集）", predicted_vs_reference_b64, "predicted_vs_reference.png"))
+    lines.extend(_plot_reference("残差诊断", residuals_b64, "residuals.png"))
+    lines.extend(_plot_reference("交叉验证选成分", cv_curve_b64, "cv_curve.png"))
 
     lines.extend(
         [

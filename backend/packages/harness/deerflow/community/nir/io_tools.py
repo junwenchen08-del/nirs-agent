@@ -7,6 +7,7 @@ to the LLM — only JSON metadata and (optionally) saved .npz / .csv paths.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Annotated
 
@@ -60,15 +61,58 @@ def _apply_artifact_wavelength_selection(X: np.ndarray, wavelength_selection: di
     return X[:, selected]
 
 
+def _parse_y_cols(value: str | None) -> list[int] | None:
+    """Parse a compact multi-target column selector."""
+    if value is None:
+        return None
+    selected: list[int] = []
+    for token in value.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if ":" in token:
+            parts = token.split(":")
+            if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+                raise ValueError("y_cols ranges must use explicit 'start:stop' bounds")
+            selected.extend(range(int(parts[0]), int(parts[1])))
+        else:
+            selected.append(int(token))
+    selected = list(dict.fromkeys(selected))
+    if not selected:
+        raise ValueError("y_cols must select at least one column")
+    return selected
+
+
+def _compact_inspection_sequence(value, *, limit: int = 32):
+    """Bound long schema lists before they enter the model context."""
+    if not isinstance(value, list) or len(value) <= limit:
+        return value
+    if all(isinstance(item, int) and not isinstance(item, bool) for item in value):
+        contiguous = all(right == left + 1 for left, right in zip(value, value[1:]))
+        if contiguous:
+            return {"start": value[0], "stop": value[-1] + 1, "count": len(value)}
+    numeric = [float(item) for item in value if isinstance(item, (int, float))]
+    result = {"count": len(value), "first": value[:5], "last": value[-3:]}
+    if len(numeric) == len(value):
+        result["min"] = min(numeric)
+        result["max"] = max(numeric)
+    return result
+
+
 @tool("nir_load_data", parse_docstring=True)
 def nir_load_data_tool(
     runtime: Runtime,
     file_path: str,
     output_path: str | None = None,
     y_col: int | None = None,
+    y_cols: str | None = None,
     wv_row: int | None = None,
     x_cols: str | None = None,
     subset: str | None = None,
+    x_var: str | None = None,
+    y_var: str | None = None,
+    wv_var: str | None = None,
+    transpose: bool = False,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",  # noqa: ARG001
 ) -> str:
     """Load a near-infrared spectral data file (.mat / .csv / .txt).
@@ -115,22 +159,30 @@ def nir_load_data_tool(
             (CSV/TXT only; ignored for .mat). When provided, auto-detection
             is bypassed and this column is split as y. ``None`` (default)
             triggers auto-detection.
+        y_cols: Optional multi-component reference columns as a comma list
+            or half-open range string. Mutually exclusive with y_col.
+            Multi-component loading stores y as a two-dimensional matrix.
         wv_row: Optional 0-based index of the wavelength row (CSV/TXT only;
             ignored for .mat). When provided, auto-detection is bypassed and
             this row is split as wv. ``None`` (default) triggers
             auto-detection.
         x_cols: ★ v3.8 Optional column selector for the spectra block X
             (CSV/TXT only; ignored for .mat). Use this to skip metadata
-            columns. Syntax: ``"8:"`` (col 8 to end), ``"8:314"`` (half-open
-            range), ``":8"`` (cols 0-7), ``"8,9,10"`` (explicit list). When
-            y_col is inside the selected range it is automatically excluded
-            from X. Example for the Anderson mango dataset with 8 metadata
-            cols + DM at col 8 + 306 spectra cols: pass
-            ``y_col=8, wv_row=0, x_cols="9:"``.
+            columns using a slice or comma-separated list. When y_col is
+            inside the selected range it is automatically excluded from X.
+            For the Anderson mango layout, select spectra after the metadata
+            and reference columns.
         subset: Optional name of a sub-dataset inside a MATLAB struct .mat
             file (e.g. ``"R562"``). Call ``nir_inspect`` first to see the
             available subsets; when multiple exist and this is None, the
             tool returns an error listing them.
+        x_var: Optional MATLAB field path for spectra, including dotted paths
+            reported by nir_inspect (for example ``Experiment.block_b``).
+            Use only after a low-confidence inspection asks for confirmation.
+        y_var: Optional MATLAB field path for reference values.
+        wv_var: Optional MATLAB field path for the wavelength/wavenumber axis.
+        transpose: Set true only when nir_inspect reports that the explicitly
+            selected MATLAB spectra matrix stores samples in columns.
 
     Returns:
         JSON summary of the loaded data (sample count, wavelength range,
@@ -139,21 +191,46 @@ def nir_load_data_tool(
     """
     try:
         from nir_core.io.loaders import auto_detect_and_load, load_csv, load_mat
-        from nir_core.io.sniffers import detect_format
+        from nir_core.io.sniffers import detect_format, inspect_file
         from nir_core.io.writers import save_npz
 
         real_in = _resolve(runtime, file_path, read_only=True)
+
+        parsed_y_cols = _parse_y_cols(y_cols)
+        if y_col is not None and parsed_y_cols is not None:
+            return _err("y_col and y_cols are mutually exclusive")
 
         # When explicit y_col / wv_row / x_cols are provided for CSV/TXT files,
         # bypass auto-detection and call load_csv with the override.
         # This gives the agent an escape hatch when auto-detection fails,
         # so it never needs to fall back to writing Python scripts.
-        has_override = y_col is not None or wv_row is not None or x_cols is not None
-        if has_override and detect_format(real_in) != "mat":
-            data = load_csv(real_in, y_col=y_col, wv_row=wv_row, x_cols=x_cols)
-        elif subset is not None and detect_format(real_in) == "mat":
-            # Struct .mat with explicit subset selection.
-            data = load_mat(real_in, subset=subset)
+        file_format = detect_format(real_in)
+        csv_override = y_col is not None or parsed_y_cols is not None or wv_row is not None or x_cols is not None
+        mat_override = x_var is not None or y_var is not None or wv_var is not None or transpose
+        has_override = csv_override or mat_override
+        if not has_override and subset is None:
+            inspected = json.loads(inspect_file(real_in))
+            mapping = inspected.get("schema_mapping") or {}
+            if mapping.get("status") == "needs_user_mapping":
+                return _err(
+                    "Field mapping confirmation required before loading. "
+                    f"Candidate spectra fields: {mapping.get('x_candidates', [])}; "
+                    f"candidate reference fields: {mapping.get('y_candidates', [])}; "
+                    f"candidate numeric columns: {mapping.get('candidate_numeric_columns', [])}. "
+                    "Call nir_inspect, ask the user to confirm the mapping, then retry "
+                    "with x_var/y_var/wv_var or y_col/x_cols."
+                )
+        if csv_override and file_format != "mat":
+            data = load_csv(real_in, y_col=y_col, y_cols=parsed_y_cols, wv_row=wv_row, x_cols=x_cols)
+        elif file_format == "mat" and (subset is not None or mat_override):
+            data = load_mat(
+                real_in,
+                x_var=x_var,
+                y_var=y_var,
+                wv_var=wv_var,
+                subset=subset,
+                transpose=transpose,
+            )
         else:
             data = auto_detect_and_load(real_in)
 
@@ -166,6 +243,11 @@ def nir_load_data_tool(
         summary["layout_override_used"] = has_override
         summary["subset_used"] = subset
         summary["x_cols_used"] = x_cols
+        summary["y_cols_used"] = parsed_y_cols
+        summary["x_var_used"] = x_var
+        summary["y_var_used"] = y_var
+        summary["wv_var_used"] = wv_var
+        summary["transpose_used"] = transpose
         # ⭐ Surface the auto-detected layout so the agent can confirm y and
         # wv have been correctly separated from the raw CSV block. Without
         # these explicit fields the agent tends to "double-check" by writing
@@ -174,8 +256,13 @@ def nir_load_data_tool(
         summary["y_separated"] = data.y is not None
         summary["wv_separated"] = data.wv is not None
         if data.y is not None:
-            summary["y_first_values"] = [round(float(v), 4) for v in data.y[:5]]
-            summary["y_last_values"] = [round(float(v), 4) for v in data.y[-3:]]
+            y_arr = np.asarray(data.y, dtype=float)
+            if y_arr.ndim == 1:
+                summary["y_first_values"] = [round(float(v), 4) for v in y_arr[:5]]
+                summary["y_last_values"] = [round(float(v), 4) for v in y_arr[-3:]]
+            else:
+                summary["y_first_values"] = np.round(y_arr[:5], 4).tolist()
+                summary["y_last_values"] = np.round(y_arr[-3:], 4).tolist()
         if data.wv is not None:
             summary["wv_first_values"] = [round(float(v), 2) for v in data.wv[:3]]
             summary["wv_last_values"] = [round(float(v), 2) for v in data.wv[-3:]]
@@ -222,11 +309,28 @@ def nir_inspect_tool(
         except (TypeError, ValueError):
             return raw
 
+        schema_mapping = info.get("schema_mapping") or {}
+        for key in ("spectral_columns", "candidate_numeric_columns", "wavelengths"):
+            if key in schema_mapping:
+                schema_mapping[key] = _compact_inspection_sequence(schema_mapping[key])
+        if schema_mapping:
+            info["schema_mapping"] = schema_mapping
+        for key in ("column_names", "spectral_column_indices"):
+            if key in info:
+                info[key] = _compact_inspection_sequence(info[key])
+
         # Add layout advisory so the agent knows whether the NIR-style
         # "row-label + column-label" pattern is present without having to
         # open the file in Python.
         corner_nan = bool(info.get("corner_is_nan"))
-        info["layout_pattern"] = "row_label_and_column_label" if corner_nan else "plain_matrix"
+        if info.get("labeled_matrix"):
+            info["layout_pattern"] = "labeled_matrix_bundle"
+        elif (info.get("schema_mapping") or {}).get("status") == "auto":
+            info["layout_pattern"] = "schema_inferred"
+        elif (info.get("schema_mapping") or {}).get("status") == "needs_user_mapping":
+            info["layout_pattern"] = "mapping_required"
+        else:
+            info["layout_pattern"] = "row_label_and_column_label" if corner_nan else "plain_matrix"
 
         # ★ v3.8: Non-numeric metadata column advisory. When inspect detects
         # columns that are almost entirely NaN (= string columns like
@@ -256,7 +360,36 @@ def nir_inspect_tool(
 
         # ★ v3.7: Struct .mat advisory — when the file is a MATLAB struct,
         # tell the agent exactly how to call nir_load_data(subset=...).
-        if info.get("is_struct"):
+        schema_mapping = info.get("schema_mapping") or {}
+        mapping_needs_confirmation = schema_mapping.get("status") == "needs_user_mapping" and not (info.get("is_struct") and info.get("available_subsets"))
+        if info.get("labeled_matrix"):
+            info["hint"] = (
+                "MATLAB labeled matrix detected. nir_load_data will automatically "
+                f"use {info.get('target_columns', [])} as reference values, exclude "
+                f"metadata columns {info.get('metadata_columns', [])}, parse numeric "
+                "VarLabels as the spectral axis, and preserve ObjLabels as sample names. "
+                "Call nir_load_data directly without y_col, x_cols, wv_row, or Python scripts."
+            )
+        elif mapping_needs_confirmation:
+            info["action_required"] = "confirm_field_mapping"
+            x_candidates = schema_mapping.get("x_candidates") or []
+            y_candidates = schema_mapping.get("y_candidates") or []
+            numeric_columns = schema_mapping.get("candidate_numeric_columns") or []
+            info["hint"] = (
+                "The file was parsed successfully, but its field roles are ambiguous, "
+                f"so modeling has been paused. Candidate spectra fields: {x_candidates}; "
+                f"candidate reference fields: {y_candidates}; candidate numeric CSV "
+                f"columns: {numeric_columns}. Ask the user to confirm which field/columns "
+                "are spectra and which are reference values, then call nir_load_data with "
+                "explicit mapping arguments. Do not write a script or guess between equal candidates."
+            )
+        elif schema_mapping.get("status") == "auto":
+            info["hint"] = (
+                "A high-confidence schema mapping was inferred from field names, numeric "
+                "column headers, dimensions, and axis monotonicity. nir_load_data will use "
+                f"this mapping directly: {schema_mapping}. No script or manual parsing is needed."
+            )
+        elif info.get("is_struct"):
             subsets = info.get("available_subsets") or []
             if subsets:
                 info["hint"] = (
@@ -312,7 +445,8 @@ def nir_predict_tool(
     """Predict reference values for new spectra using a trained model.
 
     Loads a joblib-serialised model and applies its fitted preprocessing and
-    wavelength selection metadata to raw spectra before inference.
+    wavelength selection metadata to raw spectra before inference. Version-3
+    multi-output artifacts produce one named prediction column per component.
     Optionally runs Mahalanobis drift detection against the training
     distribution (if the metrics JSON contains training stats).
 
@@ -335,12 +469,84 @@ def nir_predict_tool(
 
         real_model = _resolve(runtime, model_path, read_only=True)
         real_data = _resolve(runtime, data_path, read_only=True)
-        model, preprocessing, wavelength_selection = _unwrap_model_artifact(joblib.load(real_model))
-        if model is None:
-            return _err("Model artifact is missing the fitted model object.")
+        artifact = joblib.load(real_model)
         data_dict = dict(np.load(real_data, allow_pickle=True))
         X = np.asarray(data_dict["X"], dtype=float)
         wv = np.asarray(data_dict["wv"], dtype=float).ravel() if data_dict.get("wv") is not None and data_dict["wv"].size else None
+
+        if isinstance(artifact, dict) and artifact.get("multi_output") is True:
+            models = artifact.get("models") or []
+            names = [str(name) for name in artifact.get("component_names") or []]
+            selections = artifact.get("wavelength_selection") or []
+            preprocessing_config = artifact.get("preprocessing") or {}
+            n_targets = int(artifact.get("n_targets", len(models)))
+            if not (len(models) == len(names) == len(selections) == n_targets):
+                return _err("Multi-output artifact has inconsistent model, name, or wavelength-selection counts.")
+
+            predictions: list[np.ndarray] = []
+            preprocessing_applied: list[bool] = []
+            for index, model_item in enumerate(models):
+                if isinstance(preprocessing_config, list):
+                    if len(preprocessing_config) != n_targets:
+                        return _err("Multi-output artifact has inconsistent preprocessing metadata.")
+                    component_preprocessing = preprocessing_config[index]
+                else:
+                    component_preprocessing = preprocessing_config
+                X_component, applied = _apply_artifact_preprocessing(
+                    X,
+                    wv,
+                    component_preprocessing,
+                    input_preprocessed=input_preprocessed,
+                )
+                X_component = _apply_artifact_wavelength_selection(X_component, selections[index])
+                predictions.append(np.asarray(model_item.predict(X_component), dtype=float).ravel())
+                preprocessing_applied.append(applied)
+
+            y_pred_multi = np.column_stack(predictions)
+            result = {
+                "status": "ok",
+                "n_samples": int(X.shape[0]),
+                "n_targets": n_targets,
+                "component_names": names,
+                "predictions_summary": [
+                    {
+                        "name": name,
+                        "mean": float(np.mean(y_pred_multi[:, index])),
+                        "min": float(np.min(y_pred_multi[:, index])),
+                        "max": float(np.max(y_pred_multi[:, index])),
+                    }
+                    for index, name in enumerate(names)
+                ],
+                "preprocessing": {
+                    "shared": (bool(preprocessing_config[0].get("shared", False)) if isinstance(preprocessing_config, list) and preprocessing_config else not isinstance(preprocessing_config, list)),
+                    "applied": preprocessing_applied,
+                },
+                "wavelength_selection": selections,
+            }
+            if detect_drift:
+                from nir_core.utils.drift import compute_mahalanobis_drift
+
+                drift = compute_mahalanobis_drift(X, X, threshold=3.0)
+                result["drift"] = {
+                    "note": "Self-reference drift on raw spectra (no training matrix supplied).",
+                    "drift_score": float(drift["drift_score"]),
+                }
+            if output_path:
+                real_out = _resolve(runtime, output_path, read_only=False)
+                os.makedirs(os.path.dirname(real_out), exist_ok=True)
+                import csv
+
+                with open(real_out, "w", newline="", encoding="utf-8") as file:
+                    writer = csv.writer(file)
+                    writer.writerow(["sample_index", *names])
+                    for index, values in enumerate(y_pred_multi):
+                        writer.writerow([index, *(float(value) for value in values)])
+                result["output_path"] = output_path
+            return _ok(result)
+
+        model, preprocessing, wavelength_selection = _unwrap_model_artifact(artifact)
+        if model is None:
+            return _err("Model artifact is missing the fitted model object.")
         X, preprocessing_applied = _apply_artifact_preprocessing(
             X,
             wv,

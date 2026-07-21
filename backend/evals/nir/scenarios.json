@@ -3,7 +3,7 @@
   "scenarios": [
     {
       "id": "intake-missing-requirements",
-      "description": "The agent asks for missing professional requirements before touching data tools.",
+      "description": "智能体在接触数据工具之前，先向用户询问缺失的专业需求信息。",
       "task_type": "calibration",
       "user_message": "请用这份近红外数据建立模型。",
       "expected_route": "nir-coordinator",
@@ -14,7 +14,7 @@
     },
     {
       "id": "inspection-complete",
-      "description": "A data-inspection request completes after audit without model registration.",
+      "description": "数据检查请求在审查完成后结束，不涉及模型注册。",
       "task_type": "inspection",
       "user_message": "检查 sample.csv 的近红外光谱结构和数据质量。",
       "expected_route": "nir-coordinator",
@@ -26,7 +26,7 @@
     },
     {
       "id": "calibration-register",
-      "description": "A passing calibration is registered only after explicit approval.",
+      "description": "通过的校准模型仅在用户明确批准后才完成注册。",
       "task_type": "calibration",
       "user_message": "为玉米蛋白建立近红外定量模型，通过后让我确认再注册。",
       "expected_route": "nir-coordinator",
@@ -39,7 +39,7 @@
     },
     {
       "id": "calibration-retry-recover",
-      "description": "A failed calibration retrieves evidence and succeeds on a bounded retry.",
+      "description": "首轮校准失败后，智能体检索知识库证据并在有限次重试中成功。",
       "task_type": "calibration",
       "user_message": "建立蛋白模型，如果首轮不达标请检索知识库后改进。",
       "expected_route": "nir-coordinator",
@@ -53,7 +53,7 @@
     },
     {
       "id": "retry-budget-exhausted",
-      "description": "Repeated failed attempts stop at the configured retry budget.",
+      "description": "多次尝试均失败后，在配置的重试预算内停止并报告最佳结果。",
       "task_type": "analysis",
       "user_message": "分析水分模型，最多尝试两轮，仍不达标就报告最佳结果。",
       "expected_route": "nir-coordinator",
@@ -67,7 +67,7 @@
     },
     {
       "id": "prediction-complete",
-      "description": "Prediction uses an existing model and never enters registration.",
+      "description": "使用已有模型完成预测，且不进入模型注册流程。",
       "task_type": "prediction",
       "user_message": "使用已注册模型预测这批未知样本。",
       "expected_route": "nir-coordinator",
@@ -79,7 +79,7 @@
     },
     {
       "id": "knowledge-complete",
-      "description": "A NIR knowledge question routes to evidence retrieval and completes.",
+      "description": "NIR 知识问题路由到知识库检索并完成。",
       "task_type": "knowledge",
       "user_message": "检索知识库：MSC 和 SNV 分别适合什么散射场景？",
       "expected_route": "nir-coordinator",
@@ -92,7 +92,7 @@
     },
     {
       "id": "compare-review",
-      "description": "Model comparison persists the best metrics and waits for review.",
+      "description": "模型比较保留最佳指标并等待审核。",
       "task_type": "compare",
       "user_message": "比较 PLS、SVR 和随机森林，给出最佳近红外模型。",
       "expected_route": "nir-coordinator",
@@ -105,7 +105,7 @@
     },
     {
       "id": "analysis-review",
-      "description": "A general NIR analysis produces a traceable passing model for review.",
+      "description": "通用 NIR 分析生成可追溯的达标模型并提交审核。",
       "task_type": "analysis",
       "user_message": "分析这批近红外数据并给出达到质量门槛的模型。",
       "expected_route": "nir-coordinator",
@@ -118,7 +118,7 @@
     },
     {
       "id": "analysis-retry-recover",
-      "description": "A general analysis uses retrieved evidence before a successful retry.",
+      "description": "通用分析在重试成功前先检索知识库证据辅助优化。",
       "task_type": "analysis",
       "user_message": "首轮分析不达标时检索知识库并自动优化一次。",
       "expected_route": "nir-coordinator",
@@ -132,7 +132,7 @@
     },
     {
       "id": "data-audit-blocked",
-      "description": "Calibration stops before modeling when required data-quality checks fail.",
+      "description": "数据质量检查未通过时，校准工作流在建模前停止。",
       "task_type": "calibration",
       "user_message": "先检查光谱与参考值，数据不合格时不要建模。",
       "expected_route": "nir-coordinator",
@@ -144,7 +144,7 @@
     },
     {
       "id": "calibration-review-pending",
-      "description": "A passing calibration remains pending until the user explicitly approves it.",
+      "description": "通过的校准模型保持待审核状态，直到用户明确批准。",
       "task_type": "calibration",
       "user_message": "建立模型并展示结果，但暂时不要注册。",
       "expected_route": "nir-coordinator",
@@ -157,7 +157,7 @@
     },
     {
       "id": "calibration-rejected",
-      "description": "Explicit user rejection blocks registration and ends the calibration workflow.",
+      "description": "用户明确拒绝后，注册被阻止且校准工作流终止。",
       "task_type": "calibration",
       "user_message": "这个模型不采用，不要注册。",
       "expected_route": "nir-coordinator",
@@ -170,7 +170,7 @@
     },
     {
       "id": "compare-retry-recover",
-      "description": "A failed model comparison retrieves evidence and succeeds on retry.",
+      "description": "模型比较失败后检索知识库证据，重试成功。",
       "task_type": "compare",
       "user_message": "比较多种算法，不达标时根据知识库建议调整后再比较。",
       "expected_route": "nir-coordinator",
@@ -184,7 +184,7 @@
     },
     {
       "id": "prediction-missing-model",
-      "description": "Prediction remains in intake until an existing model path is supplied.",
+      "description": "预测任务缺少已有模型路径时，停留在录入阶段等待用户补充。",
       "task_type": "prediction",
       "user_message": "预测这批未知样本。",
       "expected_route": "nir-coordinator",
@@ -195,7 +195,7 @@
     },
     {
       "id": "prediction-audit-blocked",
-      "description": "Prediction stops when incoming spectra are incompatible with the model domain.",
+      "description": "待预测光谱与模型域不兼容时，预测在数据审查阶段停止。",
       "task_type": "prediction",
       "user_message": "用现有模型预测未知样本，先检查波长轴兼容性。",
       "expected_route": "nir-coordinator",
@@ -207,7 +207,7 @@
     },
     {
       "id": "inspection-small-sample-blocked",
-      "description": "Inspection reports insufficient samples without attempting model training.",
+      "description": "数据检查发现样本量不足时，仅报告问题而不尝试建模。",
       "task_type": "inspection",
       "user_message": "检查这份只有少量样本的近红外数据是否适合建模。",
       "expected_route": "nir-coordinator",
@@ -219,7 +219,7 @@
     },
     {
       "id": "knowledge-no-hit-complete",
-      "description": "A knowledge query with no relevant local evidence completes without fabricated citations.",
+      "description": "知识库检索无相关结果时，如实告知用户而不编造引用。",
       "task_type": "knowledge",
       "user_message": "知识库中是否有关于特定小麦品种在线监测的资料？",
       "expected_route": "nir-coordinator",
@@ -231,7 +231,7 @@
     },
     {
       "id": "soil-moisture-calibration-register",
-      "description": "A soil-moisture calibration completes the approval and registration lifecycle.",
+      "description": "土壤水分校准完成从审批到注册的完整生命周期。",
       "task_type": "calibration",
       "user_message": "为土壤水分建立近红外模型，单位为百分比，确认后注册。",
       "expected_route": "nir-coordinator",
@@ -244,7 +244,7 @@
     },
     {
       "id": "pharmaceutical-api-calibration-review",
-      "description": "A pharmaceutical API calibration reaches review with traceable artifacts.",
+      "description": "原料药含量校准生成可追溯的模型产物并提交审核。",
       "task_type": "calibration",
       "user_message": "建立原料药含量近红外定量模型，先给出审核结果。",
       "expected_route": "nir-coordinator",
@@ -254,6 +254,44 @@
       "expected_approval_status": "pending",
       "required_trace_fields": ["model_path", "metrics_path"],
       "tags": ["pharmaceutical", "api", "review"]
+    },
+    {
+      "id": "multi-component-basic",
+      "description": "含三个参考成分的数据集应一次加载并通过多成分工具共享划分完成训练。",
+      "task_type": "multi_modeling",
+      "user_message": "同时分析玉米数据中的蛋白质、水分和油脂三个成分。",
+      "expected_route": "nir-coordinator",
+      "expected_final_stages": ["review"],
+      "required_workflow_actions": ["start", "record_audit", "plan_ready", "record_attempt"],
+      "required_tools": ["nir_inspect", "nir_load_data", "nir_train_multi_model"],
+      "expected_approval_status": "pending",
+      "required_trace_fields": ["model_path", "metrics_path"],
+      "tags": ["multi-component", "training", "shared-split"]
+    },
+    {
+      "id": "multi-component-shared-preprocess",
+      "description": "多成分训练默认共享仅在训练集拟合的预处理流水线，并逐成分评估。",
+      "task_type": "multi_modeling",
+      "user_message": "对三个品质成分同时建模，预处理采用默认共享策略。",
+      "expected_route": "nir-coordinator",
+      "expected_final_stages": ["review"],
+      "required_workflow_actions": ["start", "record_audit", "plan_ready", "record_attempt"],
+      "required_tools": ["nir_train_multi_model"],
+      "expected_approval_status": "pending",
+      "required_trace_fields": ["model_path", "metrics_path"],
+      "tags": ["multi-component", "preprocessing"]
+    },
+    {
+      "id": "multi-component-predict",
+      "description": "已有多成分模型对未知光谱预测时返回按成分命名的多列结果。",
+      "task_type": "prediction",
+      "user_message": "使用这个多成分模型同时预测未知样本的蛋白质、水分和油脂。",
+      "expected_route": "nir-coordinator",
+      "expected_final_stages": ["completed"],
+      "required_workflow_actions": ["start", "record_audit", "plan_ready", "complete"],
+      "required_tools": ["nir_inspect", "nir_predict"],
+      "expected_approval_status": "not_required",
+      "tags": ["multi-component", "prediction"]
     }
   ]
 }

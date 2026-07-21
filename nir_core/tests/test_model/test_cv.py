@@ -84,3 +84,98 @@ def test_cross_validate_shape_mismatch_raises(synthetic_data):
         cross_validate(
             lambda: PLSRegression(n_components=2), X, y_short, n_folds=5
         )
+
+
+def test_cross_validate_rejects_3d_y(synthetic_data):
+    """y with ndim > 2 must be rejected with a clear ValueError."""
+    X = synthetic_data.X
+    y_3d = np.zeros((X.shape[0], 3, 2))
+    with pytest.raises(ValueError, match="y must be 1D or 2D"):
+        cross_validate(
+            lambda: PLSRegression(n_components=2), X, y_3d, n_folds=5
+        )
+
+
+def test_cross_validate_2d_y_returns_per_target(synthetic_data):
+    """2D y returns n_targets and per_target, with top-level fold_rmse
+    holding the per-fold mean across targets (list[float] of length n_folds)."""
+    X = synthetic_data.X
+    # Build a 2-target y by stacking the original y with a noisy copy.
+    y1 = synthetic_data.y
+    y2 = y1 + 0.5 * np.random.default_rng(0).standard_normal(y1.shape[0])
+    y_2d = np.column_stack([y1, y2])
+
+    results = cross_validate(
+        lambda: PLSRegression(n_components=3, scale=False),
+        X, y_2d, n_folds=5, random_state=42,
+    )
+
+    # Backward-compatible keys still present and well-typed.
+    for key in ("fold_rmse", "mean_rmse", "std_rmse", "fold_r2", "mean_r2", "n_folds"):
+        assert key in results
+    assert len(results["fold_rmse"]) == results["n_folds"]
+    assert all(isinstance(v, float) for v in results["fold_rmse"])
+
+    # New multi-target keys.
+    assert results["n_targets"] == 2
+    assert "per_target" in results
+    assert len(results["per_target"]) == 2
+    for t_idx, pt in enumerate(results["per_target"]):
+        assert pt["target_index"] == t_idx
+        assert len(pt["fold_rmse"]) == results["n_folds"]
+        assert len(pt["fold_r2"]) == results["n_folds"]
+        assert np.isfinite(pt["mean_rmse"])
+        assert np.isfinite(pt["mean_r2"])
+
+
+def test_cross_validate_2d_y_per_target_matches_single_target_run(synthetic_data):
+    """Per-target fold_rmse for 2D y must equal a standalone 1D run on that
+    target — i.e. no cross-target mixing. This is the core regression guard
+    for the bug where rmse()/r2_score() raveled 2D arrays together.
+
+    Uses LinearRegression because OLS solves each y column independently,
+    so multi-output and single-output fits are numerically identical.
+    PLS2 would introduce Y-covariation and break the exact match (which is
+    expected PLS behaviour, not a bug).
+    """
+    X = synthetic_data.X
+    y1 = synthetic_data.y
+    y2 = y1 + 0.5 * np.random.default_rng(1).standard_normal(y1.shape[0])
+    y_2d = np.column_stack([y1, y2])
+
+    multi = cross_validate(
+        lambda: LinearRegression(), X, y_2d, n_folds=5, random_state=42,
+    )
+    single_0 = cross_validate(
+        lambda: LinearRegression(), X, y1, n_folds=5, random_state=42,
+    )
+    single_1 = cross_validate(
+        lambda: LinearRegression(), X, y2, n_folds=5, random_state=42,
+    )
+
+    # Same KFold seed -> identical fold splits; OLS is column-independent ->
+    # per-target fold series must match the standalone 1D runs exactly.
+    assert np.allclose(multi["per_target"][0]["fold_rmse"], single_0["fold_rmse"])
+    assert np.allclose(multi["per_target"][0]["fold_r2"], single_0["fold_r2"])
+    assert np.allclose(multi["per_target"][1]["fold_rmse"], single_1["fold_rmse"])
+    assert np.allclose(multi["per_target"][1]["fold_r2"], single_1["fold_r2"])
+
+    # Top-level fold_rmse is the mean across the two targets per fold.
+    expected_fold_rmse = [
+        0.5 * (multi["per_target"][0]["fold_rmse"][i]
+               + multi["per_target"][1]["fold_rmse"][i])
+        for i in range(multi["n_folds"])
+    ]
+    assert np.allclose(multi["fold_rmse"], expected_fold_rmse)
+
+
+def test_cross_validate_1d_y_has_no_per_target_key(synthetic_data):
+    """1D y must NOT add n_targets/per_target, so existing callers are
+    unaffected by the multi-output extension."""
+    X, y = synthetic_data.X, synthetic_data.y
+    results = cross_validate(
+        lambda: PLSRegression(n_components=3, scale=False),
+        X, y, n_folds=5, random_state=42,
+    )
+    assert "per_target" not in results
+    assert "n_targets" not in results

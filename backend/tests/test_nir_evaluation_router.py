@@ -151,7 +151,7 @@ def test_gateway_lists_versioned_nir_evaluation_scenarios() -> None:
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["version"] == 1
-    assert len(payload["scenarios"]) == 20
+    assert len(payload["scenarios"]) == 23
     assert payload["scenarios"][0]["id"]
     assert isinstance(payload["scenarios"][0]["tags"], list)
 

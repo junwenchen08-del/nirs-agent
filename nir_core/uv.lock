@@ -2502,6 +2502,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+deep = [
+    { name = "torch" },
+]
 dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -2541,9 +2544,10 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.2.0" },
     { name = "scipy", specifier = ">=1.10.0" },
     { name = "sentence-transformers", marker = "extra == 'knowledge'", specifier = ">=2.0" },
+    { name = "torch", marker = "extra == 'deep'", specifier = ">=2.0.0" },
     { name = "xgboost", marker = "extra == 'ensemble'", specifier = ">=1.7.0" },
 ]
-provides-extras = ["mat73", "ensemble", "knowledge", "dev"]
+provides-extras = ["mat73", "ensemble", "deep", "knowledge", "dev"]
 
 [[package]]
 name = "numpy"

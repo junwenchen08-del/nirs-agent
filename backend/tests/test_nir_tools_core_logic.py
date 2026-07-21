@@ -112,6 +112,478 @@ def test_train_model_cars_selection_persists_artifact_metadata(tmp_path: Path):
     assert artifact["wavelength_selection"] == payload["wavelength_selection"]
 
 
+def test_partitioned_model_uses_named_external_split(tmp_path: Path):
+    """Named partitions keep the external set out of all tuning decisions."""
+    import joblib
+    import pandas as pd
+
+    from deerflow.community.nir.tools import nir_train_partitioned_model_tool
+
+    rng = np.random.RandomState(24)
+    n_wavelengths = 21
+    labels = np.array(["Cal"] * 18 + ["Tuning"] * 9 + ["Val Ext"] * 9)
+    X = rng.normal(size=(labels.size, n_wavelengths))
+    y = 3.0 + X[:, 3] * 1.5 - X[:, 11] * 0.8 + rng.normal(scale=0.04, size=labels.size)
+    frame = pd.DataFrame(X, columns=[str(900 + 3 * index) for index in range(n_wavelengths)])
+    frame.insert(0, "DM", y)
+    frame.insert(0, "Set", labels)
+    source = tmp_path / "partitioned.csv"
+    frame.to_csv(source, index=False)
+    model_file = tmp_path / "partitioned.pkl"
+    metrics_file = tmp_path / "partitioned.json"
+
+    paths = {
+        "/mnt/user-data/uploads/partitioned.csv": str(source),
+        "/mnt/user-data/outputs/partitioned.pkl": str(model_file),
+        "/mnt/user-data/outputs/partitioned.json": str(metrics_file),
+    }
+    with patch(
+        "deerflow.community.nir.modeling._resolve",
+        side_effect=lambda _runtime, path, *, read_only: paths[path],
+    ):
+        result = nir_train_partitioned_model_tool.func(
+            runtime=MagicMock(),
+            file_path="/mnt/user-data/uploads/partitioned.csv",
+            split_col="Set",
+            train_label="Cal",
+            tuning_label="Tuning",
+            test_label="Val Ext",
+            y_col=1,
+            x_cols="2:",
+            pipeline_steps='["snv", {"method": "derivative1", "params": {"window": 5, "order": 2}}, "autoscale"]',
+            max_components=3,
+            compare_cars=False,
+            model_output="/mnt/user-data/outputs/partitioned.pkl",
+            metrics_output="/mnt/user-data/outputs/partitioned.json",
+        )
+
+    payload = json.loads(result)
+    metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
+    artifact = joblib.load(model_file)
+    assert payload["status"] == "ok"
+    assert payload["protocol"] == "named_partition_external_validation"
+    assert isinstance(payload["passed"], bool)
+    assert metrics["partitions"]["train"]["n_samples"] == 18
+    assert metrics["partitions"]["tuning"]["n_samples"] == 9
+    assert metrics["partitions"]["external_test"]["n_samples"] == 9
+    assert artifact["format"] == "nir_model_artifact"
+    assert (tmp_path / "partitioned_report.md").is_file()
+
+
+def test_auto_split_model_persists_deterministic_holdout_protocol(tmp_path: Path):
+    """Unpartitioned CSV data receives a reproducible, leakage-safe 70/15/15 split."""
+    import joblib
+    import pandas as pd
+
+    from deerflow.community.nir.tools import nir_train_auto_split_model_tool
+
+    rng = np.random.RandomState(31)
+    n_samples = 80
+    n_wavelengths = 19
+    X = rng.normal(size=(n_samples, n_wavelengths))
+    y = 1.7 + X[:, 4] * 1.2 - X[:, 13] * 0.5 + rng.normal(scale=0.03, size=n_samples)
+    frame = pd.DataFrame(X, columns=[str(1000 + 4 * index) for index in range(n_wavelengths)])
+    frame.insert(0, "Protein", y)
+    source = tmp_path / "unpartitioned.csv"
+    frame.to_csv(source, index=False)
+    model_file = tmp_path / "auto_split.pkl"
+    metrics_file = tmp_path / "auto_split.json"
+
+    paths = {
+        "/mnt/user-data/uploads/unpartitioned.csv": str(source),
+        "/mnt/user-data/outputs/auto_split.pkl": str(model_file),
+        "/mnt/user-data/outputs/auto_split.json": str(metrics_file),
+    }
+    with patch(
+        "deerflow.community.nir.modeling._resolve",
+        side_effect=lambda _runtime, path, *, read_only: paths[path],
+    ):
+        result = nir_train_auto_split_model_tool.func(
+            runtime=MagicMock(),
+            file_path="/mnt/user-data/uploads/unpartitioned.csv",
+            y_col=0,
+            x_cols="1:",
+            pipeline_steps='["snv", "autoscale"]',
+            max_components=3,
+            compare_cars=False,
+            model_output="/mnt/user-data/outputs/auto_split.pkl",
+            metrics_output="/mnt/user-data/outputs/auto_split.json",
+        )
+
+    payload = json.loads(result)
+    metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
+    artifact = joblib.load(model_file)
+    partitions = metrics["partitions"]
+    split_indices = [set(partitions[name]["sample_indices"]) for name in ("calibration", "tuning", "holdout_test")]
+
+    assert payload["status"] == "ok"
+    assert payload["protocol"] == "deterministic_auto_split_holdout"
+    assert payload["target"] == "Protein"
+    assert payload["validation_scope"] == "independent_holdout_not_external"
+    assert [partitions[name]["n_samples"] for name in ("calibration", "tuning", "holdout_test")] == [56, 12, 12]
+    assert not (split_indices[0] & split_indices[1] or split_indices[0] & split_indices[2] or split_indices[1] & split_indices[2])
+    assert set.union(*split_indices) == set(range(n_samples))
+    assert metrics["split"]["strategy"] == "spxy"
+    assert metrics["split"]["requested_strategy"] == "auto"
+    assert metrics["split"]["random_state"] == 42
+    assert metrics["wavelength_selection_decision"]["mode"] == "disabled"
+    assert payload["wavelength_selection_decision"]["evaluate_cars"] is False
+    assert artifact["format"] == "nir_model_artifact"
+    assert (tmp_path / "auto_split_report.md").is_file()
+
+
+def test_auto_split_default_autonomously_evaluates_cars(tmp_path: Path):
+    """A generic request needs no explicit compare_cars flag for wide data."""
+    import pandas as pd
+
+    from deerflow.community.nir.tools import nir_train_auto_split_model_tool
+
+    rng = np.random.RandomState(131)
+    X = rng.normal(size=(70, 60))
+    y = 2.0 + X[:, 3] * 1.4 - X[:, 17] * 0.6 + rng.normal(scale=0.03, size=70)
+    frame = pd.DataFrame(X, columns=[str(900 + 3 * index) for index in range(X.shape[1])])
+    frame.insert(0, "Protein", y)
+    source = tmp_path / "autonomous_selection.csv"
+    frame.to_csv(source, index=False)
+    model_file = tmp_path / "autonomous_selection.pkl"
+    metrics_file = tmp_path / "autonomous_selection.json"
+    paths = {
+        "/mnt/user-data/uploads/autonomous_selection.csv": str(source),
+        "/mnt/user-data/outputs/autonomous_selection.pkl": str(model_file),
+        "/mnt/user-data/outputs/autonomous_selection.json": str(metrics_file),
+    }
+
+    with (
+        patch(
+            "deerflow.community.nir.modeling._resolve",
+            side_effect=lambda _runtime, path, *, read_only: paths[path],
+        ),
+        patch(
+            "nir_core.model.selection.cars_wavelength_selection",
+            return_value=(X[:, [3, 17]], [3, 17]),
+        ),
+    ):
+        result = nir_train_auto_split_model_tool.func(
+            runtime=MagicMock(),
+            file_path="/mnt/user-data/uploads/autonomous_selection.csv",
+            y_col=0,
+            x_cols="1:",
+            pipeline_steps='["mean_center"]',
+            max_components=2,
+            model_output="/mnt/user-data/outputs/autonomous_selection.pkl",
+            metrics_output="/mnt/user-data/outputs/autonomous_selection.json",
+        )
+
+    payload = json.loads(result)
+    assert payload["status"] == "ok"
+    assert payload["wavelength_selection_decision"]["mode"] == "auto"
+    assert payload["wavelength_selection_decision"]["evaluate_cars"] is True
+    assert payload["model_selection_decision"]["mode"] == "auto"
+    assert payload["model_selection_decision"]["selected_method"] in {item["method"] for item in payload["model_candidates"]}
+    assert {item["method"] for item in payload["candidate_results"]} == {
+        "none",
+        "cars",
+    }
+
+
+def test_one_shot_analysis_defaults_to_autonomous_wavelength_selection(tmp_path: Path):
+    """The generic one-shot path decides on CARS without an explicit instruction."""
+    from deerflow.community.nir.tools import nir_analyze_tool
+
+    rng = np.random.RandomState(132)
+    X = rng.normal(size=(70, 60))
+    y = 1.5 + X[:, 3] * 1.2 - X[:, 17] * 0.7 + rng.normal(scale=0.03, size=70)
+    wv = np.linspace(900.0, 1700.0, X.shape[1])
+    source = tmp_path / "one_shot.npz"
+    output_dir = tmp_path / "one_shot_output"
+    output_dir.mkdir()
+    np.savez(source, X=X, y=y, wv=wv)
+
+    with (
+        patch(
+            "deerflow.community.nir.modeling._resolve",
+            return_value=str(source),
+        ),
+        patch(
+            "deerflow.community.nir.modeling._resolve_writable_dir",
+            return_value=str(output_dir),
+        ),
+        patch(
+            "nir_core.model.selection.cars_wavelength_selection",
+            side_effect=lambda spectra, *_args, **_kwargs: (
+                spectra[:, [3, 17]],
+                [3, 17],
+            ),
+        ),
+    ):
+        result = nir_analyze_tool.func(
+            runtime=MagicMock(),
+            data_path="/mnt/user-data/uploads/one_shot.npz",
+            auto_preprocess=False,
+        )
+
+    payload = json.loads(result)
+    persisted = json.loads((output_dir / "metrics.json").read_text(encoding="utf-8"))
+    assert payload["status"] == "ok"
+    assert payload["wavelength_selection_decision"]["mode"] == "auto"
+    assert payload["wavelength_selection_decision"]["evaluate_cars"] is True
+    assert payload["model_selection_decision"]["mode"] == "auto"
+    assert payload["model_selection_decision"]["selected_method"] == payload["method"]
+    assert {item["method"] for item in payload["wavelength_selection_candidates"]} == {
+        "none",
+        "cars",
+    }
+    assert persisted["wavelength_selection_decision"] == payload["wavelength_selection_decision"]
+    assert "模型选择模式" in (output_dir / "report.md").read_text(encoding="utf-8")
+
+
+def test_auto_split_model_prefers_detected_group_field(tmp_path: Path):
+    """Auto mode keeps detected batch groups intact across all three partitions."""
+    import pandas as pd
+
+    from deerflow.community.nir.tools import nir_train_auto_split_model_tool
+
+    rng = np.random.RandomState(44)
+    n_groups = 10
+    samples_per_group = 8
+    n_samples = n_groups * samples_per_group
+    X = rng.normal(size=(n_samples, 15))
+    y = 4.0 + X[:, 2] * 0.9 + rng.normal(scale=0.05, size=n_samples)
+    frame = pd.DataFrame(X, columns=[str(1100 + 5 * index) for index in range(X.shape[1])])
+    frame.insert(0, "Protein", y)
+    frame.insert(0, "Batch", np.repeat([f"B{index:02d}" for index in range(n_groups)], samples_per_group))
+    source = tmp_path / "grouped.csv"
+    frame.to_csv(source, index=False)
+    model_file = tmp_path / "grouped.pkl"
+    metrics_file = tmp_path / "grouped.json"
+
+    paths = {
+        "/mnt/user-data/uploads/grouped.csv": str(source),
+        "/mnt/user-data/outputs/grouped.pkl": str(model_file),
+        "/mnt/user-data/outputs/grouped.json": str(metrics_file),
+    }
+    with patch(
+        "deerflow.community.nir.modeling._resolve",
+        side_effect=lambda _runtime, path, *, read_only: paths[path],
+    ):
+        result = nir_train_auto_split_model_tool.func(
+            runtime=MagicMock(),
+            file_path="/mnt/user-data/uploads/grouped.csv",
+            y_col=1,
+            x_cols="2:",
+            split_strategy="auto",
+            pipeline_steps='["snv", "autoscale"]',
+            max_components=2,
+            compare_cars=False,
+            model_output="/mnt/user-data/outputs/grouped.pkl",
+            metrics_output="/mnt/user-data/outputs/grouped.json",
+        )
+
+    payload = json.loads(result)
+    metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
+    partitions = metrics["partitions"]
+    group_sets = [set(partitions[name]["group_values"]) for name in ("calibration", "tuning", "holdout_test")]
+
+    assert payload["status"] == "ok"
+    assert metrics["split"]["strategy"] == "group"
+    assert metrics["split"]["group_column"] == "Batch"
+    assert not (group_sets[0] & group_sets[1] or group_sets[0] & group_sets[2] or group_sets[1] & group_sets[2])
+    assert set.union(*group_sets) == {f"B{index:02d}" for index in range(n_groups)}
+
+
+def test_autonomous_split_uses_y_stratification_above_spxy_limit():
+    """Large ungrouped data avoids the quadratic SPXY distance matrix."""
+    import pandas as pd
+
+    from deerflow.community.nir.modeling import _select_autonomous_split
+
+    rng = np.random.RandomState(55)
+    X = rng.normal(size=(120, 8))
+    y = np.linspace(0.0, 12.0, X.shape[0])
+    raw = pd.DataFrame({"Target": y})
+
+    calibration, tuning, holdout, decision = _select_autonomous_split(
+        raw,
+        X,
+        y,
+        y_col=0,
+        strategy="auto",
+        group_col=None,
+        tuning_ratio=0.15,
+        test_ratio=0.15,
+        random_state=42,
+        spxy_max_samples=50,
+    )
+
+    assert decision["strategy"] == "y_stratified"
+    assert "SPXY limit" in decision["reason"]
+    assert [len(calibration), len(tuning), len(holdout)] == [84, 18, 18]
+    assert not (set(calibration) & set(tuning) or set(calibration) & set(holdout) or set(tuning) & set(holdout))
+
+
+def test_wavelength_selection_policy_autonomously_evaluates_high_dimensional_data():
+    from deerflow.community.nir.modeling import _decide_autonomous_wavelength_selection
+
+    decision = _decide_autonomous_wavelength_selection(
+        compare_cars=None,
+        n_calibration=5000,
+        n_wavelengths=306,
+        baseline_rmse=0.2,
+        y_tuning=np.linspace(0.0, 1.0, 100),
+        max_selection_samples=750,
+    )
+
+    assert decision["mode"] == "auto"
+    assert decision["evaluate_cars"] is True
+    assert "many_wavelengths" in decision["signals"]
+    assert decision["cars_fit_samples"] == 750
+    assert decision["sample_cap_applied"] is True
+
+
+def test_wavelength_selection_policy_skips_small_feature_sets_and_honors_override():
+    from deerflow.community.nir.modeling import _decide_autonomous_wavelength_selection
+
+    automatic = _decide_autonomous_wavelength_selection(
+        compare_cars=None,
+        n_calibration=100,
+        n_wavelengths=20,
+        baseline_rmse=0.8,
+        y_tuning=np.linspace(0.0, 1.0, 30),
+    )
+    disabled = _decide_autonomous_wavelength_selection(
+        compare_cars=False,
+        n_calibration=100,
+        n_wavelengths=300,
+        baseline_rmse=0.2,
+        y_tuning=np.linspace(0.0, 1.0, 30),
+    )
+
+    assert automatic["evaluate_cars"] is False
+    assert automatic["reason_code"] == "insufficient_wavelengths"
+    assert disabled["mode"] == "disabled"
+    assert disabled["reason_code"] == "explicitly_disabled"
+
+
+def test_wavelength_candidate_choice_requires_material_tuning_improvement():
+    from deerflow.community.nir.modeling import _choose_wavelength_candidate
+
+    full = {"method": "none", "RMSE_tuning": 1.0, "n_selected": 300, "n_components": 6}
+    marginal_cars = {"method": "cars", "RMSE_tuning": 0.998, "n_selected": 40, "n_components": 5}
+    useful_cars = {"method": "cars", "RMSE_tuning": 0.97, "n_selected": 45, "n_components": 5}
+
+    chosen, evidence = _choose_wavelength_candidate([full, marginal_cars], min_relative_improvement=0.005)
+    assert chosen["method"] == "none"
+    assert evidence["reason_code"] == "cars_improvement_below_threshold"
+
+    chosen, evidence = _choose_wavelength_candidate([full, useful_cars], min_relative_improvement=0.005)
+    assert chosen["method"] == "cars"
+    assert evidence["reason_code"] == "cars_improved_tuning_rmse"
+
+
+def test_model_selection_policy_expands_candidates_only_when_signals_justify_it():
+    from deerflow.community.nir.modeling import _decide_autonomous_model_selection
+
+    weak_high_dimensional = _decide_autonomous_model_selection(
+        requested_method="auto",
+        n_calibration=120,
+        n_features=180,
+        baseline_rmse=0.8,
+        y_tuning=np.linspace(0.0, 1.0, 30),
+    )
+    strong_compact = _decide_autonomous_model_selection(
+        requested_method="auto",
+        n_calibration=200,
+        n_features=30,
+        baseline_rmse=0.02,
+        y_tuning=np.linspace(0.0, 1.0, 40),
+    )
+
+    assert weak_high_dimensional["candidate_methods"] == [
+        "pls",
+        "ridge",
+        "svr",
+        "et",
+    ]
+    assert "weak_pls_tuning_fit" in weak_high_dimensional["signals"]
+    assert strong_compact["candidate_methods"] == ["pls"]
+    assert strong_compact["reason_code"] == "pls_baseline_sufficient"
+
+
+def test_model_selection_policy_honors_explicit_method_and_runtime_caps():
+    from deerflow.community.nir.modeling import _decide_autonomous_model_selection
+
+    forced = _decide_autonomous_model_selection(
+        requested_method="svr",
+        n_calibration=5000,
+        n_features=300,
+        baseline_rmse=1.0,
+        y_tuning=np.linspace(0.0, 1.0, 100),
+    )
+    capped = _decide_autonomous_model_selection(
+        requested_method="auto",
+        n_calibration=5000,
+        n_features=300,
+        baseline_rmse=1.0,
+        y_tuning=np.linspace(0.0, 1.0, 100),
+        max_svr_samples=1500,
+        max_tree_samples=2500,
+    )
+
+    assert forced["mode"] == "forced"
+    assert forced["candidate_methods"] == ["svr"]
+    assert "svr" not in capped["candidate_methods"]
+    assert "et" not in capped["candidate_methods"]
+    assert capped["runtime_caps_applied"] == ["svr", "et"]
+
+
+def test_model_candidate_choice_requires_material_improvement_over_pls():
+    from deerflow.community.nir.modeling import _choose_model_candidate
+
+    pls = {"method": "pls", "RMSE_tuning": 1.0}
+    marginal_svr = {"method": "svr", "RMSE_tuning": 0.995}
+    useful_svr = {"method": "svr", "RMSE_tuning": 0.94}
+
+    chosen, evidence = _choose_model_candidate(
+        [pls, marginal_svr],
+        min_relative_improvement=0.01,
+    )
+    assert chosen["method"] == "pls"
+    assert evidence["reason_code"] == "alternative_improvement_below_threshold"
+
+    chosen, evidence = _choose_model_candidate(
+        [pls, useful_svr],
+        min_relative_improvement=0.01,
+    )
+    assert chosen["method"] == "svr"
+    assert evidence["reason_code"] == "alternative_improved_tuning_rmse"
+
+
+def test_model_family_selection_detects_nonlinear_candidate_improvement():
+    from deerflow.community.nir.modeling import _select_model_family
+
+    rng = np.random.RandomState(144)
+    X = rng.uniform(-2.0, 2.0, size=(140, 8))
+    y = np.sin(2.5 * X[:, 0]) + 0.6 * X[:, 1] ** 2 + rng.normal(scale=0.03, size=140)
+
+    chosen, decision, candidates = _select_model_family(
+        "auto",
+        X[:105],
+        y[:105],
+        X[105:],
+        y[105:],
+        max_components=6,
+        cv_folds=3,
+        max_svr_samples=1500,
+        max_tree_samples=2500,
+        min_relative_improvement=0.01,
+    )
+
+    assert {item["method"] for item in candidates} == {"pls", "ridge", "svr", "et"}
+    assert chosen["method"] in {"svr", "et"}
+    assert decision["selected_method"] == chosen["method"]
+    assert decision["adoption"]["reason_code"] == "alternative_improved_tuning_rmse"
+
+
 def test_nir_predict_applies_artifact_wavelength_selection(tmp_path: Path):
     """Prediction accepts a full-width X matrix and slices train-selected columns."""
     import joblib

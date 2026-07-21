@@ -868,6 +868,18 @@ tools:
     group: bash
     use: deerflow.community.nir.modeling:nir_train_model_tool
 
+  - name: nir_train_auto_split_model
+    group: bash
+    use: deerflow.community.nir.modeling:nir_train_auto_split_model_tool
+
+  - name: nir_train_partitioned_model
+    group: bash
+    use: deerflow.community.nir.modeling:nir_train_partitioned_model_tool
+
+  - name: nir_train_multi_model
+    group: bash
+    use: deerflow.community.nir.modeling:nir_train_multi_model_tool
+
   - name: nir_predict
     group: bash
     use: deerflow.community.nir.io_tools:nir_predict_tool
@@ -875,6 +887,10 @@ tools:
   - name: nir_analyze
     group: bash
     use: deerflow.community.nir.modeling:nir_analyze_tool
+
+  - name: nir_analyze_collection
+    group: bash
+    use: deerflow.community.nir.modeling:nir_analyze_collection_tool
 
   - name: nir_reflect
     group: bash
@@ -1049,7 +1065,9 @@ sandbox:
   # read_file and ls use head-truncation since their content is front-loaded.
   # Set to 0 to disable truncation.
   bash_output_max_chars: 20000
-  read_file_output_max_chars: 50000
+  # Keep ordinary file previews compact. Large generated reports should be
+  # presented as artifacts; agents should read metrics JSON or bounded ranges.
+  read_file_output_max_chars: 12000
   ls_output_max_chars: 20000
 
   # Maximum wall-clock seconds a single host bash command may run before it is
@@ -1261,19 +1279,20 @@ summarization:
   # Context retention policy after summarization
   # Specifies how much recent history to preserve
   keep:
-    # Keep the most recent 10 messages (recommended)
-    type: messages
-    value: 10
-    # Alternative: Keep specific token count
-    # type: tokens
-    # value: 3000
+    # Bound preserved recent context by tokens. A message-count policy can
+    # retain several 50k-character tool results and defeat summarization.
+    type: tokens
+    value: 8000
+    # Alternative: Keep the most recent message count
+    # type: messages
+    # value: 10
     # Alternative: Keep percentage of model's max input tokens
     # type: fraction
     # value: 0.3
 
   # Maximum tokens to keep when preparing messages for summarization
   # Set to null to skip trimming (not recommended for very long conversations)
-  trim_tokens_to_summarize: 15564
+  trim_tokens_to_summarize: 12000
 
   # Custom summary prompt template (null = use default LangChain prompt)
   # The prompt should guide the model to extract important context

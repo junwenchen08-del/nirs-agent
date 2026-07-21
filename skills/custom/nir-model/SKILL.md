@@ -4,11 +4,13 @@ description: >-
   Train and evaluate calibration models (PLS/PCR/SVR/RF/GBM/Ridge/Lasso/KNN/MLP/CNN)
   on preprocessed NIR .npz data. Performs three-way split, inner CV hyper-parameter
   selection, full metric evaluation, and quality gating. Activates via /nir-model.
+  Also handles multi-component simultaneous analysis requests.
 allowed-tools:
   - read_file
   - write_file
   - ls
   - nir_train_model
+  - nir_train_multi_model
 ---
 
 # NIR 建模技能
@@ -16,6 +18,23 @@ allowed-tools:
 ## 用途
 对 .npz 数据（含 X 和 y）建立回归模型，返回完整评估指标和质量判断。
 ★ v3: 支持 pipeline_steps 防泄露预处理模式和 cv_strategy 自适应CV。
+
+当用户明确提出“多成分”“多组分”“同时分析/预测”或 multiple components 时，
+输入 NPZ 的 y 应为 `(N,K)`，调用 `nir_train_multi_model`，不要循环调用
+`nir_train_model`。该工具共享一次数据划分，默认共享预处理，并为每个成分
+独立选择波长和训练模型。
+
+```text
+nir_train_multi_model(
+  input_path="/mnt/user-data/workspace/multi.npz",
+  method="pls",
+  pipeline_steps='["snv","sg_smooth","mean_center"]',
+  shared_preprocessing=true,
+  model_output="/mnt/user-data/workspace/multi_model.pkl",
+  metrics_output="/mnt/user-data/workspace/multi_metrics.json",
+  output_dir="/mnt/user-data/workspace/multi_outputs"
+)
+```
 
 ## 两种模式
 

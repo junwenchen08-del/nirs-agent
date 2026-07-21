@@ -16,7 +16,9 @@ class SpectralData(BaseModel):
 
     Attributes:
         X: Spectral matrix of shape (n_samples, n_wavelengths).
-        y: Reference values of shape (n_samples,) or None if absent.
+        y: Reference values of shape (n_samples,), (n_samples, n_targets),
+            or None if absent.
+        y_names: Optional names for the reference-value columns.
         wv: Wavelengths of shape (n_wavelengths,) or None if absent.
         sample_names: Optional sample identifiers.
         source_file: Original file path the data was loaded from.
@@ -27,6 +29,7 @@ class SpectralData(BaseModel):
 
     X: np.ndarray
     y: np.ndarray | None = None
+    y_names: list[str] | None = None
     wv: np.ndarray | None = None
     sample_names: list[str] = Field(default_factory=list)
     source_file: str = ""
@@ -45,8 +48,32 @@ class SpectralData(BaseModel):
             )
         return arr
 
+    @field_validator("y", mode="before")
+    @classmethod
+    def _ensure_y_1d_or_2d(cls, v):
+        if v is None:
+            return None
+        arr = np.asarray(v, dtype=float)
+        if arr.ndim not in {1, 2}:
+            raise ValueError(
+                f"y must be 1D or 2D, got {arr.ndim}D with shape {arr.shape}"
+            )
+        return arr
+
     def summary(self) -> dict:
         """Return a compact summary dict suitable for LLM context."""
+        n_components = 0
+        y_names: list[str] = []
+        y_ranges: dict[str, list[float]] | None = None
+        if self.y is not None:
+            y_arr = np.asarray(self.y, dtype=float)
+            n_components = 1 if y_arr.ndim == 1 else int(y_arr.shape[1])
+            y_names = self.y_names or [f"y{i}" for i in range(n_components)]
+            y_2d = y_arr.reshape(-1, 1) if y_arr.ndim == 1 else y_arr
+            y_ranges = {
+                name: [float(y_2d[:, i].min()), float(y_2d[:, i].max())]
+                for i, name in enumerate(y_names)
+            }
         return {
             "n_samples": int(self.X.shape[0]),
             "n_wavelengths": int(self.X.shape[1]),
@@ -56,11 +83,14 @@ class SpectralData(BaseModel):
                 else None
             ),
             "has_reference": self.y is not None,
+            "n_components": n_components,
+            "y_names": y_names,
             "y_range": (
                 [float(self.y.min()), float(self.y.max())]
-                if self.y is not None
+                if self.y is not None and np.asarray(self.y).ndim == 1
                 else None
             ),
+            "y_ranges": y_ranges,
             "source_file": self.source_file,
             "original_format": self.original_format,
         }

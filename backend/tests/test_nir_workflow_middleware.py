@@ -14,7 +14,14 @@ from deerflow.agents.middlewares.nir_workflow_middleware import NIRWorkflowMiddl
 from deerflow.community.nir.workflow import start_workflow, transition_workflow
 
 
-def _request(tool_name: str, state: dict, *, call_id: str = "call-1", context: dict | None = None) -> ToolCallRequest:
+def _request(
+    tool_name: str,
+    state: dict,
+    *,
+    args: dict | None = None,
+    call_id: str = "call-1",
+    context: dict | None = None,
+) -> ToolCallRequest:
     runtime = ToolRuntime(
         state=state,
         context=context or {},
@@ -25,7 +32,7 @@ def _request(tool_name: str, state: dict, *, call_id: str = "call-1", context: d
         store=None,
     )
     return ToolCallRequest(
-        tool_call={"id": call_id, "name": tool_name, "args": {}},
+        tool_call={"id": call_id, "name": tool_name, "args": args or {}},
         tool=None,
         state=state,
         runtime=runtime,
@@ -117,6 +124,200 @@ def test_unrelated_tool_passes_through_without_workflow() -> None:
     assert result is original
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "args"),
+    [
+        (
+            "write_file",
+            {
+                "path": "/mnt/user-data/workspace/inspect_mat.py",
+                "content": "import scipy.io\nprint('inspect')\n",
+            },
+        ),
+        ("bash", {"command": "python /mnt/user-data/workspace/inspect_mat.py"}),
+        # Regression: python3.10 was a false negative (\\d* matched only '3',
+        # then '.' failed the trailing \\s/$ boundary). Now covered by \\d*(?:\\.\\d+)*.
+        ("bash", {"command": "python3.10 /mnt/user-data/workspace/inspect_mat.py"}),
+        # python after a shell separator must still be blocked.
+        ("bash", {"command": "echo prepare && python /mnt/user-data/workspace/inspect_mat.py"}),
+        # sudo/time/env prefixes are command-start positions, must block.
+        ("bash", {"command": "sudo python /mnt/user-data/workspace/inspect_mat.py"}),
+        # Direct script execution (shebang) at command-start position.
+        ("bash", {"command": "/mnt/user-data/workspace/inspect_mat.py"}),
+        ("bash", {"command": "./run_analysis.py --flag"}),
+        # R/Julia/MATLAB interpreters (previously caught only by broad suffix
+        # check; now covered by _INTERPRETER_COMMAND_RE).
+        ("bash", {"command": "Rscript /mnt/user-data/workspace/cv.R"}),
+        ("bash", {"command": "julia /mnt/user-data/workspace/sim.jl"}),
+        ("bash", {"command": "matlab -batch /mnt/user-data/workspace/run.m"}),
+    ],
+)
+def test_active_nir_workflow_blocks_python_analysis_fallbacks(tool_name: str, args: dict) -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="calibration",
+        data_path="/mnt/user-data/uploads/tablets.MAT",
+        analyte="active",
+        unit="%w/w",
+        domain="pharma",
+    )
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result(tool_name, {"status": "ok"})
+
+    result = middleware.wrap_tool_call(
+        _request(tool_name, {"nir_workflow": workflow}, args=args),
+        handler,
+    )
+
+    assert called is False
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    payload = json.loads(result.content)
+    assert payload["code"] == "nir_code_execution_forbidden"
+    assert payload["next_action"] == "inspect_data"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Regression: ``python`` as a search term / argument must NOT be blocked.
+        "grep python requirements.txt",
+        "echo python",
+        "echo use python for this",
+        "cat notes.txt | grep python",
+        "find . -name python",
+        "ls /usr/lib/python3.10/site-packages",
+        "cd python-projects",
+        "grep -r pythonic .",
+    ],
+)
+def test_active_nir_workflow_allows_bash_mentioning_python_as_argument(command: str) -> None:
+    """Regression: the previous regex treated any whitespace before ``python``
+    as a command-start signal, blocking legitimate bash commands that mention
+    ``python`` as a search term or argument (e.g. ``grep python file``)."""
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="analysis",
+        data_path="/mnt/user-data/uploads/data.mat",
+        analyte="protein",
+        unit="%",
+        domain="default",
+    )
+    original = _result("bash", {"status": "ok"})
+
+    result = middleware.wrap_tool_call(
+        _request("bash", {"nir_workflow": workflow}, args={"command": command}),
+        lambda _: original,
+    )
+
+    assert result is original
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Regression: script suffix as an argument must NOT be blocked. The old
+        # _SCRIPT_SUFFIX_RE.search(command) matched .py at end of string,
+        # blocking non-executing commands like cat/grep/ls/rm on script files.
+        "cat script.py",
+        "grep pattern file.py",
+        "ls script.py",
+        "rm script.py",
+        "echo script.py",
+        "mv a.py b.txt",
+        "cp config.py config.py.bak",
+        "chmod +x script.py",
+        "cat notes.txt | grep foo file.py",
+    ],
+)
+def test_active_nir_workflow_allows_bash_operating_on_script_files(command: str) -> None:
+    """Regression: a script extension appearing as a file argument (not at a
+    command-start position) must NOT be blocked. Only direct execution of a
+    script file (e.g. ``./script.py``) or interpreter invocation should be
+    blocked."""
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="analysis",
+        data_path="/mnt/user-data/uploads/data.mat",
+        analyte="protein",
+        unit="%",
+        domain="default",
+    )
+    original = _result("bash", {"status": "ok"})
+
+    result = middleware.wrap_tool_call(
+        _request("bash", {"nir_workflow": workflow}, args={"command": command}),
+        lambda _: original,
+    )
+
+    assert result is original
+
+
+def test_active_nir_workflow_allows_non_script_artifact_write() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="analysis",
+        data_path="/mnt/user-data/uploads/data.mat",
+        analyte="protein",
+        unit="%",
+        domain="default",
+    )
+    original = _result("write_file", {"status": "ok"})
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "write_file",
+            {"nir_workflow": workflow},
+            args={"path": "/mnt/user-data/outputs/notes.md", "content": "# Notes"},
+        ),
+        lambda _: original,
+    )
+
+    assert result is original
+
+
+@pytest.mark.parametrize(
+    ("path", "content"),
+    [
+        # Empty __init__.py: script suffix but no analysis imports
+        ("/mnt/user-data/workspace/pkg/__init__.py", ""),
+        # config.py without analysis imports
+        ("/mnt/user-data/workspace/config.py", "DEBUG = True\n"),
+        # Non-analysis Python module (no numpy/pandas/scipy/sklearn/nir_core)
+        ("/mnt/user-data/workspace/utils.py", "def helper():\n    return 42\n"),
+    ],
+)
+def test_active_nir_workflow_allows_legitimate_python_module_files(
+    path: str, content: str
+) -> None:
+    """Regression: script-suffix alone must NOT block legitimate Python module
+    files. Only script suffix AND analysis-style imports should be blocked."""
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="analysis",
+        data_path="/mnt/user-data/uploads/data.mat",
+        analyte="protein",
+        unit="%",
+        domain="default",
+    )
+    original = _result("write_file", {"status": "ok"})
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "write_file",
+            {"nir_workflow": workflow},
+            args={"path": path, "content": content},
+        ),
+        lambda _: original,
+    )
+
+    assert result is original
+
+
 def test_successful_model_result_automatically_enters_review() -> None:
     middleware = NIRWorkflowMiddleware()
     workflow = _execution_state()
@@ -144,6 +345,85 @@ def test_successful_model_result_automatically_enters_review() -> None:
     assert updated["approval_status"] == "pending"
     assert updated["model_path"] == "/mnt/user-data/outputs/model.pkl"
     assert updated["metrics_path"] == "/mnt/user-data/outputs/metrics.json"
+
+
+def test_successful_auto_split_model_result_automatically_enters_review() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state(task_type="analysis")
+    message = _result(
+        "nir_train_auto_split_model",
+        {
+            "status": "ok",
+            "passed": True,
+            "grade": "B",
+            "model_path": "/mnt/user-data/outputs/auto-split.pkl",
+            "metrics_path": "/mnt/user-data/outputs/auto-split.json",
+        },
+    )
+
+    result = middleware.wrap_tool_call(
+        _request("nir_train_auto_split_model", {"nir_workflow": workflow}),
+        lambda _: message,
+    )
+
+    assert isinstance(result, Command)
+    updated = result.update["nir_workflow"]
+    assert updated["stage"] == "review"
+    assert updated["attempt"] == 1
+    assert updated["model_path"].endswith("auto-split.pkl")
+
+
+def test_successful_mat_collection_result_automatically_enters_review() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state(task_type="analysis")
+    message = _result(
+        "nir_analyze_collection",
+        {
+            "status": "ok",
+            "passed": True,
+            "grade": "excellent",
+            "primary_subset": "R562",
+            "model_path": "/mnt/user-data/outputs/nir_collection/R562/model.pkl",
+            "metrics_path": "/mnt/user-data/outputs/nir_collection/R562/metrics.json",
+        },
+    )
+
+    result = middleware.wrap_tool_call(
+        _request("nir_analyze_collection", {"nir_workflow": workflow}),
+        lambda _: message,
+    )
+
+    assert isinstance(result, Command)
+    updated = result.update["nir_workflow"]
+    assert updated["stage"] == "review"
+    assert updated["attempt"] == 1
+    assert updated["model_path"].endswith("/R562/model.pkl")
+
+
+def test_successful_multi_model_result_automatically_enters_review() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state(task_type="multi_modeling")
+    message = _result(
+        "nir_train_multi_model",
+        {
+            "status": "ok",
+            "passed": True,
+            "grade": "good",
+            "model_path": "/mnt/user-data/outputs/multi-model.pkl",
+            "metrics_path": "/mnt/user-data/outputs/multi-metrics.json",
+        },
+    )
+
+    result = middleware.wrap_tool_call(
+        _request("nir_train_multi_model", {"nir_workflow": workflow}),
+        lambda _: message,
+    )
+
+    assert isinstance(result, Command)
+    updated = result.update["nir_workflow"]
+    assert updated["stage"] == "review"
+    assert updated["attempt"] == 1
+    assert updated["model_path"].endswith("multi-model.pkl")
 
 
 def test_successful_tool_observation_is_checkpointed_with_run_context() -> None:

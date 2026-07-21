@@ -107,6 +107,24 @@ batch endpoint owner-checks explicit thread/scenario mappings and reuses the
 same deterministic evaluator as `backend/make eval-nir`; browser-local history
 contains only the latest 12 aggregate summaries.
 
+NIR file ingestion is confidence-gated. `nir_core.io.schema` profiles CSV/TXT
+encoding, delimiter, decimal mark, field roles, and orientation, and recursively
+enumerates numeric MAT v5/v7.3 leaves under dotted paths. High-confidence
+schemas load automatically; equal matrix candidates or ambiguous numeric CSV
+columns are surfaced as `needs_user_mapping` rather than silently guessed.
+
+Primary single-target NIR runtime paths autonomously decide whether wavelength selection
+is worthwhile. They establish a full-spectrum tuning baseline, conditionally
+compare CARS using calibration data only, cap selector fitting on large datasets,
+and retain CARS only for a material tuning improvement; the persisted decision
+evidence never consults the final test or external holdout.
+
+Those primary single-target paths also default to bounded model-family
+selection: PLS is the baseline, while Ridge, SVR, and Extra Trees are added only
+when dimensionality, tuning quality, sample count, and runtime caps justify
+them. An alternative must materially improve tuning RMSE; the final holdout is
+never used to choose the model family.
+
 Rule of thumb: **root `make` = the full application**; **`backend/Makefile` and `frontend/`
 (`pnpm`) = per-module work.**
 

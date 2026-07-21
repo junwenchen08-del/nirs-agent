@@ -155,7 +155,9 @@ def plot_residuals(y_ref: np.ndarray, y_pred: np.ndarray) -> str:
     fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(11, 5))
 
     # Left: residuals vs predicted.
-    axes[0].scatter(y_pred, residuals, s=30, alpha=0.7, edgecolors="none", c="steelblue")
+    axes[0].scatter(
+        y_pred, residuals, s=30, alpha=0.7, edgecolors="none", c="steelblue"
+    )
     axes[0].axhline(0.0, color="k", linestyle="--", linewidth=1.0)
     axes[0].set_xlabel("Predicted")
     axes[0].set_ylabel("Residual (pred - ref)")
@@ -170,6 +172,108 @@ def plot_residuals(y_ref: np.ndarray, y_pred: np.ndarray) -> str:
     axes[1].set_title("Residual Histogram", fontsize=12)
     axes[1].grid(True, linestyle="--", alpha=0.4)
 
+    fig.tight_layout()
+    return _fig_to_base64(fig)
+
+
+def _multi_plot_inputs(
+    y_ref: np.ndarray,
+    y_pred: np.ndarray,
+    names: list[str] | None,
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    ref = np.asarray(y_ref, dtype=float)
+    pred = np.asarray(y_pred, dtype=float)
+    if ref.ndim != 2 or pred.ndim != 2:
+        raise ValueError("y_ref and y_pred must both be 2D")
+    if ref.shape != pred.shape:
+        raise ValueError(f"Shape mismatch: y_ref {ref.shape}, y_pred {pred.shape}")
+    target_names = names or [f"y{i}" for i in range(ref.shape[1])]
+    if len(target_names) != ref.shape[1]:
+        raise ValueError("names length must match the number of targets")
+    return ref, pred, target_names
+
+
+def plot_multi_predicted_vs_reference(
+    y_ref: np.ndarray,
+    y_pred: np.ndarray,
+    names: list[str] | None = None,
+) -> str:
+    """Plot predicted-versus-reference panels for multiple components."""
+    ref, pred, target_names = _multi_plot_inputs(y_ref, y_pred, names)
+    n_targets = ref.shape[1]
+    n_cols = min(2, n_targets)
+    n_rows = int(np.ceil(n_targets / n_cols))
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(6 * n_cols, 5 * n_rows), squeeze=False
+    )
+    for index, ax in enumerate(axes.ravel()):
+        if index >= n_targets:
+            ax.set_visible(False)
+            continue
+        reference = ref[:, index]
+        prediction = pred[:, index]
+        metrics = _compute_metrics(reference, prediction)
+        all_values = np.concatenate([reference, prediction])
+        lo, hi = float(np.min(all_values)), float(np.max(all_values))
+        pad = 0.05 * (hi - lo if hi > lo else 1.0)
+        limits = (lo - pad, hi + pad)
+        ax.plot(limits, limits, "k--", linewidth=1.0)
+        ax.scatter(
+            reference, prediction, s=24, alpha=0.75, edgecolors="none", c="steelblue"
+        )
+        ax.set(
+            xlim=limits,
+            ylim=limits,
+            xlabel="Reference",
+            ylabel="Predicted",
+            title=target_names[index],
+        )
+        ax.text(
+            0.04,
+            0.96,
+            f"R² = {metrics['R2']:.4f}\nRMSEP = {metrics['RMSEP']:.4f}\nRPD = {metrics['RPD']:.4f}",
+            transform=ax.transAxes,
+            va="top",
+            fontsize=9,
+        )
+        ax.grid(True, linestyle="--", alpha=0.35)
+    fig.tight_layout()
+    return _fig_to_base64(fig)
+
+
+def plot_multi_residuals(
+    y_ref: np.ndarray,
+    y_pred: np.ndarray,
+    names: list[str] | None = None,
+) -> str:
+    """Plot residual-versus-predicted panels for multiple components."""
+    ref, pred, target_names = _multi_plot_inputs(y_ref, y_pred, names)
+    n_targets = ref.shape[1]
+    n_cols = min(2, n_targets)
+    n_rows = int(np.ceil(n_targets / n_cols))
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(6 * n_cols, 4.5 * n_rows), squeeze=False
+    )
+    for index, ax in enumerate(axes.ravel()):
+        if index >= n_targets:
+            ax.set_visible(False)
+            continue
+        residuals = pred[:, index] - ref[:, index]
+        ax.scatter(
+            pred[:, index],
+            residuals,
+            s=24,
+            alpha=0.75,
+            edgecolors="none",
+            c="steelblue",
+        )
+        ax.axhline(0.0, color="k", linestyle="--", linewidth=1.0)
+        ax.set(
+            xlabel="Predicted",
+            ylabel="Residual (pred - ref)",
+            title=target_names[index],
+        )
+        ax.grid(True, linestyle="--", alpha=0.35)
     fig.tight_layout()
     return _fig_to_base64(fig)
 
@@ -381,8 +485,14 @@ def plot_regression_coefficients(
     fig, ax = plt.subplots(figsize=(10, 5))
 
     # Positive coefficients in blue, negative in red.
-    ax.bar(x, coef, color=np.where(coef >= 0, "steelblue", "crimson"),
-           edgecolor="none", width=(x[1] - x[0]) if n_wv > 1 else 1.0, alpha=0.8)
+    ax.bar(
+        x,
+        coef,
+        color=np.where(coef >= 0, "steelblue", "crimson"),
+        edgecolor="none",
+        width=(x[1] - x[0]) if n_wv > 1 else 1.0,
+        alpha=0.8,
+    )
 
     ax.axhline(0.0, color="k", linewidth=0.8)
 

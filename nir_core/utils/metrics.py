@@ -118,7 +118,9 @@ def slope(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     denom = float(np.sum((y_true - np.mean(y_true)) ** 2))
     if denom == 0.0:
         return 0.0
-    return float(np.sum((y_true - np.mean(y_true)) * (y_pred - np.mean(y_pred))) / denom)
+    return float(
+        np.sum((y_true - np.mean(y_true)) * (y_pred - np.mean(y_pred))) / denom
+    )
 
 
 def mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -156,6 +158,35 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
         "slope": slope(y_true, y_pred),
         "MAE": mae(y_true, y_pred),
     }
+
+
+def compute_metrics_multi(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    names: list[str] | None = None,
+) -> list[dict]:
+    """Compute the standard metric set independently for each target."""
+    true_2d = np.asarray(y_true, dtype=float)
+    pred_2d = np.asarray(y_pred, dtype=float)
+    if true_2d.ndim != 2 or pred_2d.ndim != 2:
+        raise ValueError("y_true and y_pred must both be 2D")
+    if true_2d.shape != pred_2d.shape:
+        raise ValueError(
+            f"y_true and y_pred must have the same shape, got {true_2d.shape} and {pred_2d.shape}"
+        )
+    n_targets = true_2d.shape[1]
+    target_names = names or [f"y{i}" for i in range(n_targets)]
+    if len(target_names) != n_targets:
+        raise ValueError(
+            f"names length ({len(target_names)}) must match target count ({n_targets})"
+        )
+    return [
+        {
+            "name": target_names[index],
+            **compute_metrics(true_2d[:, index], pred_2d[:, index]),
+        }
+        for index in range(n_targets)
+    ]
 
 
 def _extract_r2(metrics: dict) -> float | None:
@@ -299,7 +330,9 @@ def evaluate_quality(
         grade = "poor"
     else:
         grade_tier = min(_tier(r2_status), _tier(rpd_status))
-        grade = {4: "excellent", 3: "good", 2: "fair", 1: "poor"}.get(grade_tier, "poor")
+        grade = {4: "excellent", 3: "good", 2: "fair", 1: "poor"}.get(
+            grade_tier, "poor"
+        )
 
     # Overfitting detection.
     rmsep = metrics.get("RMSEP")
