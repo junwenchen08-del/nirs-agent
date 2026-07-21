@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, override
@@ -27,16 +28,20 @@ class _ToolPolicy:
     task_types: frozenset[str]
 
 
-_MODEL_TASKS = frozenset({"analysis", "calibration", "compare"})
-_DATA_TASKS = frozenset({"analysis", "calibration", "compare", "prediction", "inspection"})
-_EXECUTION_TASKS = frozenset({"analysis", "calibration", "compare", "prediction"})
+_MODEL_TASKS = frozenset({"analysis", "calibration", "multi_modeling", "compare"})
+_DATA_TASKS = frozenset({"analysis", "calibration", "multi_modeling", "compare", "prediction", "inspection"})
+_EXECUTION_TASKS = frozenset({"analysis", "calibration", "multi_modeling", "compare", "prediction"})
 
 _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_load_data": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
     "nir_inspect": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
     "nir_preprocess": _ToolPolicy(frozenset({"execution"}), _EXECUTION_TASKS),
+    "nir_train_auto_split_model": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
     "nir_train_model": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
+    "nir_train_partitioned_model": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
+    "nir_train_multi_model": _ToolPolicy(frozenset({"execution"}), frozenset({"multi_modeling"})),
     "nir_analyze": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
+    "nir_analyze_collection": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
     "nir_compare": _ToolPolicy(frozenset({"execution"}), _MODEL_TASKS),
     "nir_predict": _ToolPolicy(frozenset({"execution"}), frozenset({"prediction"})),
     "nir_reflect": _ToolPolicy(frozenset({"knowledge", "review"}), _MODEL_TASKS),
@@ -45,7 +50,32 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
 }
 _OBSERVED_NIR_TOOLS = frozenset({*_TOOL_POLICIES, "nir_workflow"})
 
-_MODELING_TOOLS = frozenset({"nir_train_model", "nir_analyze", "nir_compare"})
+_MODELING_TOOLS = frozenset({"nir_train_auto_split_model", "nir_train_model", "nir_train_partitioned_model", "nir_train_multi_model", "nir_analyze", "nir_analyze_collection", "nir_compare"})
+_TERMINAL_NIR_STAGES = frozenset({"completed", "blocked"})
+_SCRIPT_SUFFIX_RE = re.compile(r"\.(?:py|ipynb|r|jl|m)(?:$|[?#])", re.IGNORECASE)
+# Interpreters that execute analysis scripts (Python, pip, pytest, R, Julia,
+# MATLAB). Matched only at a command-start position (after ^, a shell
+# separator ;&|( or newline, or a known prefix sudo/time/exec/env/nohup) to
+# avoid false positives like ``grep python file`` or ``echo R``.
+# ``python\d*(?:\.\d+)*`` covers ``python``, ``python3`` and ``python3.10``.
+_INTERPRETER_COMMAND_RE = re.compile(
+    r"(?:^|[;&|(\n])\s*(?:(?:sudo|time|exec|env|nohup)\s+)?"
+    r"(?:python\d*(?:\.\d+)*(?:\.exe)?|pip\d*|pytest|uv\s+run\s+python"
+    r"|Rscript|R\b|julia|matlab)"
+    r"(?:\s|$)",
+    re.IGNORECASE,
+)
+# Direct script execution: a file with a script extension at a command-start
+# position (e.g. ``./script.py``, ``/path/to/run.R``). Avoids false positives
+# like ``cat script.py`` or ``grep pattern file.py`` where the script is merely
+# an argument to a non-executing command. Interpreters (python/Rscript/julia/
+# matlab) are covered by _INTERPRETER_COMMAND_RE above.
+_SCRIPT_EXEC_RE = re.compile(
+    r"(?:^|[;&|(\n])\s*(?:(?:sudo|time|exec|env|nohup)\s+)?"
+    r"\S*\.(?:py|ipynb|r|jl|m)(?:\s|$)",
+    re.IGNORECASE,
+)
+_ANALYSIS_CODE_RE = re.compile(r"\b(?:import|from)\s+(?:numpy|pandas|scipy|sklearn|nir_core)\b", re.IGNORECASE)
 
 
 def _knowledge_evidence_ids(payload: Mapping[str, Any]) -> list[str]:
@@ -105,11 +135,35 @@ def _denied_message(
 
 def _authorize(request: ToolCallRequest) -> ToolMessage | None:
     tool_name = str(request.tool_call.get("name", ""))
+    workflow = _state_from_request(request).get("nir_workflow")
+    if isinstance(workflow, Mapping) and str(workflow.get("stage", "")) not in _TERMINAL_NIR_STAGES:
+        args = request.tool_call.get("args")
+        args = args if isinstance(args, Mapping) else {}
+        violation = False
+        if tool_name in {"write_file", "write_file_tool"}:
+            path = str(args.get("path") or args.get("file_path") or "")
+            content = str(args.get("content") or "")
+            # Only block files that are BOTH a script extension AND contain
+            # analysis-style imports. This permits legitimate Python module
+            # files (empty __init__.py, config.py without analysis imports)
+            # while still blocking analysis scripts as defense-in-depth.
+            # Active script execution is separately blocked in the bash branch.
+            violation = bool(_SCRIPT_SUFFIX_RE.search(path) and _ANALYSIS_CODE_RE.search(content))
+        elif tool_name in {"bash", "bash_tool"}:
+            command = str(args.get("command") or args.get("cmd") or "")
+            violation = bool(_INTERPRETER_COMMAND_RE.search(command) or _SCRIPT_EXEC_RE.search(command))
+        if violation:
+            return _denied_message(
+                request,
+                code="nir_code_execution_forbidden",
+                error=("Python/R/MATLAB analysis scripts are forbidden during an active NIR workflow. Use nir_inspect, nir_load_data, nir_preprocess, and NIR modeling tools only."),
+                workflow=workflow,
+            )
+
     policy = _TOOL_POLICIES.get(tool_name)
     if policy is None:
         return None
 
-    workflow = _state_from_request(request).get("nir_workflow")
     if not isinstance(workflow, Mapping):
         return _denied_message(
             request,

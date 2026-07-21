@@ -11,6 +11,13 @@ from pathlib import Path
 
 import numpy as np
 
+from nir_core.io.schema import (
+    csv_profile_numeric_matrix,
+    flatten_mat_leaves,
+    infer_mat_mapping,
+    load_inferred_mat_arrays,
+    profile_csv,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -95,9 +102,7 @@ def detect_structure(X: np.ndarray) -> str:
         ValueError: If ``X`` is not 2D.
     """
     if X.ndim != 2:
-        raise ValueError(
-            f"detect_structure expects a 2D array, got shape {X.shape!r}"
-        )
+        raise ValueError(f"detect_structure expects a 2D array, got shape {X.shape!r}")
     n_rows, n_cols = X.shape
     if n_rows == 0 or n_cols == 0:
         return "samples_in_rows"
@@ -151,7 +156,8 @@ def inspect_file(filepath: str) -> str:
 # Internal inspectors
 # ---------------------------------------------------------------------------
 
-def _inspect_csv_like(filepath: str) -> dict:
+
+def _inspect_csv_like_legacy(filepath: str) -> dict:
     """Inspect a CSV/TXT file by parsing it with numpy (header-sniffed).
 
     Only the first 200 data rows are loaded for statistics; total row count
@@ -161,7 +167,7 @@ def _inspect_csv_like(filepath: str) -> dict:
     has_header = _sniff_header(filepath, delimiter)
 
     # Count total data rows without parsing floats (cheap line scan).
-    with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+    with open(filepath, encoding="utf-8", errors="replace") as fh:
         total_rows = sum(1 for line in fh if line.strip())
     if has_header:
         total_rows -= 1
@@ -235,7 +241,9 @@ def _inspect_csv_like(filepath: str) -> dict:
         # (empty corner where row label meets column label). The agent uses
         # this to decide whether to expect y / wv auto-separation.
         "corner_is_nan": bool(
-            preview.shape[0] > 0 and preview.shape[1] > 0 and not np.isfinite(preview[0, 0])
+            preview.shape[0] > 0
+            and preview.shape[1] > 0
+            and not np.isfinite(preview[0, 0])
         ),
         # ★ v3.8: Columns that are almost entirely NaN (= non-numeric string
         # columns like Set/Season/Region/Cultivar). The agent should pass
@@ -243,6 +251,53 @@ def _inspect_csv_like(filepath: str) -> dict:
         # as NaN and break PLS/SVR. Empty list means no metadata columns
         # detected (or n_rows <= 1, in which case detection is unreliable).
         "non_numeric_columns": non_numeric_cols,
+    }
+
+
+def _inspect_csv_like(filepath: str) -> dict:
+    """Inspect a CSV/TXT preview and publish its inferred field mapping."""
+    profile = profile_csv(filepath, max_rows=201)
+    preview = csv_profile_numeric_matrix(profile)
+    if preview.ndim != 2 or preview.shape[1] == 0:
+        raise ValueError(f"Could not parse a 2D data block from {filepath!r}")
+
+    mapping = profile.mapping
+    if mapping["status"] == "auto" and mapping.get("transpose"):
+        n_samples = len(mapping["spectral_columns"])
+        n_wavelengths = profile.total_rows
+        structure = "samples_in_columns"
+    elif mapping["status"] == "auto":
+        n_samples = profile.total_rows
+        n_wavelengths = len(mapping["spectral_columns"])
+        structure = "samples_in_rows"
+    else:
+        structure = detect_structure(preview)
+        if structure == "samples_in_rows":
+            n_samples, n_wavelengths = profile.total_rows, profile.n_columns
+        else:
+            n_wavelengths, n_samples = profile.n_columns, profile.total_rows
+
+    finite = preview[np.isfinite(preview)]
+    value_range = [float(finite.min()), float(finite.max())] if finite.size else None
+    non_numeric_cols = [
+        index
+        for index in range(profile.n_columns)
+        if preview.shape[0]
+        and np.sum(np.isfinite(preview[:, index])) / preview.shape[0] < 0.1
+    ]
+    return {
+        "shape": [int(profile.total_rows), int(profile.n_columns)],
+        "estimated_samples": int(n_samples),
+        "estimated_wavelengths": int(n_wavelengths),
+        "structure": structure,
+        "value_range": value_range,
+        "has_nan": bool(np.isnan(preview).any()),
+        "corner_is_nan": bool(preview.size and not np.isfinite(preview[0, 0])),
+        "non_numeric_columns": non_numeric_cols,
+        "has_header": profile.has_header,
+        "column_names": profile.headers,
+        "dialect": profile.dialect,
+        "schema_mapping": mapping,
     }
 
 
@@ -258,6 +313,104 @@ def _inspect_mat(filepath: str) -> dict:
     if _is_hdf5(filepath):
         return _inspect_mat73(filepath)
     return _inspect_mat_v5(filepath)
+
+
+_LABELED_MATRIX_TARGET_TOKENS = (
+    "active",
+    "api",
+    "assay",
+    "content",
+    "concentration",
+    "target",
+    "reference",
+    "moisture",
+    "protein",
+    "fat",
+    "sugar",
+    "dry matter",
+)
+
+
+def _matlab_label_text(value: object) -> str:
+    """Normalize scipy/h5py scalar label wrappers to a plain string."""
+    current = value
+    while isinstance(current, np.ndarray) and current.size == 1:
+        current = current.reshape(-1)[0]
+    if isinstance(current, bytes):
+        return current.decode("utf-8", errors="replace").strip()
+    return str(current).strip()
+
+
+def _detect_labeled_matrix_layout(variables: dict[str, object]) -> dict | None:
+    """Detect PLS-Toolbox ``Matrix``/``VarLabels``/``ObjLabels`` bundles.
+
+    Numeric variable labels identify spectral columns. Named response columns
+    such as ``active (%w/w)`` are separated as y, while other named columns
+    (for example ``Type`` and ``Scale``) remain metadata and are excluded.
+    """
+    keys = {str(name).lower(): name for name in variables}
+    matrix_key = keys.get("matrix")
+    labels_key = keys.get("varlabels")
+    if matrix_key is None or labels_key is None:
+        return None
+
+    matrix = np.asarray(variables[matrix_key])
+    if matrix.ndim != 2 or not np.issubdtype(matrix.dtype, np.number):
+        return None
+    labels = [
+        _matlab_label_text(value)
+        for value in np.asarray(variables[labels_key]).reshape(-1)
+    ]
+    if len(labels) != matrix.shape[1]:
+        return None
+
+    spectral_indices: list[int] = []
+    wavelengths: list[float] = []
+    for index, label in enumerate(labels):
+        try:
+            wavelength = float(label)
+        except ValueError:
+            continue
+        if np.isfinite(wavelength):
+            spectral_indices.append(index)
+            wavelengths.append(wavelength)
+    if len(spectral_indices) < 2:
+        return None
+
+    spectral_set = set(spectral_indices)
+    target_indices = [
+        index
+        for index, label in enumerate(labels)
+        if index not in spectral_set
+        and any(token in label.lower() for token in _LABELED_MATRIX_TARGET_TOKENS)
+    ]
+    metadata_indices = [
+        index
+        for index in range(len(labels))
+        if index not in spectral_set and index not in target_indices
+    ]
+
+    sample_names: list[str] = []
+    sample_key = keys.get("objlabels")
+    if sample_key is not None:
+        candidate_names = [
+            _matlab_label_text(value)
+            for value in np.asarray(variables[sample_key]).reshape(-1)
+        ]
+        if len(candidate_names) == matrix.shape[0]:
+            sample_names = candidate_names
+
+    return {
+        "matrix_variable": str(matrix_key),
+        "variable_labels_variable": str(labels_key),
+        "sample_labels_variable": str(sample_key) if sample_key is not None else None,
+        "labels": labels,
+        "spectral_indices": spectral_indices,
+        "wavelengths": wavelengths,
+        "target_indices": target_indices,
+        "metadata_indices": metadata_indices,
+        "sample_names": sample_names,
+    }
 
 
 def _is_hdf5(filepath: str) -> bool:
@@ -282,14 +435,68 @@ def _inspect_mat_v5(filepath: str) -> dict:
         k: v for k, v in raw.items() if not k.startswith("__")
     }
 
+    labeled = _detect_labeled_matrix_layout(candidates)
+    if labeled is not None:
+        matrix = np.asarray(candidates[labeled["matrix_variable"]], dtype=float)
+        spectral = matrix[:, labeled["spectral_indices"]]
+        finite = spectral[np.isfinite(spectral)]
+        return {
+            "labeled_matrix": True,
+            "auto_load_supported": True,
+            "matrix_variable": labeled["matrix_variable"],
+            "variable_labels_variable": labeled["variable_labels_variable"],
+            "sample_labels_variable": labeled["sample_labels_variable"],
+            "source_shape": [int(matrix.shape[0]), int(matrix.shape[1])],
+            "shape": [int(matrix.shape[0]), len(labeled["spectral_indices"])],
+            "estimated_samples": int(matrix.shape[0]),
+            "estimated_wavelengths": len(labeled["spectral_indices"]),
+            "structure": "samples_in_rows",
+            "value_range": (
+                [float(finite.min()), float(finite.max())] if finite.size else None
+            ),
+            "has_nan": bool(np.isnan(spectral).any()),
+            "target_columns": [
+                {"index": index, "name": labeled["labels"][index]}
+                for index in labeled["target_indices"]
+            ],
+            "metadata_columns": [
+                {"index": index, "name": labeled["labels"][index]}
+                for index in labeled["metadata_indices"]
+            ],
+            "spectral_column_indices": labeled["spectral_indices"],
+            "wavelength_range": [
+                float(min(labeled["wavelengths"])),
+                float(max(labeled["wavelengths"])),
+            ],
+            "has_sample_labels": bool(labeled["sample_names"]),
+        }
+
+    schema_mapping = infer_mat_mapping(candidates)
+    struct_obj = _find_top_struct(candidates)
+    if struct_obj is not None:
+        info = _summarize_struct(struct_obj)
+        info["schema_mapping"] = schema_mapping
+        if schema_mapping["status"] == "auto":
+            X, y, wv = load_inferred_mat_arrays(candidates, schema_mapping)
+            info.update(_summarize_array(X))
+            info["auto_load_supported"] = True
+            info["has_reference"] = y is not None
+            info["has_wavelength_axis"] = wv is not None
+        return info
+
+    if schema_mapping["status"] == "auto":
+        X, y, wv = load_inferred_mat_arrays(candidates, schema_mapping)
+        info = _summarize_array(X)
+        info["schema_mapping"] = schema_mapping
+        info["auto_load_supported"] = True
+        info["has_reference"] = y is not None
+        info["has_wavelength_axis"] = wv is not None
+        return info
+
     # Detect a top-level struct wrapper. scipy returns mat_struct objects
     # inside a (1,1) object array when squeeze_me=False; with squeeze_me=True
     # they come back as bare mat_struct. We use duck-typing (_fieldnames) to
     # avoid importing mat_struct.
-    struct_obj = _find_top_struct(candidates)
-    if struct_obj is not None:
-        return _summarize_struct(struct_obj)
-
     # Flat file: pick the largest 2D numeric array (legacy behaviour).
     flat: dict[str, np.ndarray] = {}
     for k, v in candidates.items():
@@ -298,10 +505,10 @@ def _inspect_mat_v5(filepath: str) -> dict:
             flat[k] = arr
     arr = _pick_first_2d(flat)
     if arr is None:
-        raise ValueError(
-            f"No suitable 2D numeric variable found in {filepath!r}"
-        )
-    return _summarize_array(arr)
+        raise ValueError(f"No suitable 2D numeric variable found in {filepath!r}")
+    info = _summarize_array(arr)
+    info["schema_mapping"] = schema_mapping
+    return info
 
 
 def _inspect_mat73(filepath: str) -> dict:
@@ -310,36 +517,42 @@ def _inspect_mat73(filepath: str) -> dict:
         import h5py  # type: ignore
     except Exception as exc:  # pragma: no cover - environment dependent
         raise ValueError(
-            "Reading MATLAB v7.3 (HDF5) files requires the 'h5py' package, "
-            f"but it could not be imported: {exc!s}. Install it via "
-            "`pip install h5py`."
+            f"Reading MATLAB v7.3 (HDF5) files requires the 'h5py' package, but it could not be imported: {exc!s}. Install it via `pip install h5py`."
         ) from exc
 
-    with h5py.File(filepath, "r") as fh:
-        # Detect HDF5 groups (MATLAB structs in v7.3 files).
-        groups = {k: fh[k] for k in fh.keys() if isinstance(fh[k], h5py.Group)}
-        if groups:
-            # Pick the top-level group with the most leaf datasets.
-            top_name = max(groups, key=lambda k: len(groups[k].keys()))
-            struct_dict = {
-                sub: np.asarray(groups[top_name][sub][...])
-                for sub in groups[top_name].keys()
-            }
-            return _summarize_struct(struct_dict)
+    def read_node(node):
+        if isinstance(node, h5py.Group):
+            return {name: read_node(node[name]) for name in node.keys()}
+        return np.asarray(node[...])
 
-        # Flat file: pick the largest 2D dataset.
-        flat: dict[str, np.ndarray] = {}
-        for key in fh.keys():
-            try:
-                flat[key] = np.asarray(fh[key][...])
-            except Exception:
-                continue
-        arr = _pick_first_2d(flat)
-        if arr is None:
-            raise ValueError(
-                f"No suitable 2D numeric variable found in {filepath!r}"
-            )
-        return _summarize_array(arr)
+    with h5py.File(filepath, "r") as fh:
+        root = {name: read_node(fh[name]) for name in fh.keys() if name != "#refs#"}
+
+    mapping = infer_mat_mapping(root)
+    if mapping["status"] == "auto":
+        X, y, wv = load_inferred_mat_arrays(root, mapping)
+        info = _summarize_array(X)
+        info.update(
+            {
+                "schema_mapping": mapping,
+                "auto_load_supported": True,
+                "has_reference": y is not None,
+                "has_wavelength_axis": wv is not None,
+            }
+        )
+        return info
+
+    leaves = {
+        path: value
+        for path, value in flatten_mat_leaves(root).items()
+        if value.ndim == 2
+    }
+    arr = _pick_first_2d(leaves)
+    if arr is None:
+        raise ValueError(f"No suitable 2D numeric variable found in {filepath!r}")
+    info = _summarize_array(arr)
+    info["schema_mapping"] = mapping
+    return info
 
 
 def _find_top_struct(candidates: dict[str, object]) -> object | None:
@@ -355,7 +568,9 @@ def _find_top_struct(candidates: dict[str, object]) -> object | None:
         if isinstance(value, np.ndarray) and value.dtype == object:
             if value.size == 1:
                 value = value.flat[0]
-        if hasattr(value, "_fieldnames") and isinstance(getattr(value, "_fieldnames"), list):
+        if hasattr(value, "_fieldnames") and isinstance(
+            getattr(value, "_fieldnames"), list
+        ):
             return value
     return None
 
@@ -393,7 +608,9 @@ def _summarize_struct(struct: object) -> dict:
             continue
         arrays[name] = arr
         lname = name.lower()
-        if arr.ndim == 2 and _matches_any(lname, ("x", "spectra", "absorbance", "data")):
+        if arr.ndim == 2 and _matches_any(
+            lname, ("x", "spectra", "absorbance", "data")
+        ):
             x_fields.append(name)
         elif arr.ndim == 1:
             if _matches_any(lname, ("y", "ref", "reference", "target", "label")):
@@ -416,13 +633,14 @@ def _summarize_struct(struct: object) -> dict:
         first = sub_structs[first_name]
         first_fields = dict(_iter_struct_fields(first))
         first_arrays = {
-            k: np.asarray(v) for k, v in first_fields.items()
-            if np.asarray(v).ndim >= 1
+            k: np.asarray(v) for k, v in first_fields.items() if np.asarray(v).ndim >= 1
         }
         # Look for X1/X2/... in the sub-struct; concatenate column counts.
         sub_x_names = sorted(
-            n for n, v in first_arrays.items()
-            if v.ndim == 2 and _matches_any(n.lower(), ("x", "spectra", "absorbance", "data"))
+            n
+            for n, v in first_arrays.items()
+            if v.ndim == 2
+            and _matches_any(n.lower(), ("x", "spectra", "absorbance", "data"))
         )
         if sub_x_names:
             total_cols = sum(first_arrays[n].shape[1] for n in sub_x_names)
@@ -439,11 +657,21 @@ def _summarize_struct(struct: object) -> dict:
             sub_y = []
             for n, v in first_arrays.items():
                 v1 = np.asarray(v).ravel()
-                if v1.ndim == 1 and v1.shape[0] == total_rows and _matches_any(n.lower(), ("y", "ref", "reference", "target", "label")):
+                if (
+                    v1.ndim == 1
+                    and v1.shape[0] == total_rows
+                    and _matches_any(
+                        n.lower(), ("y", "ref", "reference", "target", "label")
+                    )
+                ):
                     sub_y.append(n)
             sub_wv = [
-                n for n, v in arrays.items()
-                if np.asarray(v).ravel().ndim == 1 and _matches_any(n.lower(), ("wn", "wv", "wavelength", "lambda", "wave"))
+                n
+                for n, v in arrays.items()
+                if np.asarray(v).ravel().ndim == 1
+                and _matches_any(
+                    n.lower(), ("wn", "wv", "wavelength", "lambda", "wave")
+                )
             ]
             info["y_fields"] = sub_y
             info["wv_fields"] = sub_wv
@@ -451,8 +679,7 @@ def _summarize_struct(struct: object) -> dict:
             first_x = first_arrays[sub_x_names[0]]
             finite = first_x[np.isfinite(first_x)]
             info["value_range"] = (
-                [float(finite.min()), float(finite.max())]
-                if finite.size > 0 else None
+                [float(finite.min()), float(finite.max())] if finite.size > 0 else None
             )
             info["has_nan"] = bool(np.isnan(first_x).any())
         else:
@@ -476,8 +703,7 @@ def _summarize_struct(struct: object) -> dict:
         first_x = arrays[x_fields[0]]
         finite = first_x[np.isfinite(first_x)]
         info["value_range"] = (
-            [float(finite.min()), float(finite.max())]
-            if finite.size > 0 else None
+            [float(finite.min()), float(finite.max())] if finite.size > 0 else None
         )
         info["has_nan"] = bool(np.isnan(first_x).any())
     else:
@@ -510,7 +736,11 @@ def _iter_struct_fields(struct: object):
             value = getattr(struct, name)
             # Unwrap (1,1) object arrays containing a mat_struct (nested struct
             # returned by scipy with squeeze_me=False).
-            if isinstance(value, np.ndarray) and value.dtype == object and value.size == 1:
+            if (
+                isinstance(value, np.ndarray)
+                and value.dtype == object
+                and value.size == 1
+            ):
                 inner = value.flat[0]
                 if hasattr(inner, "_fieldnames"):
                     value = inner
@@ -528,7 +758,9 @@ def _matches_any(name_lower: str, prefixes: tuple[str, ...]) -> bool:
 
 def _pick_first_2d(candidates: dict[str, np.ndarray]) -> np.ndarray | None:
     """Pick the first variable that is 2D (prefer larger arrays)."""
-    two_d = {k: v for k, v in candidates.items() if isinstance(v, np.ndarray) and v.ndim == 2}
+    two_d = {
+        k: v for k, v in candidates.items() if isinstance(v, np.ndarray) and v.ndim == 2
+    }
     if not two_d:
         return None
     # Prefer the array with the most elements (heuristic for the spectra block).
@@ -547,9 +779,7 @@ def _summarize_array(arr: np.ndarray) -> dict:
         n_wavelengths, n_samples = arr.shape
     finite = arr[np.isfinite(arr)]
     value_range = (
-        [float(finite.min()), float(finite.max())]
-        if finite.size > 0
-        else None
+        [float(finite.min()), float(finite.max())] if finite.size > 0 else None
     )
     return {
         "shape": [int(arr.shape[0]), int(arr.shape[1])],
@@ -565,13 +795,14 @@ def _summarize_array(arr: np.ndarray) -> dict:
 # CSV/TXT sniffing helpers (also used by loaders.py)
 # ---------------------------------------------------------------------------
 
+
 def _sniff_delimiter(filepath: str) -> str:
     """Sniff the most likely delimiter for a CSV/TXT file.
 
     Tries ``,`` ``\\t`` ``;`` and whitespace; picks the one yielding the
     most columns on the first non-empty line.
     """
-    with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+    with open(filepath, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.rstrip("\n")
             if line.strip() == "":
@@ -596,14 +827,12 @@ def _sniff_header(filepath: str, delimiter: str | None) -> bool:
     half of the cells fail to parse as floats do we treat the row as a true
     text header.
     """
-    with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+    with open(filepath, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.rstrip("\n")
             if line.strip() == "":
                 continue
-            cells = (
-                line.split() if delimiter is None else line.split(delimiter)
-            )
+            cells = line.split() if delimiter is None else line.split(delimiter)
             non_empty = [c.strip() for c in cells if c.strip() != ""]
             if not non_empty:
                 continue

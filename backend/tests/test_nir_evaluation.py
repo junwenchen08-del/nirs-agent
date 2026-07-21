@@ -86,7 +86,7 @@ def _scenario(scenario_id: str):
 def test_default_scenario_catalog_covers_core_nir_agent_paths() -> None:
     scenarios = load_scenarios(SCENARIOS_PATH)
 
-    assert len(scenarios) == 20
+    assert len(scenarios) == 23
     assert {
         "intake-missing-requirements",
         "inspection-complete",
@@ -103,6 +103,9 @@ def test_default_scenario_catalog_covers_core_nir_agent_paths() -> None:
         "knowledge-no-hit-complete",
         "soil-moisture-calibration-register",
         "pharmaceutical-api-calibration-review",
+        "multi-component-basic",
+        "multi-component-shared-preprocess",
+        "multi-component-predict",
     }.issubset(scenarios)
 
 

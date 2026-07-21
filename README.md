@@ -32,7 +32,7 @@ NIR 工具调用，并从建模、知识检索和注册工具的结构化结果�
 核心原则：
 - **确定性兜底**：所有数学运算在 `nir_core` 中实现，LLM 无法跳过或错误执行
 - **零框架侵入**：NIR 配置由 `nir_core/config.py` 自管理，不修改 DeerFlow 的 `AppConfig`
-- **强制三集分离**：训练集、验证集、测试集在加载后立即分离，验证集绝不参与任何参数选择
+- **强制三集分离**：校准集、调优集、测试集相互隔离；调优集只负责模型选择，测试集不参与任何参数选择
 - **反思闭环**：当模型质量不达标时自动尝试不同预处理组合，最多 3 次回溯
 
 ---
@@ -155,18 +155,34 @@ deer-flow/
 
 ## 工具清单
 
-通过 `backend/.../community/nir/tools.py` 注册的 8 个 `@tool` 函数：
+通过 `backend/.../community/nir/tools.py` 注册的 15 个 `@tool` 函数：
 
 | 工具名 | 功能 | 调用方式 |
 |--------|------|---------|
+| `nir_workflow` | 启动并推进可持久化 NIR 工作流 | `nir_workflow(action, task_type)` |
 | `nir_load_data` | 加载光谱文件（.mat/.csv/.txt），标准化为 .npz | `nir_load_data(file_path)` |
 | `nir_inspect` | 预览文件结构（不完整加载） | `nir_inspect(file_path)` |
 | `nir_preprocess` | 单步预处理（11种方法） | `nir_preprocess(input_path, method, output_path)` |
 | `nir_train_model` | 建模（PLS/PCR/SVR/ML 等），含三集分离、CV、可选波长选择和质量门禁 | `nir_train_model(input_path, method, domain, wavelength_selection)` |
+| `nir_train_auto_split_model` | 无官方划分 CSV 的自主划分、波长选择和模型家族选择 | `nir_train_auto_split_model(file_path, y_col, x_cols, split_strategy="auto")` |
+| `nir_train_partitioned_model` | 使用 CSV 官方 Cal/Tuning/外部测试分区自主选择模型并完成无泄漏评估 | `nir_train_partitioned_model(file_path, split_col, train_label, tuning_label, test_label, y_col, x_cols)` |
+| `nir_train_multi_model` | 多成分同时建模，共享划分并逐成分选择波长、评估和保存 | `nir_train_multi_model(input_path, method, shared_preprocessing)` |
 | `nir_predict` | 使用已训练模型预测新样本（可选漂移检测） | `nir_predict(model_path, data_path)` |
-| `nir_analyze` | 一键端到端分析（不含反思闭环） | `nir_analyze(data_path, domain)` |
+| `nir_analyze` | 一键端到端分析，默认自主选择波长方案和模型家族（不含反思闭环） | `nir_analyze(data_path, domain)` |
+| `nir_analyze_collection` | 一次处理 MAT 文件内多个独立子数据集，返回紧凑汇总和全部产物路径 | `nir_analyze_collection(data_path, subsets="auto", domain)` |
 | `nir_reflect` | 确定性反思决策（should_retry + get_next_pipeline） | `nir_reflect(metrics, domain, attempt, history)` |
 | `nir_compare` | 多预处理流水线并行对比 | `nir_compare(data_path, pipelines, method)` |
+| `nir_register_model` | 经用户批准后注册版本化模型产物 | `nir_register_model(model_id, model_path, metrics_path)` |
+| `nir_search_knowledge` | 检索 NIR 领域知识库，为失败重试提供证据 | `nir_search_knowledge(query)` |
+
+多成分 CSV 通过 `nir_load_data(y_cols="8,9,10", x_cols="11:")` 显式指定
+参考列，标准化 NPZ 中保存 `y: (N,K)` 和 `y_names`。随后
+`nir_train_multi_model` 只划分一次 train/val/test，默认共享训练集拟合的预处理，
+但每个成分独立执行波长选择、训练、指标计算和质量门禁。模型保存为 v3 artifact，
+`nir_predict` 会自动输出按 `component_names` 命名的 K 列预测结果。
+若 CSV 首行同时包含成分名称和数值波长（如
+`protein,moisture,1100,1200,...`），加载器会保留名称并从光谱列提取波长轴；
+使用 `x_cols` 裁剪光谱时，`X` 与 `wv` 始终按同一组原始列索引同步裁剪。
 
 ---
 
@@ -176,20 +192,74 @@ deer-flow/
 先划分 train/val/test，再仅用训练集拟合预处理和选择器，最后用同一组
 `selected_indices` 裁剪验证集、测试集和后续预测数据，避免测试集信息泄漏。
 
+当数据集已提供官方分区（例如 Anderson 芒果数据集的 `Set=Cal/Tuning/Val Ext`）时，使用
+`nir_train_partitioned_model`，而不是随机分割工具。该工具只用 Cal 拟合预处理和 CARS，
+只用 Tuning 选择潜变量、全波段/CARS 方案及模型家族，并在 Val Ext 上一次性报告外部指标；模型、指标
+JSON 和 Markdown 报告会一同保存。
+
+当单成分 CSV 没有官方分区时，默认使用 `nir_train_auto_split_model`。它以固定随机种子生成
+约 70% 校准集、15% 调优集和 15% 独立留出测试集。`split_strategy="auto"` 会优先识别
+批次、季节、年份、产地、仪器、品种等合格分组字段并保持组间隔离；没有合格字段时，样本数
+不超过 500 使用 SPXY 联合光谱/目标距离，大于 500 使用目标值分层以避免二次复杂度距离矩阵。
+预处理只在校准集拟合，潜变量和可选 CARS 方案只由调优集选择，留出测试集最终只使用一次。
+指标 JSON 保存实际策略、选择原因、候选字段、分组值和全部样本索引。默认不需要自然语言明确
+要求波长选择：运行时先建立全波段基线，再根据校准样本数、波长数、波长/样本比和调优表现判断
+是否比较 CARS；只有调优 RMSE 相对改善至少 0.5% 才采用 CARS。大校准集的 CARS 拟合样本上限
+默认为 750，以避免高维大数据运行过久。该结果属于同一数据集内的独立留出测试，不能表述为外部验证。
+
+当 MAT 文件包含多个 `available_subsets` 时，协调器调用一次
+`nir_analyze_collection`，工具内部按子集顺序建模并生成轻量
+`collection_summary.md`。普通 NIR 报告不再内嵌 Base64 PNG；图表作为同目录独立
+产物交付。协调器使用工具返回的紧凑 JSON 或 `metrics.json` 汇总结果，不会把完整
+`report.md` 重新读入模型上下文。
+
+对于 PLS-Toolbox 常见的 `Matrix + VarLabels + ObjLabels` MAT 布局，加载器会把
+数值型 `VarLabels` 识别为光谱轴，把 `active`、`content`、`concentration` 等命名列
+识别为参考值，并排除 `Type`、`Scale` 等元数据列；`ObjLabels` 会保存为样本名。
+通用数据接入层还会递归检查 MAT v5/v7.3 的嵌套结构，根据字段名、向量长度和光谱轴
+单调性生成 `schema_mapping` 与置信度，必要时自动转置光谱矩阵。CSV/TXT 会检测编码、
+分隔符和小数点格式，并从字段名称和数值波长表头识别样本编号、目标值和光谱列。
+后端默认安装 `nir-core[mat73]`，Docker 中可以直接读取基于 HDF5 的 MAT v7.3 文件。
+只有高置信度映射会自动加载；多个等价矩阵或无法确定列角色时，`nir_inspect` 返回
+`action_required: confirm_field_mapping`，要求用户确认后使用 `x_var/y_var/wv_var` 或
+`y_col/x_cols` 显式加载，避免静默猜错。
+活动 NIR 工作流会在运行时拒绝 Python/R/MATLAB 分析脚本的创建和执行，工具加载失败
+时不得退回通用代码分析。
+
 支持的方法：
 
 | 方法 | 参数 | 说明 |
 |------|------|------|
-| `none` | `{}` | 默认，全波长建模 |
+| `auto` | `max_selection_samples`, `min_relative_improvement` 及 CARS 参数 | `nir_analyze` 默认；按数据规模和调优信号决定是否比较 CARS |
+| `none` | `{}` | 明确关闭波长选择，全波长建模 |
 | `cars` | `n_mc_samples`, `n_folds`, `random_state` | CARS 竞争性自适应重加权采样，适合 PLS 定量建模 |
 | `spa` | `n_min`, `n_max` | SPA 连续投影算法，适合少量代表性波长 |
 | `manual` | `indices` 或波长 `ranges` | 使用已知波段，如 `{"ranges":[[900,1200],[1450,1650]]}` |
+
+CARS 的 Monte Carlo 子集使用 80% 训练样本，ARS 按权重从完整变量池竞争采样，
+并始终与全波长 CV 基线比较，避免选择后性能反而下降。SPA 会在
+`n_min` 大于可用波长数时直接报错，而不是静默返回不满足约束的子集。
 
 启用预处理或波长选择时，保存的 `.pkl` v2 artifact 会包含模型、已拟合的
 预处理流水线和选择元数据。`nir_predict` 默认接收原始光谱，先复用训练时的
 预处理，再按 `selected_indices` 裁剪；输入已完成同一预处理时可设置
 `input_preprocessed=true` 跳过流水线。metrics 和返回值会包含
-`wavelength_selection`、`n_wavelengths_original`、`n_wavelengths_model`。
+`wavelength_selection`、`wavelength_selection_decision`、候选方案的调优证据、
+`n_wavelengths_original`、`n_wavelengths_model`。测试集/外部测试集不参与是否采用波长选择的决策。
+
+## 自主建模算法选择
+
+单成分的 `nir_train_auto_split_model`、`nir_train_partitioned_model`、`nir_analyze` 和
+`nir_analyze_collection` 默认使用 `method="auto"`。运行时先建立 PLS 基线，再按校准样本规模、
+入模特征数、特征/样本比和 PLS 调优表现生成受控候选集：高维问题可加入 Ridge，PLS 调优较弱且
+校准样本不超过 1500 时可加入 RBF-SVR，存在明显非线性信号且样本数在 80–2500 时可加入
+Extra Trees。强且紧凑的 PLS 基线不会触发额外搜索。
+
+所有候选模型的超参数只在校准集内部交叉验证，模型家族只由调优集 RMSE 选择；替代模型必须相对
+PLS 改善至少 1% 才会被采用。最终测试集或官方外部测试集不参与候选生成、超参数搜索或模型选择，
+仅在全部决策固定后评估一次。返回值和 metrics 会保存 `model_selection_decision`、候选模型调优
+证据、运行时上限、失败候选及最终算法。显式传入 `method="pls"`、`method="svr"` 等会进入强制
+模式并关闭模型家族自主选择；多成分同时建模保持原有显式算法行为。
 
 ---
 

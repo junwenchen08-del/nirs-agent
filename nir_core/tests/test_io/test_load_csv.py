@@ -12,7 +12,9 @@ from nir_core.io.writers import save_csv
 from nir_core.models import SpectralData
 
 
-def test_load_csv_roundtrip_no_y_no_wv(tmp_path: Path, synthetic_data: SpectralData) -> None:
+def test_load_csv_roundtrip_no_y_no_wv(
+    tmp_path: Path, synthetic_data: SpectralData
+) -> None:
     """Round-trip a spectra-only CSV and verify shapes/values."""
     src = synthetic_data
     # Save without y / wv to exercise the plain-matrix path.
@@ -35,7 +37,9 @@ def test_load_csv_roundtrip_no_y_no_wv(tmp_path: Path, synthetic_data: SpectralD
     np.testing.assert_allclose(loaded.X, data.X)
 
 
-def test_load_csv_roundtrip_with_y_and_wv(tmp_path: Path, synthetic_data: SpectralData) -> None:
+def test_load_csv_roundtrip_with_y_and_wv(
+    tmp_path: Path, synthetic_data: SpectralData
+) -> None:
     """Round-trip a full CSV (y + wv) and verify all three arrays."""
     src = synthetic_data
     data = SpectralData(
@@ -75,6 +79,45 @@ def test_load_csv_auto_delimiter_tab(tmp_path: Path) -> None:
     loaded = load_csv(str(fp))
     assert loaded.X.shape == (3, 4)
     np.testing.assert_allclose(loaded.X, X)
+
+
+def test_load_csv_auto_maps_decimal_comma_header_roles(tmp_path: Path) -> None:
+    fp = tmp_path / "mapped_semicolon.csv"
+    fp.write_text(
+        "Sample;Protein;1100;1102;1104\n"
+        "S1;10,5;0,10;0,20;0,30\n"
+        "S2;11,0;0,11;0,21;0,31\n"
+        "S3;11,5;0,12;0,22;0,32\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_csv(str(fp))
+
+    assert loaded.X.shape == (3, 3)
+    np.testing.assert_allclose(loaded.y, [10.5, 11.0, 11.5])
+    np.testing.assert_allclose(loaded.wv, [1100.0, 1102.0, 1104.0])
+    assert loaded.y_names == ["Protein"]
+    assert loaded.sample_names == ["S1", "S2", "S3"]
+
+
+def test_load_csv_auto_transposes_wavelength_first_column_layout(
+    tmp_path: Path,
+) -> None:
+    fp = tmp_path / "transposed.csv"
+    fp.write_text(
+        "wavelength,S1,S2,S3\n"
+        "1100,0.10,0.11,0.12\n"
+        "1102,0.20,0.21,0.22\n"
+        "1104,0.30,0.31,0.32\n"
+        "1106,0.40,0.41,0.42\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_csv(str(fp))
+
+    assert loaded.X.shape == (3, 4)
+    np.testing.assert_allclose(loaded.wv, [1100.0, 1102.0, 1104.0, 1106.0])
+    assert loaded.sample_names == ["S1", "S2", "S3"]
 
 
 def test_load_csv_auto_detects_nir_style_labeled_layout(tmp_path: Path) -> None:
@@ -151,7 +194,9 @@ def test_load_csv_auto_layout_rejects_non_nir_first_row(tmp_path: Path) -> None:
     assert loaded.wv is None
 
 
-def test_load_csv_auto_layout_accepts_similar_scale_y_and_spectra(tmp_path: Path) -> None:
+def test_load_csv_auto_layout_accepts_similar_scale_y_and_spectra(
+    tmp_path: Path,
+) -> None:
     """Reference values and absorbances with similar numeric ranges must
     still be auto-separated when signals 1 (corner NaN) and 2 (NIR
     wavelength row) are confident.
@@ -323,7 +368,9 @@ def test_load_csv_x_cols_slice_from_n(tmp_path: Path) -> None:
     fp = tmp_path / "mango_like.csv"
     with open(fp, "w", encoding="utf-8") as fh:
         # Header
-        fh.write(",".join(meta_cols) + "," + ",".join(f"w{i}" for i in range(n_spec)) + "\n")
+        fh.write(
+            ",".join(meta_cols) + "," + ",".join(f"w{i}" for i in range(n_spec)) + "\n"
+        )
         # Data rows: 8 string cells + 30 numeric cells
         for row in X_spec:
             fh.write(",".join(meta_cols) + "," + ",".join(f"{v:g}" for v in row) + "\n")
@@ -346,10 +393,20 @@ def test_load_csv_x_cols_with_y_col(tmp_path: Path) -> None:
     fp = tmp_path / "mango_with_y.csv"
     with open(fp, "w", encoding="utf-8") as fh:
         # Header: 8 meta + DM + 25 spectra
-        fh.write(",".join(meta_cols) + ",DM," + ",".join(f"w{i}" for i in range(n_spec)) + "\n")
+        fh.write(
+            ",".join(meta_cols)
+            + ",DM,"
+            + ",".join(f"w{i}" for i in range(n_spec))
+            + "\n"
+        )
         # Data rows: 8 strings + y + 30 spectra values
         for yi, row in zip(y, X_spec):
-            fh.write(",".join(meta_cols) + f",{yi:g}," + ",".join(f"{v:g}" for v in row) + "\n")
+            fh.write(
+                ",".join(meta_cols)
+                + f",{yi:g},"
+                + ",".join(f"{v:g}" for v in row)
+                + "\n"
+            )
 
     loaded = load_csv(str(fp), y_col=8, x_cols="9:")
     # X should be the 25 spectra columns (col 9 onwards)

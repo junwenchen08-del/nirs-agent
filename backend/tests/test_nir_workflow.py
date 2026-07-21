@@ -28,6 +28,19 @@ def test_start_collects_missing_professional_requirements():
     assert state["next_action"] == "collect_requirements"
 
 
+def test_start_multi_modeling_enters_data_audit_with_complete_requirements():
+    state = start_workflow(
+        task_type="multi_modeling",
+        data_path="multi.npz",
+        analyte="protein, moisture, oil",
+        unit="percent",
+        domain="feed",
+    )
+
+    assert state["stage"] == "data_audit"
+    assert state["missing_inputs"] == []
+
+
 def test_complete_calibration_requires_explicit_approval_before_registration():
     state = start_workflow(
         task_type="calibration",

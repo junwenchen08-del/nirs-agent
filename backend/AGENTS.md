@@ -210,13 +210,90 @@ from deerflow.config import get_app_config
   training responses expose an original-feature-space `coef_summary.intercept`
   alongside coefficient statistics so downstream reports can reconstruct the
   model equation without omitting scikit-learn's internal centering offset.
-  `nir_train_model` and `nir_analyze` support train-only wavelength selection
-  (`none`, `cars`, `spa`, `manual`) after leakage-safe preprocessing and before
-  model fitting; selected original-column indices are persisted in metrics and,
+  `nir_train_model` and `nir_analyze` support explicit train-only wavelength
+  selection (`none`, `cars`, `spa`, `manual`) after leakage-safe preprocessing
+  and before model fitting; `nir_analyze` additionally defaults to the
+  autonomous `auto` policy for PLS. Selected original-column indices are
+  persisted in metrics and,
   when selection is enabled, in the saved model artifact. Version-2 artifacts
   also persist the fitted preprocessing pipeline, so `nir_predict` can apply
   train-time preprocessing and then the same spectral columns to raw samples;
   `input_preprocessed=true` explicitly bypasses the preprocessing step.
+  Multi-component calibration uses the separate `nir_train_multi_model` tool
+  under the `multi_modeling` workflow task. Explicit CSV `y_cols` are persisted
+  as a two-dimensional y matrix with `y_names`; all targets share one split,
+  while wavelength selection and model fitting run independently per target.
+  Mixed multi-target headers retain numeric spectral labels as `wv`, and CSV
+  `x_cols` selection applies the same original-column indices to both `X` and
+  `wv`. CARS uses 80% Monte Carlo sample subsets, performs weighted competition
+  over the full wavelength pool, and retains the full-wavelength model whenever
+  no selected subset improves its CV RMSE; SPA rejects `n_min` values larger
+  than the available wavelength count.
+  `nir_train_partitioned_model` is the CSV protocol path for data with named
+  official partitions: it fits preprocessing/CARS on Cal only, selects latent
+  variables and the full-versus-CARS candidate on Tuning only, then reports
+  Val Ext (or another named external partition) once. It persists a standard
+  prediction artifact plus metrics JSON and a compact Markdown report.
+  `nir_train_auto_split_model` is the autonomous CSV path for single-target
+  datasets without official partitions. Its default `auto` strategy first
+  detects eligible batch/domain metadata (instrument, batch, season/year,
+  origin/site, cultivar) and keeps whole groups isolated. Ungrouped datasets
+  with at most 500 samples use a joint spectral/target SPXY maximin order;
+  larger datasets use target-rank stratification to avoid the quadratic
+  distance matrix. Explicit `group`, `spxy`, `y_stratified`, and `random`
+  overrides remain available. It creates approximately 70% calibration, 15%
+  tuning, and 15% independent holdout subsets, records row indices plus the
+  strategy decision/evidence, fits preprocessing and optional CARS on
+  calibration only, selects latent variables on tuning, and evaluates the
+  holdout once. `compare_cars=None` is the default autonomous policy: it first
+  scores a full-spectrum baseline, evaluates CARS only when sample/feature and
+  tuning signals justify the cost, caps CARS fitting at 750 target-covering
+  calibration samples, and adopts it only for at least 0.5% relative tuning
+  RMSE improvement. Explicit true/false overrides remain available. The same
+  policy is the default for PLS `nir_analyze` and therefore MAT collection
+  items. Test/holdout data never participates in this decision, and metrics
+  persist `wavelength_selection_decision` evidence. Holdout metrics are
+  explicitly labelled as non-external validation.
+  The primary single-target tools also default to `method="auto"`. They score
+  a calibration-CV PLS baseline on tuning, add Ridge for high-dimensional or
+  weak linear fits, add RBF-SVR only up to 1,500 calibration samples, and add
+  Extra Trees for strong nonlinearity signals between 80 and 2,500 samples.
+  PLS remains selected unless an alternative improves tuning RMSE by at least
+  1%. Candidate failures degrade safely to the surviving baseline, explicit
+  methods bypass family selection, and `model_selection_decision` records all
+  signals, caps, candidates, failures, adoption evidence, and the selected
+  family. Final holdout/external-test rows remain untouched until selection is
+  complete. Multi-component modeling retains its explicit method behavior.
+  `nir_analyze_collection` handles MATLAB files with multiple independent
+  `available_subsets` in one tool call. It runs the existing single-dataset
+  analysis sequentially for predictable memory use, writes one child artifact
+  directory per subset plus a compact `collection_summary.md`, and returns only
+  decision-grade metrics and artifact paths to the model. NIR Markdown reports
+  reference companion PNG files instead of embedding Base64 payloads. The NIR
+  coordinator must summarize from tool JSON or small metrics files and must not
+  read complete generated reports back into model context. Runtime compaction
+  retains recent history by an 8,000-token budget rather than message count,
+  and ordinary `read_file` previews are capped at 12,000 characters.
+  Flat PLS-Toolbox MATLAB bundles containing `Matrix`, `VarLabels`, and
+  `ObjLabels` are auto-split by label semantics: numeric variable labels become
+  the spectral axis, response-like labels become y, remaining named columns are
+  excluded as metadata, and object labels become sample names.
+  `nir_core.io.schema` is the generic ingestion layer: it detects CSV/TXT
+  encoding, delimiter, decimal mark, numeric spectral headers, named targets,
+  sample identifiers, and wavelength-first transposed layouts. For MAT v5/v7.3
+  it recursively enumerates numeric leaves under dotted paths and scores X/y/wv
+  mappings from names, shape compatibility, and axis monotonicity. Only unique,
+  high-confidence mappings auto-load. Ambiguous files return
+  `schema_mapping.status=needs_user_mapping`; `nir_inspect` pauses with
+  `action_required=confirm_field_mapping`, and `nir_load_data` accepts explicit
+  `x_var`, `y_var`, `wv_var`, and `transpose` overrides. The backend depends on
+  `nir-core[mat73]`, so the h5py runtime required for MAT v7.3 is installed in
+  normal backend and Docker environments. During an active
+  NIR workflow, `NIRWorkflowMiddleware` hard-denies script writes (`.py`,
+  notebooks, R/Julia/MATLAB files) and shell-based Python execution so a loader
+  error cannot push the agent into an ad-hoc scipy/sklearn fallback.
+  Version-3 multi-output artifacts store component names, models, preprocessing,
+  and per-target selection metadata, and `nir_predict` emits an N-by-K CSV.
   Successful knowledge retrieval stores bounded source identifiers in
   `nir_workflow.knowledge_evidence`, while attempt history stores model and
   metrics paths for post-run traceability. The deterministic evaluator in

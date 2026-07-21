@@ -21,10 +21,11 @@ from deerflow.agents.thread_state import NIRWorkflowState
 from deerflow.tools.types import Runtime
 from deerflow.utils.messages import get_original_user_content_text
 
-_SUPPORTED_TASK_TYPES = frozenset({"analysis", "calibration", "compare", "prediction", "inspection", "knowledge"})
+_SUPPORTED_TASK_TYPES = frozenset({"analysis", "calibration", "multi_modeling", "compare", "prediction", "inspection", "knowledge"})
 _REQUIRED_INPUTS = {
     "analysis": ("data_path", "analyte", "unit", "domain"),
     "calibration": ("data_path", "analyte", "unit", "domain"),
+    "multi_modeling": ("data_path", "analyte", "unit", "domain"),
     "compare": ("data_path", "analyte", "unit", "domain"),
     "prediction": ("data_path", "model_path"),
     "inspection": ("data_path",),
@@ -470,8 +471,8 @@ def nir_workflow_tool(
         action: Workflow action: start, status, set_requirements, record_audit,
             plan_ready, record_attempt, knowledge_retrieved, approve, reject,
             registered, or complete.
-        task_type: For start: analysis, calibration, compare, prediction,
-            inspection, or knowledge.
+        task_type: For start: analysis, calibration, multi_modeling, compare,
+            prediction, inspection, or knowledge.
         project_id: Optional stable identifier for a new workflow.
         data_path: Input spectral data path.
         model_path: Model artifact path.

@@ -7,17 +7,29 @@ All loaders are pure functions: they read from disk and return a new
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import numpy as np
 
+from nir_core.io.schema import (
+    csv_profile_numeric_matrix,
+    infer_mat_mapping,
+    load_inferred_mat_arrays,
+    profile_csv,
+)
+from nir_core.io.sniffers import (
+    _detect_labeled_matrix_layout,
+    _sniff_delimiter,
+    _sniff_header,
+    detect_format,
+)
 from nir_core.models import SpectralData
-from nir_core.io.sniffers import _sniff_delimiter, _sniff_header, detect_format
-
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def load_mat(
     filepath: str,
@@ -25,6 +37,7 @@ def load_mat(
     y_var: str | None = None,
     wv_var: str | None = None,
     subset: str | None = None,
+    transpose: bool = False,
 ) -> SpectralData:
     """Load a MATLAB ``.mat`` file into :class:`SpectralData`.
 
@@ -88,8 +101,8 @@ def load_mat(
     with open(filepath, "rb") as fh:
         magic = fh.read(8)
     if magic == b"\x89HDF\r\n\x1a\n":
-        return _load_mat_v73(filepath, x_var, y_var, wv_var, subset)
-    return _load_mat_v5(filepath, x_var, y_var, wv_var, subset)
+        return _load_mat_v73(filepath, x_var, y_var, wv_var, subset, transpose)
+    return _load_mat_v5(filepath, x_var, y_var, wv_var, subset, transpose)
 
 
 def load_csv(
@@ -99,6 +112,7 @@ def load_csv(
     y_col: int | None = None,
     wv_row: int | None = None,
     auto_layout: bool = True,
+    y_cols: list[int] | None = None,
 ) -> SpectralData:
     """Load a CSV/TXT spectral file into :class:`SpectralData`.
 
@@ -148,7 +162,10 @@ def load_csv(
             (preserves prior behavior — which is problematic for files with
             leading metadata columns like the Anderson 2020 mango dataset
             where cols 0-7 are Set/Season/Region/...).
-        y_col: Index of the reference-value column. ``None`` disables y.
+        y_col: Index of one reference-value column. ``None`` disables y.
+        y_cols: Explicit reference-value columns for multi-component data.
+            Mutually exclusive with ``y_col``. Multi-component loading is
+            intentionally explicit and is not auto-detected.
         wv_row: Index of the wavelength row. ``None`` disables wv.
         auto_layout: When True and ``y_col``/``wv_row`` are not given, try
             to auto-detect a row-label + column-label layout from the
@@ -163,10 +180,41 @@ def load_csv(
     """
     if not Path(filepath).exists():
         raise FileNotFoundError(f"File not found: {filepath}")
+    if y_col is not None and y_cols is not None:
+        raise ValueError("y_col and y_cols are mutually exclusive")
+
+    if (
+        auto_layout
+        and y_col is None
+        and y_cols is None
+        and wv_row is None
+        and x_cols is None
+    ):
+        profile = profile_csv(filepath, max_rows=201)
+        if profile.mapping["status"] == "auto":
+            return _load_inferred_csv_profile(profile, filepath)
 
     if delimiter is None:
         delimiter = _sniff_delimiter(filepath)
     has_header = _sniff_header(filepath, delimiter)
+    header_candidate = (
+        _read_header_cells(filepath, delimiter) if y_cols is not None else []
+    )
+    if not has_header and y_cols is not None:
+        selected_headers = [
+            header_candidate[index]
+            for index in y_cols
+            if 0 <= index < len(header_candidate)
+        ]
+        if len(selected_headers) == len(y_cols) and all(
+            value.strip() and not _is_float_text(value) for value in selected_headers
+        ):
+            has_header = True
+    header_cells = (
+        header_candidate
+        if has_header and header_candidate
+        else (_read_header_cells(filepath, delimiter) if has_header else [])
+    )
 
     arr = np.genfromtxt(
         filepath,
@@ -181,21 +229,169 @@ def load_csv(
 
     # Auto-detect row-label + column-label layout when caller didn't pin
     # y_col / wv_row explicitly. See docstring for the heuristic.
-    if auto_layout and y_col is None and wv_row is None:
+    if auto_layout and y_col is None and y_cols is None and wv_row is None:
         detected_wv_row, detected_y_col = _detect_labeled_layout(arr)
         wv_row = detected_wv_row
         y_col = detected_y_col
 
-    X, y, wv = _split_csv_block(arr, y_col=y_col, wv_row=wv_row, x_cols=x_cols)
+    header_wv: np.ndarray | None = None
+    if has_header and header_cells:
+        feature_indices = _resolve_csv_feature_indices(
+            len(header_cells),
+            y_col=y_col,
+            y_cols=y_cols,
+            x_cols=x_cols,
+        )
+        try:
+            candidate = np.asarray(
+                [float(header_cells[index]) for index in feature_indices],
+                dtype=float,
+            )
+        except (ValueError, IndexError):
+            candidate = np.empty(0, dtype=float)
+        if candidate.size == len(feature_indices) and np.isfinite(candidate).all():
+            header_wv = candidate
+
+    # A mixed text/numeric first row (target names followed by wavelengths)
+    # is consumed as a header above. Treat an explicit wv_row=0 as referring
+    # to that raw first row rather than deleting the first sample after it.
+    split_wv_row = None if header_wv is not None and wv_row == 0 else wv_row
+    X, y, wv = _split_csv_block(
+        arr,
+        y_col=y_col,
+        y_cols=y_cols,
+        wv_row=split_wv_row,
+        x_cols=x_cols,
+    )
+    if header_wv is not None:
+        wv = header_wv
+
+    y_names = None
+    if y_cols is not None:
+        y_names = [
+            header_cells[index].strip()
+            if index < len(header_cells) and header_cells[index].strip()
+            else f"y{i}"
+            for i, index in enumerate(y_cols)
+        ]
 
     return SpectralData(
         X=X,
         y=y,
+        y_names=y_names,
         wv=wv,
         sample_names=[],
         source_file=str(filepath),
         original_format="csv",
     )
+
+
+def _load_inferred_csv_profile(profile, filepath: str) -> SpectralData:
+    """Materialize a high-confidence CSV schema profile."""
+    mapping = profile.mapping
+    sample_id_columns = [int(index) for index in mapping["sample_id_columns"]]
+    if (
+        profile.total_rows > len(profile.rows)
+        and profile.dialect["decimal"] == "."
+        and not mapping.get("transpose")
+        and not sample_id_columns
+    ):
+        feature_columns = [int(index) for index in mapping["spectral_columns"]]
+        target_columns = [int(index) for index in mapping["target_columns"]]
+        selected_columns = sorted(set(feature_columns + target_columns))
+        selected = np.genfromtxt(
+            filepath,
+            delimiter=profile.dialect["delimiter"],
+            skip_header=1 if profile.has_header else 0,
+            usecols=selected_columns,
+            dtype=float,
+            encoding=profile.dialect["encoding"],
+        )
+        if selected.ndim == 1:
+            selected = selected.reshape(1, -1)
+        local_index = {
+            original: index for index, original in enumerate(selected_columns)
+        }
+        X = selected[:, [local_index[index] for index in feature_columns]]
+        y: np.ndarray | None = None
+        y_names: list[str] | None = None
+        if target_columns:
+            y_matrix = selected[:, [local_index[index] for index in target_columns]]
+            y = y_matrix[:, 0] if len(target_columns) == 1 else y_matrix
+            y_names = [profile.headers[index] for index in target_columns]
+        return SpectralData(
+            X=X,
+            y=y,
+            y_names=y_names,
+            wv=np.asarray(mapping.get("wavelengths"), dtype=float),
+            sample_names=[],
+            source_file=str(filepath),
+            original_format="csv",
+        )
+
+    if profile.total_rows > len(profile.rows):
+        profile = profile_csv(filepath, max_rows=None)
+        mapping = profile.mapping
+        sample_id_columns = [int(index) for index in mapping["sample_id_columns"]]
+    matrix = csv_profile_numeric_matrix(profile)
+    if mapping.get("transpose"):
+        wavelength_column = int(mapping["wavelength_column"])
+        feature_columns = [int(index) for index in mapping["spectral_columns"]]
+        X = matrix[:, feature_columns].T
+        wv = matrix[:, wavelength_column]
+        return SpectralData(
+            X=X,
+            y=None,
+            wv=wv,
+            sample_names=[profile.headers[index] for index in feature_columns],
+            source_file=str(filepath),
+            original_format="csv",
+        )
+
+    feature_columns = [int(index) for index in mapping["spectral_columns"]]
+    target_columns = [int(index) for index in mapping["target_columns"]]
+    X = matrix[:, feature_columns]
+    y: np.ndarray | None = None
+    y_names: list[str] | None = None
+    if target_columns:
+        y_matrix = matrix[:, target_columns]
+        y = y_matrix[:, 0] if len(target_columns) == 1 else y_matrix
+        y_names = [profile.headers[index] for index in target_columns]
+    sample_names = (
+        [row[sample_id_columns[0]] for row in profile.rows] if sample_id_columns else []
+    )
+    return SpectralData(
+        X=X,
+        y=y,
+        y_names=y_names,
+        wv=np.asarray(mapping.get("wavelengths"), dtype=float),
+        sample_names=sample_names,
+        source_file=str(filepath),
+        original_format="csv",
+    )
+
+
+def _read_header_cells(filepath: str, delimiter: str | None) -> list[str]:
+    """Read the first non-empty header row without changing numeric parsing."""
+    with open(filepath, encoding="utf-8-sig") as file:
+        line = next(
+            (candidate.strip("\r\n") for candidate in file if candidate.strip()), ""
+        )
+    if not line:
+        return []
+    if delimiter is None or delimiter.isspace():
+        return re.split(r"\s+", line.strip())
+    import csv
+
+    return next(csv.reader([line], delimiter=delimiter))
+
+
+def _is_float_text(value: str) -> bool:
+    try:
+        float(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _env_float(name: str, default: float) -> float:
@@ -278,10 +474,7 @@ def _detect_labeled_layout(
     # (range 1.3), ratio ≈ 1.54, was wrongly rejected and y got merged
     # into X with data.y = None.
     y_min, y_max = float(y_col_values.min()), float(y_col_values.max())
-    if (
-        y_min >= _NIR_WAVELENGTH_MIN_NM * 0.5
-        and y_max <= _NIR_WAVELENGTH_MAX_NM * 1.5
-    ):
+    if y_min >= _NIR_WAVELENGTH_MIN_NM * 0.5 and y_max <= _NIR_WAVELENGTH_MAX_NM * 1.5:
         return None, None
 
     return 0, 0
@@ -322,12 +515,14 @@ def auto_detect_and_load(filepath: str, *, x_cols: str | None = None) -> Spectra
 # MAT loading internals
 # ---------------------------------------------------------------------------
 
+
 def _load_mat_v5(
     filepath: str,
     x_var: str | None,
     y_var: str | None,
     wv_var: str | None,
     subset: str | None,
+    transpose: bool,
 ) -> SpectralData:
     """Load a v5/v7 .mat via scipy.io.loadmat."""
     from scipy.io import loadmat
@@ -336,12 +531,76 @@ def _load_mat_v5(
     # Drop MATLAB metadata keys. Keep everything else as-is (including
     # mat_struct objects — they are unwrapped later by _flatten_mat_struct).
     variables = {k: v for k, v in raw.items() if not k.startswith("__")}
-    X, y, wv = _resolve_mat_variables(variables, x_var, y_var, wv_var, subset)
+    if (
+        x_var is None
+        and y_var is None
+        and wv_var is None
+        and subset is None
+        and not transpose
+    ):
+        labeled = _load_labeled_matrix_bundle(variables, filepath)
+        if labeled is not None:
+            return labeled
+        mapping = infer_mat_mapping(variables)
+        if mapping["status"] == "auto":
+            X, y, wv = load_inferred_mat_arrays(variables, mapping)
+            y_path = mapping.get("y_variable")
+            return SpectralData(
+                X=X,
+                y=y,
+                y_names=[str(y_path).rsplit(".", 1)[-1]] if y_path else None,
+                wv=wv,
+                sample_names=[],
+                source_file=str(filepath),
+                original_format="mat",
+            )
+        x_candidates = [str(name) for name in mapping.get("x_candidates", [])]
+        if x_candidates and not all(
+            _name_matches(name.rsplit(".", 1)[-1].lower(), _X_NAME_RE)
+            for name in x_candidates
+        ):
+            raise ValueError(
+                "MAT spectra mapping is ambiguous. Candidate matrices: "
+                f"{x_candidates}. Inspect the file and provide x_var/y_var/wv_var."
+            )
+    X, y, wv = _resolve_mat_variables(
+        variables, x_var, y_var, wv_var, subset, transpose
+    )
     return SpectralData(
         X=X,
         y=y,
         wv=wv,
         sample_names=[],
+        source_file=str(filepath),
+        original_format="mat",
+    )
+
+
+def _load_labeled_matrix_bundle(
+    variables: dict[str, object],
+    filepath: str,
+) -> SpectralData | None:
+    """Load a detected PLS-Toolbox labeled matrix without metadata leakage."""
+    layout = _detect_labeled_matrix_layout(variables)
+    if layout is None:
+        return None
+
+    matrix = np.asarray(variables[layout["matrix_variable"]], dtype=float)
+    X = matrix[:, layout["spectral_indices"]]
+    target_indices = layout["target_indices"]
+    y: np.ndarray | None = None
+    y_names: list[str] | None = None
+    if target_indices:
+        y_matrix = matrix[:, target_indices]
+        y = y_matrix[:, 0] if len(target_indices) == 1 else y_matrix
+        y_names = [layout["labels"][index] for index in target_indices]
+
+    return SpectralData(
+        X=X,
+        y=y,
+        y_names=y_names,
+        wv=np.asarray(layout["wavelengths"], dtype=float),
+        sample_names=layout["sample_names"],
         source_file=str(filepath),
         original_format="mat",
     )
@@ -353,36 +612,48 @@ def _load_mat_v73(
     y_var: str | None,
     wv_var: str | None,
     subset: str | None,
+    transpose: bool,
 ) -> SpectralData:
     """Load a v7.3 (HDF5) .mat via h5py (lazy import)."""
     try:
         import h5py  # type: ignore
     except Exception as exc:  # pragma: no cover - environment dependent
         raise ValueError(
-            "Reading MATLAB v7.3 (HDF5) files requires the 'h5py' package, "
-            f"but it could not be imported: {exc!s}. Install it via "
-            "`pip install h5py` (optional dependency of nir-core)."
+            f"Reading MATLAB v7.3 (HDF5) files requires the 'h5py' package, but it could not be imported: {exc!s}. Install it via `pip install h5py` (optional dependency of nir-core)."
         ) from exc
 
-    # HDF5 groups map to MATLAB structs; we read them lazily and let
-    # _flatten_mat_struct decide how to descend.
-    root: dict[str, object] = {}
-    with h5py.File(filepath, "r") as fh:
-        for key in fh.keys():
-            obj = fh[key]
-            if isinstance(obj, h5py.Group):
-                # Read nested datasets into a dict so _flatten_mat_struct
-                # can process them uniformly with the v5 path.
-                root[key] = {
-                    sub: np.asarray(obj[sub][...]) for sub in obj.keys()
-                }
-            else:
-                try:
-                    root[key] = np.asarray(obj[...])
-                except Exception:
-                    continue
+    def read_node(node):
+        if isinstance(node, h5py.Group):
+            return {name: read_node(node[name]) for name in node.keys()}
+        return np.asarray(node[...])
 
-    X, y, wv = _resolve_mat_variables(root, x_var, y_var, wv_var, subset)
+    with h5py.File(filepath, "r") as fh:
+        root: dict[str, object] = {
+            name: read_node(fh[name]) for name in fh.keys() if name != "#refs#"
+        }
+
+    if (
+        x_var is None
+        and y_var is None
+        and wv_var is None
+        and subset is None
+        and not transpose
+    ):
+        mapping = infer_mat_mapping(root)
+        if mapping["status"] == "auto":
+            X, y, wv = load_inferred_mat_arrays(root, mapping)
+            y_path = mapping.get("y_variable")
+            return SpectralData(
+                X=X,
+                y=y,
+                y_names=[str(y_path).rsplit(".", 1)[-1]] if y_path else None,
+                wv=wv,
+                sample_names=[],
+                source_file=str(filepath),
+                original_format="mat",
+            )
+
+    X, y, wv = _resolve_mat_variables(root, x_var, y_var, wv_var, subset, transpose)
     return SpectralData(
         X=X,
         y=y,
@@ -404,7 +675,9 @@ def _is_struct_like(value: object) -> bool:
     # scipy.io.loadmat with struct_as_record=False produces mat_struct
     # instances (or object ndarrays containing them). We check by attribute
     # name rather than importing mat_struct to keep the dependency lazy.
-    if hasattr(value, "_fieldnames") and isinstance(getattr(value, "_fieldnames"), list):
+    if hasattr(value, "_fieldnames") and isinstance(
+        getattr(value, "_fieldnames"), list
+    ):
         return True
     # h5py groups are already converted to dicts by _load_mat_v73; a dict
     # of mixed dict/ndarray values is also treated as a struct.
@@ -426,7 +699,11 @@ def _iter_struct_fields(struct: object):
             value = getattr(struct, name)
             # Unwrap (1,1) object arrays containing a mat_struct (nested struct
             # returned by scipy with squeeze_me=False).
-            if isinstance(value, np.ndarray) and value.dtype == object and value.size == 1:
+            if (
+                isinstance(value, np.ndarray)
+                and value.dtype == object
+                and value.size == 1
+            ):
                 inner = value.flat[0]
                 if hasattr(inner, "_fieldnames"):
                     value = inner
@@ -513,15 +790,13 @@ def _flatten_mat_struct(
     elif subset is not None:
         if subset not in sub_structs:
             raise ValueError(
-                f"subset {subset!r} not found in MAT struct. "
-                f"Available subsets: {sorted(sub_structs)}"
+                f"subset {subset!r} not found in MAT struct. Available subsets: {sorted(sub_structs)}"
             )
         chosen_name = subset
     else:
         # Multiple sub-structs and no subset → ambiguous, ask the caller.
         raise ValueError(
-            f"MAT struct contains {len(sub_structs)} sub-structs "
-            f"({sorted(sub_structs)}). Specify one via the `subset` parameter."
+            f"MAT struct contains {len(sub_structs)} sub-structs ({sorted(sub_structs)}). Specify one via the `subset` parameter."
         )
 
     chosen = sub_structs[chosen_name]
@@ -554,13 +829,15 @@ def _concat_multi_x(
     When only one X* block exists, returns it unchanged with its matching wv.
     """
     x_names = sorted(
-        n for n, v in flat.items()
-        if isinstance(v, np.ndarray) and v.ndim == 2 and _name_matches(n.lower(), _X_NAME_RE)
+        n
+        for n, v in flat.items()
+        if isinstance(v, np.ndarray)
+        and v.ndim == 2
+        and _name_matches(n.lower(), _X_NAME_RE)
     )
     if not x_names:
         raise ValueError(
-            "No 2D X* array found in MAT struct. Available fields: "
-            f"{sorted(flat)}"
+            f"No 2D X* array found in MAT struct. Available fields: {sorted(flat)}"
         )
 
     # Single X block — straightforward.
@@ -572,8 +849,7 @@ def _concat_multi_x(
     sample_counts = {flat[n].shape[0] for n in x_names}
     if len(sample_counts) != 1:
         raise ValueError(
-            f"X* blocks {x_names} have mismatched sample counts "
-            f"{sample_counts}; cannot concatenate."
+            f"X* blocks {x_names} have mismatched sample counts {sample_counts}; cannot concatenate."
         )
     X = np.concatenate([flat[n] for n in x_names], axis=1).astype(float)
 
@@ -605,8 +881,7 @@ def _concat_multi_x(
             import warnings
 
             warnings.warn(
-                f"Concatenated wv length ({wv.shape[0]}) < X columns "
-                f"({X.shape[1]}); wavelength labels may be incomplete.",
+                f"Concatenated wv length ({wv.shape[0]}) < X columns ({X.shape[1]}); wavelength labels may be incomplete.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -625,6 +900,7 @@ def _resolve_mat_variables(
     y_var: str | None,
     wv_var: str | None,
     subset: str | None,
+    transpose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None]:
     """Pick X/y/wv from a dict of MATLAB variables (now with struct support).
 
@@ -644,14 +920,16 @@ def _resolve_mat_variables(
         variables = flat  # type: ignore[assignment]
 
     # If explicit x_var/y_var/wv_var are given, use the legacy path.
-    if x_var is not None or y_var is not None or wv_var is not None:
-        return _resolve_explicit(variables, x_var, y_var, wv_var)
+    if x_var is not None or y_var is not None or wv_var is not None or transpose:
+        return _resolve_explicit(variables, x_var, y_var, wv_var, transpose)
 
     # Heuristic path. When multiple X* blocks exist (after struct flattening),
     # concatenate them; otherwise pick the largest 2D array.
     x_candidates = {
-        k: v for k, v in variables.items()
-        if isinstance(v, np.ndarray) and v.ndim == 2
+        k: v
+        for k, v in variables.items()
+        if isinstance(v, np.ndarray)
+        and v.ndim == 2
         and _name_matches(k.lower(), _X_NAME_RE)
     }
     if len(x_candidates) >= 2:
@@ -680,23 +958,34 @@ def _resolve_explicit(
     x_var: str | None,
     y_var: str | None,
     wv_var: str | None,
+    transpose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None]:
     """Pick X/y/wv using explicit variable names (legacy behaviour)."""
+
+    def resolve_name(name: str | None) -> str | None:
+        if name is None or name in variables:
+            return name
+        leaf_name = name.rsplit(".", 1)[-1]
+        return leaf_name if leaf_name in variables else name
+
+    x_var = resolve_name(x_var)
+    y_var = resolve_name(y_var)
+    wv_var = resolve_name(wv_var)
     if x_var is not None:
         if x_var not in variables:
             raise ValueError(
-                f"Variable {x_var!r} (x_var) not found in MAT file. "
-                f"Available: {sorted(variables)}"
+                f"Variable {x_var!r} (x_var) not found in MAT file. Available: {sorted(variables)}"
             )
         X = np.asarray(variables[x_var])
         if X.ndim == 1:
             X = X.reshape(1, -1)
         if X.ndim != 2:
-            raise ValueError(
-                f"Variable {x_var!r} must be 2D, got shape {X.shape!r}."
-            )
+            raise ValueError(f"Variable {x_var!r} must be 2D, got shape {X.shape!r}.")
     else:
         X = _heuristic_x(variables)
+
+    if transpose:
+        X = X.T
 
     n_samples, n_wavelengths = X.shape
 
@@ -704,14 +993,12 @@ def _resolve_explicit(
     if y_var is not None:
         if y_var not in variables:
             raise ValueError(
-                f"Variable {y_var!r} (y_var) not found in MAT file. "
-                f"Available: {sorted(variables)}"
+                f"Variable {y_var!r} (y_var) not found in MAT file. Available: {sorted(variables)}"
             )
         y = np.asarray(variables[y_var]).ravel()
         if y.shape[0] != n_samples:
             raise ValueError(
-                f"y_var {y_var!r} length {y.shape[0]} != n_samples "
-                f"{n_samples}."
+                f"y_var {y_var!r} length {y.shape[0]} != n_samples {n_samples}."
             )
     else:
         y = _heuristic_y(variables, n_samples, exclude_name=None)
@@ -720,14 +1007,12 @@ def _resolve_explicit(
     if wv_var is not None:
         if wv_var not in variables:
             raise ValueError(
-                f"Variable {wv_var!r} (wv_var) not found in MAT file. "
-                f"Available: {sorted(variables)}"
+                f"Variable {wv_var!r} (wv_var) not found in MAT file. Available: {sorted(variables)}"
             )
         wv = np.asarray(variables[wv_var]).ravel()
         if wv.shape[0] != n_wavelengths:
             raise ValueError(
-                f"wv_var {wv_var!r} length {wv.shape[0]} != n_wavelengths "
-                f"{n_wavelengths}."
+                f"wv_var {wv_var!r} length {wv.shape[0]} != n_wavelengths {n_wavelengths}."
             )
     else:
         wv = _heuristic_wv(variables, n_wavelengths)
@@ -737,11 +1022,12 @@ def _resolve_explicit(
 
 def _heuristic_x(variables: dict[str, np.ndarray]) -> np.ndarray:
     """Pick the spectra matrix: the 2D variable with the most elements."""
-    candidates = {k: v for k, v in variables.items() if isinstance(v, np.ndarray) and v.ndim == 2}
+    candidates = {
+        k: v for k, v in variables.items() if isinstance(v, np.ndarray) and v.ndim == 2
+    }
     if not candidates:
         raise ValueError(
-            "No 2D variable found in MAT file; cannot identify spectra "
-            f"matrix. Available: {sorted(variables)}"
+            f"No 2D variable found in MAT file; cannot identify spectra matrix. Available: {sorted(variables)}"
         )
     best = max(candidates, key=lambda k: candidates[k].size)
     return np.asarray(candidates[best], dtype=float)
@@ -799,6 +1085,7 @@ def _heuristic_wv(
 # ---------------------------------------------------------------------------
 # CSV block splitting
 # ---------------------------------------------------------------------------
+
 
 def _parse_x_cols(
     spec: str,
@@ -877,16 +1164,13 @@ def _parse_x_cols(
     # Validate range
     for i in indices:
         if not (0 <= i < n_cols):
-            raise ValueError(
-                f"x_cols index {i} out of range for {n_cols} columns"
-            )
+            raise ValueError(f"x_cols index {i} out of range for {n_cols} columns")
 
     # Empty selection is almost certainly a user error (e.g. x_cols="10:"
     # on a 3-column file). Raise rather than silently producing an empty X.
     if not indices:
         raise ValueError(
-            f"x_cols spec {spec!r} selected 0 columns from {n_cols} available; "
-            "check the indices/range."
+            f"x_cols spec {spec!r} selected 0 columns from {n_cols} available; check the indices/range."
         )
 
     # Drop y_col if requested
@@ -896,11 +1180,32 @@ def _parse_x_cols(
     return sorted(indices)
 
 
+def _resolve_csv_feature_indices(
+    n_cols: int,
+    *,
+    y_col: int | None,
+    y_cols: list[int] | None,
+    x_cols: str | None,
+) -> list[int]:
+    """Resolve spectral columns against the original CSV column positions."""
+    target_cols = set(y_cols or ([] if y_col is None else [y_col]))
+    if x_cols is None:
+        indices = [index for index in range(n_cols) if index not in target_cols]
+    else:
+        indices = [
+            index for index in _parse_x_cols(x_cols, n_cols) if index not in target_cols
+        ]
+    if not indices:
+        raise ValueError("x_cols selected only reference columns; no spectra remain")
+    return indices
+
+
 def _split_csv_block(
     arr: np.ndarray,
     y_col: int | None,
     wv_row: int | None,
     x_cols: str | None = None,
+    y_cols: list[int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None]:
     """Carve (X, y, wv) out of a numeric 2D block using selectors.
 
@@ -919,59 +1224,58 @@ def _split_csv_block(
     - ``"8,9,10"``    → explicit list
     - ``"-8:"``       → last 8 columns onward (rare; mainly for symmetry)
     """
-    X = arr.astype(float)
+    X_full = arr.astype(float)
     y: np.ndarray | None = None
     wv: np.ndarray | None = None
 
-    if wv_row is not None and X.shape[0] > 0:
-        if not (0 <= wv_row < X.shape[0]):
+    if wv_row is not None and X_full.shape[0] > 0:
+        if not (0 <= wv_row < X_full.shape[0]):
             raise ValueError(
-                f"wv_row={wv_row} out of range for {X.shape[0]} rows."
+                f"wv_row={wv_row} out of range for {X_full.shape[0]} rows."
             )
-        wv = X[wv_row, :].astype(float)
-        X = np.delete(X, wv_row, axis=0)
 
-    if y_col is not None and X.shape[1] > 0:
-        if not (0 <= y_col < X.shape[1]):
+    if y_cols is not None and X_full.shape[1] > 0:
+        target_cols = [int(index) for index in y_cols]
+        if not target_cols:
+            raise ValueError("y_cols must select at least one column")
+        if len(set(target_cols)) != len(target_cols):
+            raise ValueError("y_cols must not contain duplicate columns")
+        bad = [index for index in target_cols if not 0 <= index < X_full.shape[1]]
+        if bad:
             raise ValueError(
-                f"y_col={y_col} out of range for {X.shape[1]} columns."
+                f"y_cols {bad} out of range for {X_full.shape[1]} columns."
             )
-        y = X[:, y_col].astype(float)
-        X = np.delete(X, y_col, axis=1)
-        # When y_col is inside the x_cols range, the indices shift after the
-        # np.delete above. To keep things simple for the user, we resolve
-        # x_cols against the ORIGINAL column indices (before y removal) and
-        # drop y_col from the selected set if present. This way the user can
-        # say x_cols="8:" and y_col=8 and the tool will correctly take
-        # columns 8..end as X then pull y from column 8 (so column 8 is
-        # dropped from X, leaving 9..end).
-        if x_cols is not None:
-            x_indices = _parse_x_cols(x_cols, arr.shape[1], drop_col=y_col)
-            # Recompute X from the original (pre-y-removal) array so indices
-            # line up with the user's mental model.
-            X_full = np.delete(arr.astype(float), wv_row, axis=0) if wv_row is not None else arr.astype(float)
-            X = X_full[:, x_indices]
-    elif x_cols is not None and X.shape[1] > 0:
-        # x_cols without y_col: just select columns from X.
-        x_indices = _parse_x_cols(x_cols, X.shape[1])
-        X = X[:, x_indices]
+    elif y_col is not None and X_full.shape[1] > 0:
+        if not (0 <= y_col < X_full.shape[1]):
+            raise ValueError(
+                f"y_col={y_col} out of range for {X_full.shape[1]} columns."
+            )
 
-    # Clean the wavelength vector: drop the empty corner cell (NaN/Inf) that
-    # sits at the (wv_row, y_col) intersection, and trim to the column count.
-    if wv is not None:
-        finite_mask = np.isfinite(wv)
-        if not finite_mask.all():
-            wv = wv[finite_mask]
-        if wv.shape[0] > X.shape[1]:
-            wv = wv[: X.shape[1]]
-        elif wv.shape[0] < X.shape[1]:
+    feature_indices = _resolve_csv_feature_indices(
+        X_full.shape[1],
+        y_col=y_col,
+        y_cols=y_cols,
+        x_cols=x_cols,
+    )
+    data_rows = np.delete(X_full, wv_row, axis=0) if wv_row is not None else X_full
+    if y_cols is not None:
+        y = data_rows[:, [int(index) for index in y_cols]].astype(float)
+    elif y_col is not None:
+        y = data_rows[:, y_col].astype(float)
+    X = data_rows[:, feature_indices]
+
+    if wv_row is not None:
+        candidate_wv = X_full[wv_row, feature_indices].astype(float)
+        if np.isfinite(candidate_wv).all():
+            wv = candidate_wv
+        else:
             import warnings
 
             warnings.warn(
-                f"Wavelength vector length ({wv.shape[0]}) < X columns "
-                f"({X.shape[1]}); wavelength labels may be incomplete.",
+                "The selected wavelength row contains non-numeric values in spectral columns; wavelength labels were omitted to avoid misalignment with X.",
                 UserWarning,
                 stacklevel=2,
             )
+            wv = None
 
     return X, y, wv

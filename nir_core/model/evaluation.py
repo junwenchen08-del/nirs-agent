@@ -58,7 +58,7 @@ def split_dataset(
 
     Args:
         X: Spectra, shape (n_samples, n_wavelengths).
-        y: Reference values, shape (n_samples,).
+        y: Reference values, shape (n_samples,) or (n_samples, n_targets).
         test_ratio: Fraction of the full data reserved as test
             (0 < test_ratio < 1).
         val_ratio: Fraction of the full data reserved as validation
@@ -74,11 +74,11 @@ def split_dataset(
         ValueError: On shape mismatch or invalid ratios.
     """
     X = np.asarray(X, dtype=float)
-    y = np.asarray(y, dtype=float).ravel()
+    y = np.asarray(y, dtype=float)
+    if y.ndim not in {1, 2}:
+        raise ValueError(f"y must be 1D or 2D, got shape {y.shape}")
     if X.shape[0] != y.shape[0]:
-        raise ValueError(
-            f"X rows ({X.shape[0]}) != y length ({y.shape[0]})"
-        )
+        raise ValueError(f"X rows ({X.shape[0]}) != y length ({y.shape[0]})")
     if not (0.0 < test_ratio < 1.0):
         raise ValueError(f"test_ratio must be in (0,1), got {test_ratio}")
     if not (0.0 < val_ratio < 1.0):
@@ -89,7 +89,11 @@ def split_dataset(
         )
 
     X_rem, X_test, y_rem, y_test = train_test_split(
-        X, y, test_size=test_ratio, random_state=random_state, shuffle=True,
+        X,
+        y,
+        test_size=test_ratio,
+        random_state=random_state,
+        shuffle=True,
     )
 
     n_total = X.shape[0]
@@ -98,8 +102,11 @@ def split_dataset(
     val_frac_of_rem = min(max(val_frac_of_rem, 1e-6), 1.0 - 1e-6)
 
     X_train, X_val, y_train, y_val = train_test_split(
-        X_rem, y_rem, test_size=val_frac_of_rem,
-        random_state=random_state, shuffle=True,
+        X_rem,
+        y_rem,
+        test_size=val_frac_of_rem,
+        random_state=random_state,
+        shuffle=True,
     )
 
     return ((X_train, y_train), (X_val, y_val), (X_test, y_test))
@@ -120,41 +127,88 @@ def cross_validate(
     Args:
         model_factory: Zero-argument callable returning a fresh, un-fitted
             model object with ``.fit(X, y)`` and ``.predict(X)`` methods.
+            For 2D ``y`` the returned model must support multi-output
+            (e.g. ``PLSRegression``, ``LinearRegression``, ``Ridge``);
+            single-output estimators (e.g. ``SVR``) must be wrapped in
+            ``MultiOutputRegressor`` by the caller.
         X: Spectra, shape (n_samples, n_wavelengths).
-        y: Reference values, shape (n_samples,).
+        y: Reference values, shape (n_samples,) or (n_samples, n_targets).
+            When 2D, metrics are computed per-target then averaged across
+            targets per fold; per-target detail is returned in
+            ``per_target``. The model returned by ``model_factory`` must
+            support multi-output.
         n_folds: Number of K-fold splits. Clamped to ``[2, n_samples-1]``.
         random_state: Seed for KFold shuffling.
 
     Returns:
         Dict with keys ``fold_rmse``, ``mean_rmse``, ``std_rmse``,
-        ``fold_r2``, ``mean_r2``, ``n_folds``.
+        ``fold_r2``, ``mean_r2``, ``n_folds``. For 2D ``y``,
+        ``fold_rmse``/``fold_r2`` hold the per-fold mean across targets
+        (still ``list[float]`` for backward compatibility), and extra keys
+        ``n_targets`` and ``per_target`` are added: ``per_target`` is a
+        list of per-target dicts with ``target_index``, ``fold_rmse``,
+        ``fold_r2``, ``mean_rmse``, ``mean_r2``.
 
     Raises:
-        ValueError: On shape mismatch.
+        ValueError: On shape mismatch or invalid y dimensions.
     """
     X = np.asarray(X, dtype=float)
-    y = np.asarray(y, dtype=float).ravel()
+    y = np.asarray(y, dtype=float)
+    if y.ndim not in (1, 2):
+        raise ValueError(f"y must be 1D or 2D, got shape {y.shape}")
     if X.shape[0] != y.shape[0]:
         raise ValueError(
             f"X rows ({X.shape[0]}) != y length ({y.shape[0]})"
         )
     n_samples = X.shape[0]
+    is_multi = y.ndim == 2
+    n_targets = y.shape[1] if is_multi else 1
     eff_folds = max(2, min(int(n_folds), n_samples - 1))
     kf = KFold(n_splits=eff_folds, shuffle=True, random_state=random_state)
 
     fold_rmse: list[float] = []
     fold_r2: list[float] = []
+    # Per-target fold series. For 1D y this is a single-target list whose
+    # contents mirror fold_rmse/fold_r2; for 2D y each target gets its own
+    # series so callers can inspect per-component CV behaviour without the
+    # cross-target mixing that rmse()/r2_score() would introduce by raveling.
+    per_target: list[dict] = [
+        {"fold_rmse": [], "fold_r2": []} for _ in range(n_targets)
+    ]
 
     for train_idx, val_idx in kf.split(X):
         X_tr, X_val = X[train_idx], X[val_idx]
         y_tr, y_val = y[train_idx], y[val_idx]
         model = model_factory()
         model.fit(X_tr, y_tr)
-        pred = np.asarray(model.predict(X_val)).ravel()
-        fold_rmse.append(rmse(y_val, pred))
-        fold_r2.append(r2_score(y_val, pred))
+        pred = np.asarray(model.predict(X_val))
 
-    return {
+        if is_multi:
+            fold_rmses_t: list[float] = []
+            fold_r2s_t: list[float] = []
+            for t in range(n_targets):
+                y_val_t = y_val[:, t].ravel()
+                pred_t = pred[:, t].ravel()
+                rmse_t = rmse(y_val_t, pred_t)
+                r2_t = r2_score(y_val_t, pred_t)
+                per_target[t]["fold_rmse"].append(rmse_t)
+                per_target[t]["fold_r2"].append(r2_t)
+                fold_rmses_t.append(rmse_t)
+                fold_r2s_t.append(r2_t)
+            # Top-level fold metric = mean across targets, keeps
+            # fold_rmse/fold_r2 as list[float] for backward compatibility.
+            fold_rmse.append(float(np.mean(fold_rmses_t)))
+            fold_r2.append(float(np.mean(fold_r2s_t)))
+        else:
+            pred = pred.ravel()
+            rmse_t = rmse(y_val, pred)
+            r2_t = r2_score(y_val, pred)
+            fold_rmse.append(rmse_t)
+            fold_r2.append(r2_t)
+            per_target[0]["fold_rmse"].append(rmse_t)
+            per_target[0]["fold_r2"].append(r2_t)
+
+    result: dict = {
         "fold_rmse": fold_rmse,
         "mean_rmse": float(np.mean(fold_rmse)),
         "std_rmse": float(np.std(fold_rmse, ddof=1)) if len(fold_rmse) > 1 else 0.0,
@@ -162,6 +216,19 @@ def cross_validate(
         "mean_r2": float(np.mean(fold_r2)),
         "n_folds": eff_folds,
     }
+    if is_multi:
+        result["n_targets"] = n_targets
+        result["per_target"] = [
+            {
+                "target_index": t,
+                "fold_rmse": per_target[t]["fold_rmse"],
+                "fold_r2": per_target[t]["fold_r2"],
+                "mean_rmse": float(np.mean(per_target[t]["fold_rmse"])),
+                "mean_r2": float(np.mean(per_target[t]["fold_r2"])),
+            }
+            for t in range(n_targets)
+        ]
+    return result
 
 
 def _pls_cv_best_components(
@@ -330,8 +397,13 @@ def nested_cv_preprocessing(
 
         # Inner CV on RAW TRAIN ONLY (each fold refits the pipeline).
         best_nc, cv_r2 = _pls_cv_best_components(
-            pipeline, X_train, y_train, inner_folds, max_components,
-            random_state, wv,
+            pipeline,
+            X_train,
+            y_train,
+            inner_folds,
+            max_components,
+            random_state,
+            wv,
         )
 
         # Fit final PLS on full preprocessed train, predict val.

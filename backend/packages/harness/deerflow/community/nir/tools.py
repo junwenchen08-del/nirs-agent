@@ -52,10 +52,14 @@ from .knowledge import (
     nir_search_knowledge_tool,
 )
 from .modeling import (
+    nir_analyze_collection_tool,
     nir_analyze_tool,
     nir_compare_tool,
     nir_register_model_tool,
+    nir_train_auto_split_model_tool,
     nir_train_model_tool,
+    nir_train_multi_model_tool,
+    nir_train_partitioned_model_tool,
 )
 from .preprocess import nir_preprocess_tool
 from .reflect import nir_reflect_tool
@@ -66,8 +70,12 @@ __all__ = [
     "nir_load_data_tool",
     "nir_inspect_tool",
     "nir_preprocess_tool",
+    "nir_train_auto_split_model_tool",
     "nir_train_model_tool",
+    "nir_train_partitioned_model_tool",
+    "nir_train_multi_model_tool",
     "nir_predict_tool",
+    "nir_analyze_collection_tool",
     "nir_analyze_tool",
     "nir_reflect_tool",
     "nir_compare_tool",

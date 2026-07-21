@@ -94,10 +94,11 @@ def cars_wavelength_selection(
        retention ratio ``r_i`` at iteration ``i``:
        ``r_i = a * exp(-k * i) + b`` with ``a,b,k`` chosen so that
        ``r_0 = 1`` and ``r_{N-1} = 2 / n_wavelengths``.
-    4. At each iteration the top ``ceil(r_i * n_wavelengths)`` wavelengths
-       by accumulated weight are retained; an **adaptive reweighted
-       sampling** (ARS) step then re-samples among the retained set with
-       probability proportional to weight^2, to encourage competition.
+    4. At each iteration EDF sets the target subset size
+       ``ceil(r_i * n_wavelengths)``. An **adaptive reweighted sampling**
+       (ARS) step samples that number of variables from the full wavelength
+       pool with probability proportional to weight^2, so weaker variables
+       can be eliminated competitively.
     5. Each candidate subset is evaluated by ``n_folds``-fold CV RMSE.
     6. The subset with the smallest CV RMSE is returned.
 
@@ -137,14 +138,17 @@ def cars_wavelength_selection(
         init_coef = np.abs(np.asarray(init_pls.coef_).ravel())
     except Exception:
         # Fallback: use correlation with y as importance.
-        init_coef = np.abs(np.array([np.corrcoef(X[:, j], y)[0, 1] for j in range(n_wavelengths)]))
+        init_coef = np.abs(
+            np.array([np.corrcoef(X[:, j], y)[0, 1] for j in range(n_wavelengths)])
+        )
     init_coef = np.nan_to_num(init_coef, nan=0.0, posinf=0.0, neginf=0.0)
 
     # Step 2: Monte Carlo sampling to accumulate weights.
     weights = np.zeros(n_wavelengths, dtype=float)
-    n_sub = max(n_samples - 1, int(round(0.8 * n_samples)))
-    n_sub = min(n_sub, n_samples)
-    mc_nc = _safe_n_components(X[:n_sub], y[:n_sub], max_components=min(10, n_wavelengths))
+    n_sub = min(n_samples, max(2, int(round(0.8 * n_samples))))
+    mc_nc = _safe_n_components(
+        X[:n_sub], y[:n_sub], max_components=min(10, n_wavelengths)
+    )
     for _ in range(n_mc_samples):
         idx = rng.choice(n_samples, size=n_sub, replace=False)
         Xs, ys = X[idx], y[idx]
@@ -195,25 +199,27 @@ def cars_wavelength_selection(
         n_keep = max(1, int(np.ceil(r_i * n_wavelengths)))
         n_keep = min(n_keep, n_wavelengths)
 
-        # Coarse selection: keep the top-n_keep by weight.
-        order = np.argsort(total_weights)[::-1]
-        retained = np.sort(order[:n_keep])
-
-        # ARS: re-sample among retained with probability ~ weight^2.
-        w_ret = total_weights[retained]
-        w2 = w_ret**2
+        # ARS: sample n_keep competitors from the full variable pool with
+        # probability proportional to weight^2. Sampling from a pool larger
+        # than the requested subset is essential; drawing all retained
+        # variables would make the probability weights a no-op.
+        w2 = total_weights**2
         s = float(np.sum(w2))
         if s <= 0:
-            probs = np.ones(len(retained)) / len(retained)
+            probs = np.ones(n_wavelengths) / n_wavelengths
         else:
-            probs = w2 / s
-
-        # Number of final variables to keep at this iteration: at least
-        # 1, at most n_keep. Use n_keep (already shrunk by EDF) to keep
-        # the subset size roughly equal to the retention ratio.
-        n_final = max(1, n_keep)
-        chosen_pos = rng.choice(len(retained), size=n_final, replace=False, p=probs)
-        chosen = np.sort(retained[chosen_pos])
+            # Keep a tiny non-zero floor so weighted sampling without
+            # replacement remains feasible when most coefficients are zero.
+            floor = np.finfo(float).eps * max(float(np.max(w2)), 1.0)
+            probs = (w2 + floor) / float(np.sum(w2 + floor))
+        chosen = np.sort(
+            rng.choice(
+                n_wavelengths,
+                size=n_keep,
+                replace=False,
+                p=probs,
+            )
+        )
 
         key = tuple(int(c) for c in chosen)
         if key in seen_subsets:
@@ -222,17 +228,20 @@ def cars_wavelength_selection(
 
         Xs = X[:, chosen]
         nc = _safe_n_components(Xs, y, max_components=min(10, len(chosen)))
-        rmse_i = _pls_cv_rmse(Xs, y, nc, n_folds, random_state + it)
+        # Use identical folds for every candidate so CV scores are directly
+        # comparable; changing the split per iteration can select a subset
+        # merely because it received an easier validation fold.
+        rmse_i = _pls_cv_rmse(Xs, y, nc, n_folds, random_state)
         if rmse_i < best_rmse:
             best_rmse = rmse_i
             best_indices = [int(c) for c in chosen]
 
-    # Always also evaluate the full-wavelength baseline as a safety net.
-    if not seen_subsets:
-        full_nc = _safe_n_components(X, y, max_components=min(10, n_wavelengths))
-        full_rmse = _pls_cv_rmse(X, y, full_nc, n_folds, random_state)
-        if full_rmse < best_rmse:
-            best_indices = list(range(n_wavelengths))
+    # Always evaluate the full-wavelength baseline as a safety net. Selection
+    # must not replace it unless at least one candidate has lower CV RMSE.
+    full_nc = _safe_n_components(X, y, max_components=min(10, n_wavelengths))
+    full_rmse = _pls_cv_rmse(X, y, full_nc, n_folds, random_state)
+    if full_rmse < best_rmse:
+        best_indices = list(range(n_wavelengths))
 
     best_indices = sorted(set(int(i) for i in best_indices))
     X_selected = X[:, best_indices].copy()
@@ -326,6 +335,12 @@ def spa_wavelength_selection(
         raise ValueError(f"X rows ({n_samples}) != y length ({y.shape[0]})")
     if n_min < 1:
         raise ValueError(f"n_min must be >= 1, got {n_min}")
+    if n_wavelengths == 0:
+        raise ValueError("X has zero wavelengths")
+    if n_min > n_wavelengths:
+        raise ValueError(
+            f"n_min ({n_min}) cannot exceed the number of wavelengths ({n_wavelengths})"
+        )
 
     if n_max is None:
         n_max = min(10, max(3, n_wavelengths // 3))
@@ -335,8 +350,6 @@ def spa_wavelength_selection(
         n_max = n_min
     n_max = min(n_max, n_wavelengths)
 
-    if n_wavelengths == 0:
-        raise ValueError("X has zero wavelengths")
     if n_samples < 2:
         raise ValueError("SPA requires at least 2 samples")
 
