@@ -1,0 +1,49 @@
+name: NIR Release Gate
+
+on:
+  push:
+    branches: [Duan]
+  workflow_dispatch:
+
+concurrency:
+  group: nir-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-nir-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+      - name: Install backend dependencies
+        run: uv sync --group dev
+      - name: Lint NIR bridge and lifecycle contracts
+        run: uv run ruff check packages/harness/deerflow/community/nir tests/test_nir_end_to_end_regression.py tests/test_nir_artifact_security.py
+      - name: Run all backend NIR regressions
+        run: make test-nir
+
+  nir-core-fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+      - name: Install NIR core development dependencies
+        run: uv sync --project nir_core --extra dev
+      - name: Lint NIR core production code
+        run: uv run --project nir_core ruff check nir_core --exclude tests,scripts
+      - name: Run NIR core fast regressions
+        run: uv run --project nir_core pytest -m "not slow" --quiet

@@ -92,6 +92,8 @@ make install            # Install backend dependencies
 make dev                # Run Gateway API with reload (port 8001)
 make gateway            # Run Gateway API only (port 8001)
 make test               # Run all backend tests
+make test-nir           # Run all backend NIR regressions
+make test-nir-e2e       # Run the focused deployable NIR lifecycle regression
 make test-blocking-io   # Run strict Blockbuster runtime gate on tests/blocking_io/
 make eval-nir TRACES=path/to/nir-traces.json  # Score captured NIR agent trajectories
 make lint               # Lint with ruff
@@ -227,6 +229,16 @@ from deerflow.config import get_app_config
   fitted in final model space; `nir_predict` scores new samples against that
   training domain and reports legacy artifacts as drift-unavailable instead of
   comparing a batch with itself.
+  The deployable single-target lifecycle is pinned by
+  `tests/test_nir_end_to_end_regression.py`. It runs CSV normalization,
+  leakage-safe inline preprocessing, PLS training, approved registry insertion,
+  verified model reload, clean and shifted prediction batches, training-domain
+  drift detection, and artifact-tamper rejection in one deterministic test;
+  only the sandbox virtual-path resolver is mocked. Run it with
+  `make test-nir-e2e` from `backend/`. `make test-nir` runs every backend NIR
+  regression. Pushes to `Duan` execute the same backend gate plus the fast
+  `nir_core` gate in GitHub Actions and, after repository-level activation,
+  the Gitee Go `.workflow/NIRPipeline.yml` pipeline.
   Multi-component calibration uses the separate `nir_train_multi_model` tool
   under the `multi_modeling` workflow task. Explicit CSV `y_cols` are persisted
   as a two-dimensional y matrix with `y_names`; all targets share one split,

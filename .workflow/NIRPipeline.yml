@@ -1,0 +1,26 @@
+version: "1.0"
+name: nir-duan-release-gate
+displayName: NIR Duan Release Gate
+stages:
+  - stage:
+    name: nir_quality_gate
+    displayName: NIR Quality Gate
+    failFast: true
+    steps:
+      - step: build@python
+        name: nir_tests
+        displayName: NIR Tests
+        pythonVersion: "3.12"
+        commands:
+          - python3 -m pip install --upgrade uv
+          - uv sync --project nir_core --extra dev
+          - uv run --project nir_core ruff check nir_core --exclude tests,scripts
+          - uv run --project nir_core pytest -m "not slow" --quiet
+          - cd backend && uv sync --group dev
+          - cd backend && uv run ruff check packages/harness/deerflow/community/nir tests/test_nir_end_to_end_regression.py tests/test_nir_artifact_security.py
+          - cd backend && make test-nir
+triggers:
+  push:
+    branches:
+      include:
+        - Duan

@@ -448,16 +448,16 @@ def nir_predict_tool(
     Loads a joblib-serialised model and applies its fitted preprocessing and
     wavelength selection metadata to raw spectra before inference. Version-3
     multi-output artifacts produce one named prediction column per component.
-    Optionally runs Mahalanobis drift detection against the training
-    distribution (if the metrics JSON contains training stats).
+    Optionally runs PCA Hotelling T²/Q drift detection against the monitoring
+    reference persisted from the model's training domain.
 
     Args:
         model_path: Virtual path to the .pkl model file.
         data_path: Virtual path to a new-data .npz containing X and optional wv.
         output_path: Optional virtual path for a CSV of predictions.
-        detect_drift: If True, compute Mahalanobis drift of the new spectra
-            against the input data's own distribution (as a proxy when no
-            training reference is available).
+        detect_drift: If True, score the transformed spectra against the
+            training-domain monitoring reference. Legacy artifacts without a
+            reference report drift as unavailable.
         input_preprocessed: Set True only when X already has the artifact's
             train-time preprocessing applied.
 

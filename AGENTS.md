@@ -88,6 +88,8 @@ Run `make help` for the full list.
 # Backend (see backend/AGENTS.md for the full set)
 cd backend && make dev        # Gateway API with reload (port 8001)
 cd backend && make test       # Backend test suite
+cd backend && make test-nir   # All backend NIR regressions
+cd backend && make test-nir-e2e  # Focused deployable NIR lifecycle
 cd backend && make lint       # ruff check
 cd backend && make format     # ruff format
 
@@ -113,6 +115,14 @@ reports actual applicability-domain drift rather than self-reference distance.
 Model registration uses locked atomic JSON replacement and records separate
 training-data and artifact SHA-256 hashes. Production quality gates do not
 relax for small samples, and significant bias prevents passage.
+`backend/tests/test_nir_end_to_end_regression.py` is the deployable-lifecycle
+regression anchor: real CSV normalization, leakage-safe inline preprocessing,
+training, approved registration, verified reload, prediction, training-domain
+drift detection, and tamper rejection run in one test with only virtual-path
+resolution mocked.
+Pushes to `Duan` run the focused NIR release gate in
+`.github/workflows/nir-release-gate.yml`; Gitee-native repositories use the
+matching `.workflow/NIRPipeline.yml` after Gitee Go is enabled for the repo.
 
 The NIR evaluation control room lives at `/workspace/evaluations`. Its Gateway
 batch endpoint owner-checks explicit thread/scenario mappings and reuses the

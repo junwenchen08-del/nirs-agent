@@ -1,3 +1,5 @@
+.PHONY: install dev gateway test test-nir test-nir-e2e test-blocking-io eval-nir lint format detect-blocking-io migrate-rev
+
 install:
 	uv sync
 
@@ -9,6 +11,12 @@ gateway:
 
 test:
 	PYTHONPATH=. PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run pytest tests/ -v
+
+test-nir:
+	PYTHONPATH=. PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run pytest tests/ -q -k nir
+
+test-nir-e2e:
+	PYTHONPATH=. PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run pytest tests/test_nir_end_to_end_regression.py -q
 
 test-blocking-io:
 	PYTHONPATH=. PYTHONIOENCODING=utf-8 PYTHONUTF8=1 uv run pytest tests/blocking_io -q --tb=short

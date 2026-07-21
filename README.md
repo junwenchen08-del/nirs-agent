@@ -444,6 +444,12 @@ pytest tests/test_model/test_pls.py -v
 ```bash
 cd backend
 
+# 全部后端 NIR 回归
+make test-nir
+
+# 模型生命周期端到端回归：CSV → 训练/预处理 → 注册 → 预测/漂移 → 防篡改
+make test-nir-e2e
+
 # 确定性工作流与评分器回归
 pytest tests/test_nir_evaluation.py -v
 
