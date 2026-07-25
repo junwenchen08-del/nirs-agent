@@ -17,7 +17,10 @@ from nir_core.knowledge.governance import (
     QualityTier,
     ReviewStatus,
     content_sha256,
+    extract_doi,
     infer_language,
+    require_publication_ready,
+    require_valid_doi,
     stable_document_id,
 )
 from nir_core.knowledge.parser import parse_document
@@ -76,24 +79,23 @@ def ingest_document_bytes(
 
     resolved_title = (title or Path(filename).stem).strip()
     resolved_authors = [author.strip() for author in (authors or []) if author.strip()]
+    provided_doi = require_valid_doi(doi)
     digest = content_sha256(content)
-    doc_id = stable_document_id(
-        content=content,
-        doi=doi,
-        title=resolved_title,
-        authors=resolved_authors,
-        year=year,
-    )
 
     duplicate = catalog.get_by_content_hash(digest)
     if duplicate is not None:
+        proposed_doc_id = stable_document_id(
+            content=content,
+            doi=provided_doi,
+            title=resolved_title,
+            authors=resolved_authors,
+            year=year,
+        )
         action: CatalogAction = (
-            "unchanged" if duplicate.doc_id == doc_id else "duplicate"
+            "unchanged" if duplicate.doc_id == proposed_doc_id else "duplicate"
         )
         return IngestionResult(action=action, record=duplicate, chunks_added=0)
 
-    existing = catalog.get(doc_id)
-    next_version = existing.version + 1 if existing else 1
     suffix = Path(filename).suffix or ".txt"
     temporary_path = ""
     try:
@@ -115,6 +117,16 @@ def ingest_document_bytes(
     if not markdown.strip():
         raise ValueError("document parser returned empty text")
 
+    resolved_doi = provided_doi or extract_doi(markdown)
+    doc_id = stable_document_id(
+        content=content,
+        doi=resolved_doi,
+        title=resolved_title,
+        authors=resolved_authors,
+        year=year,
+    )
+    existing = catalog.get(doc_id)
+    next_version = existing.version + 1 if existing else 1
     entities = extract_entities(markdown)
     resolved_domains = list(
         dict.fromkeys([*(domains or []), *entities.get("datasets", [])])
@@ -124,7 +136,7 @@ def ingest_document_bytes(
         title=resolved_title,
         authors=resolved_authors,
         year=year,
-        doi=doi,
+        doi=resolved_doi,
         source_type=source_type or _infer_source_type(filename),
         source=filename,
         language=language or infer_language(markdown),
@@ -134,6 +146,8 @@ def ingest_document_bytes(
         content_sha256=digest,
         version=next_version,
     )
+    if review_status == "published":
+        require_publication_ready(record)
 
     chunks = chunk_document(
         markdown,

@@ -25,6 +25,7 @@ from nir_core.io.sniffers import inspect_file
 from deerflow.tools.types import Runtime
 
 from ._common import (
+    _bind_model_metrics,
     _err,
     _json_default,
     _load_npz_safely,
@@ -38,6 +39,12 @@ from ._common import (
 from ._knowledge_hint import _build_knowledge_hint
 from ._report import _build_report
 from ._resources import budget_for_runtime, check_spectral_data, resource_error
+from ._science_gate import (
+    dataset_science_gate,
+    reproducibility_evidence,
+    science_gate_error,
+    split_science_gate,
+)
 from .artifacts import _build_model_artifact
 from .candidate_selection import (
     _choose_model_candidate,  # noqa: F401 - compatibility re-export
@@ -183,6 +190,9 @@ def nir_train_auto_split_model_tool(
             return _err(f"X rows ({X.shape[0]}) != y length ({y.shape[0]})")
         if not np.all(np.isfinite(X)) or not np.all(np.isfinite(y)):
             return _err("Auto-split calibration requires finite X and y values.")
+        dataset_validation = dataset_science_gate(X, y, wv)
+        if validation_error := science_gate_error(dataset_validation):
+            return _err(validation_error)
 
         budget.checkpoint("auto_split_selection")
         calibration_indices, tuning_indices, test_indices, split_decision = select_autonomous_split(
@@ -200,6 +210,13 @@ def nir_train_auto_split_model_tool(
         X_cal, y_cal = X[calibration_indices], y[calibration_indices]
         X_tune, y_tune = X[tuning_indices], y[tuning_indices]
         X_test, y_test = X[test_indices], y[test_indices]
+        split_validation = split_science_gate(
+            calibration=X_cal,
+            tuning=X_tune,
+            holdout=X_test,
+        )
+        if validation_error := science_gate_error(split_validation):
+            return _err(validation_error)
 
         try:
             raw_steps = json.loads(pipeline_steps)
@@ -317,8 +334,30 @@ def nir_train_auto_split_model_tool(
             for partition_name, group_values in group_assignments.items():
                 partition_metrics[partition_name]["group_values"] = group_values
 
+        training_data_hash = _sha256_file(real_in)
         metrics = {
-            "training_data_hash": _sha256_file(real_in),
+            "training_data_hash": training_data_hash,
+            "scientific_validation": {
+                "schema_version": 1,
+                "passed": True,
+                "dataset": dataset_validation,
+                "partition_separation": split_validation,
+            },
+            "reproducibility": reproducibility_evidence(
+                random_state=int(random_state),
+                protocol="deterministic_auto_split_holdout",
+                input_sha256=training_data_hash,
+                parameters={
+                    "split_strategy": split_decision["strategy"],
+                    "tuning_ratio": float(tuning_ratio),
+                    "test_ratio": float(test_ratio),
+                    "method": method,
+                    "max_components": int(max_components),
+                    "compare_cars": compare_cars,
+                    "min_cars_improvement": float(min_cars_improvement),
+                    "min_model_improvement": float(min_model_improvement),
+                },
+            ),
             "protocol": "deterministic_auto_split_holdout",
             "validation_scope": "independent_holdout_not_external",
             "target": target_name,
@@ -374,6 +413,11 @@ def nir_train_auto_split_model_tool(
         os.makedirs(os.path.dirname(real_metrics), exist_ok=True)
         with open(real_metrics, "w", encoding="utf-8") as handle:
             json.dump(metrics, handle, ensure_ascii=False, indent=2, default=_json_default)
+        _bind_model_metrics(
+            real_model,
+            real_metrics,
+            training_data_hash=training_data_hash,
+        )
 
         report_path = os.path.join(os.path.dirname(real_model), "auto_split_report.md")
         report = [
@@ -560,9 +604,19 @@ def nir_train_partitioned_model_tool(
         X = np.asarray(data.X, dtype=float)
         y = np.asarray(data.y, dtype=float).ravel()
         wv = np.asarray(data.wv, dtype=float).ravel()
+        dataset_validation = dataset_science_gate(X, y, wv)
+        if validation_error := science_gate_error(dataset_validation):
+            return _err(validation_error)
         X_cal, y_cal = X[train_mask], y[train_mask]
         X_tune, y_tune = X[tune_mask], y[tune_mask]
         X_test, y_test = X[test_mask], y[test_mask]
+        split_validation = split_science_gate(
+            calibration=X_cal,
+            tuning=X_tune,
+            holdout=X_test,
+        )
+        if validation_error := science_gate_error(split_validation):
+            return _err(validation_error)
 
         # Fit all stateful transforms on Cal only for every tuning decision.
         selection_pipe = PreprocessingPipeline(steps).fit(X_cal, wv)
@@ -661,8 +715,31 @@ def nir_train_partitioned_model_tool(
             "selected_indices": None if chosen["method"] == "none" else selected_indices,
             "selected_wavelengths": None if chosen["method"] == "none" else [float(wv[index]) for index in selected_indices],
         }
+        training_data_hash = _sha256_file(real_in)
         metrics = {
-            "training_data_hash": _sha256_file(real_in),
+            "training_data_hash": training_data_hash,
+            "scientific_validation": {
+                "schema_version": 1,
+                "passed": True,
+                "dataset": dataset_validation,
+                "partition_separation": split_validation,
+            },
+            "reproducibility": reproducibility_evidence(
+                random_state=42,
+                protocol="official_partition_external_holdout",
+                input_sha256=training_data_hash,
+                parameters={
+                    "split_column": split_col,
+                    "train_label": train_label,
+                    "tuning_label": tuning_label,
+                    "test_label": test_label,
+                    "method": method,
+                    "max_components": int(max_components),
+                    "compare_cars": compare_cars,
+                    "min_cars_improvement": float(min_cars_improvement),
+                    "min_model_improvement": float(min_model_improvement),
+                },
+            ),
             "method": chosen_model["method"],
             "n_components": None if best_n is None else int(best_n),
             "n_samples": int(X.shape[0]),
@@ -711,6 +788,11 @@ def nir_train_partitioned_model_tool(
         os.makedirs(os.path.dirname(real_metrics), exist_ok=True)
         with open(real_metrics, "w", encoding="utf-8") as handle:
             json.dump(metrics, handle, ensure_ascii=False, indent=2, default=_json_default)
+        _bind_model_metrics(
+            real_model,
+            real_metrics,
+            training_data_hash=training_data_hash,
+        )
 
         report_path = os.path.join(os.path.dirname(real_model), "partitioned_report.md")
         report = [
@@ -874,6 +956,10 @@ def nir_analyze_tool(
             return _err("No reference values (y) found; cannot train a model.")
 
         X, y = np.asarray(data.X, dtype=float), np.asarray(data.y, dtype=float).ravel()
+        data_wv = np.asarray(data.wv, dtype=float).ravel() if data.wv is not None else None
+        dataset_validation = dataset_science_gate(X, y, data_wv)
+        if validation_error := science_gate_error(dataset_validation):
+            return _err(validation_error)
         (X_tr, y_tr), (X_val, y_val), (X_te, y_te) = split_dataset(
             X,
             y,
@@ -881,6 +967,13 @@ def nir_analyze_tool(
             val_ratio=0.10,
             random_state=42,
         )
+        split_validation = split_science_gate(
+            calibration=X_tr,
+            tuning=X_val,
+            holdout=X_te,
+        )
+        if validation_error := science_gate_error(split_validation):
+            return _err(validation_error)
 
         # Preprocessing selection (leakage-safe fit/transform).
         best_pipe = None
@@ -979,8 +1072,28 @@ def nir_analyze_tool(
         y_pred_val = chosen_model["_tuning_prediction"]
         y_pred_tr = predict_fn(model, X_tr)
 
+        training_data_hash = _sha256_file(real_in)
         metrics = {
-            "training_data_hash": _sha256_file(real_in),
+            "training_data_hash": training_data_hash,
+            "scientific_validation": {
+                "schema_version": 1,
+                "passed": True,
+                "dataset": dataset_validation,
+                "partition_separation": split_validation,
+            },
+            "reproducibility": reproducibility_evidence(
+                random_state=42,
+                protocol="automated_analysis_three_way_holdout",
+                input_sha256=training_data_hash,
+                parameters={
+                    "test_ratio": 0.20,
+                    "val_ratio": 0.10,
+                    "method": method,
+                    "auto_preprocess": bool(auto_preprocess),
+                    "wavelength_selection": wavelength_selection,
+                    "min_model_improvement": float(min_model_improvement),
+                },
+            ),
             "method": selected_method,
             "n_components": best_n,
             "domain": domain,
@@ -1034,6 +1147,11 @@ def nir_analyze_tool(
         )
         with open(metrics_path, "w", encoding="utf-8") as f:
             json.dump(metrics, f, ensure_ascii=False, indent=2, default=_json_default)
+        _bind_model_metrics(
+            model_path,
+            metrics_path,
+            training_data_hash=training_data_hash,
+        )
 
         import base64
 
@@ -1415,6 +1533,10 @@ def nir_compare_tool(
         y = np.asarray(data.y, dtype=float).ravel() if data.y is not None else None
         if y is None:
             return _err("Data has no reference values (y); cannot train models.")
+        data_wv = np.asarray(data.wv, dtype=float).ravel() if data.wv is not None else None
+        dataset_validation = dataset_science_gate(X, y, data_wv)
+        if validation_error := science_gate_error(dataset_validation):
+            return _err(validation_error)
 
         (X_tr, y_tr), (X_val, y_val), (X_te, y_te) = split_dataset(
             X,
@@ -1422,6 +1544,25 @@ def nir_compare_tool(
             test_ratio=0.20,
             val_ratio=0.10,
             random_state=42,
+        )
+        split_validation = split_science_gate(
+            calibration=X_tr,
+            tuning=X_val,
+            holdout=X_te,
+        )
+        if validation_error := science_gate_error(split_validation):
+            return _err(validation_error)
+        training_data_hash = _sha256_file(real_in)
+        comparison_reproducibility = reproducibility_evidence(
+            random_state=42,
+            protocol="preprocessing_comparison_three_way_holdout",
+            input_sha256=training_data_hash,
+            parameters={
+                "test_ratio": 0.20,
+                "val_ratio": 0.10,
+                "method": method,
+                "pipeline_count": len(pipe_list),
+            },
         )
 
         results = []
@@ -1466,6 +1607,14 @@ def nir_compare_tool(
                 "n_components": best_n,
                 "domain": domain,
                 "n_samples": int(X.shape[0]),
+                "training_data_hash": training_data_hash,
+                "scientific_validation": {
+                    "schema_version": 1,
+                    "passed": True,
+                    "dataset": dataset_validation,
+                    "partition_separation": split_validation,
+                },
+                "reproducibility": comparison_reproducibility,
                 "train": compute_metrics(y_tr, y_pred_tr),
                 "val": compute_metrics(y_val, y_pred_val),
                 "test": compute_metrics(y_te, y_pred_te),
@@ -1583,6 +1732,13 @@ def nir_compare_tool(
                 "gallery": output_dir + "/comparison_gallery.html",
                 "summary": output_dir + "/comparison_summary.md",
                 "all_metrics": output_dir + "/all_metrics.json",
+                "scientific_validation": {
+                    "schema_version": 1,
+                    "passed": True,
+                    "dataset": dataset_validation,
+                    "partition_separation": split_validation,
+                },
+                "reproducibility": comparison_reproducibility,
                 "knowledge_hint": knowledge_hint,
                 "resource_budget": budget.evidence(),
             }

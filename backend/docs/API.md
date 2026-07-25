@@ -598,11 +598,16 @@ Content-Type: application/json
 
 {
   "query": "SNV vs MSC for soil NIR",
-  "top_k": 5
+  "top_k": 5,
+  "purpose": "decision"
 }
 ```
 
-The response contains ranked `results` plus a `retrieval` decision object:
+`purpose` is `answer` (default) or `decision`. Decision mode requires evidence
+from at least two independent published documents with quality tier A-C.
+
+The response contains ranked `results`, the vector `retrieval` decision, and
+an `evidence_assessment` that the agent must enforce:
 
 ```json
 {
@@ -617,13 +622,35 @@ The response contains ranked `results` plus a `retrieval` decision object:
     "top_score": 0.51,
     "runner_up_document_score": 0.49,
     "document_margin": 0.02
+  },
+  "evidence_assessment": {
+    "schema_version": 1,
+    "purpose": "decision",
+    "status": "insufficient",
+    "answer_allowed": false,
+    "decision_allowed": false,
+    "support_level": "insufficient",
+    "independent_document_count": 0,
+    "limitations": [
+      "no_reliable_retrieval_results",
+      "decision_requires_two_independent_documents"
+    ],
+    "citations": []
   }
 }
 ```
 
 An abstained response intentionally withholds weak or cross-document-ambiguous
 vector neighbors. Retrieval-policy tuning does not require rebuilding the
-embedding index.
+embedding index. Material claims must use the returned `[KB:evidence_id]`
+markers, distinguish evidence from inference, and explicitly compare
+conflicting findings before a decision. If the matching `answer_allowed` or
+`decision_allowed` flag is false, the caller must abstain.
+The assessment also includes `doi_document_count`,
+`missing_doi_document_count`, and `doi_completeness`
+(`complete`, `partial`, `missing`, or `not_applicable`). Missing DOI lowers
+provenance completeness but does not by itself make an otherwise supported
+decision unavailable.
 
 #### Upload Knowledge Document
 
@@ -646,6 +673,15 @@ Content-Type: multipart/form-data
 The response includes the stable `doc_id`, content SHA-256, version, ingestion
 action (`created`, `unchanged`, `updated`, or `duplicate`), and chunk count.
 Only `published` documents are returned by knowledge search.
+Publishing is rejected until title, authors, year, and source metadata are
+present. `GET /documents` returns `publication_readiness` so clients can show
+the missing fields before requesting the transition.
+DOI is a soft gate. Supplied DOI URLs/prefixes are normalized to
+`10.<registrant>/<suffix>` and malformed values return `422`. When the field is
+omitted, ingestion attempts to extract a DOI from parsed document text.
+Publication remains allowed when no DOI exists, but `publication_readiness`
+returns `doi_status: "missing"` and a `doi_missing` warning for paper-like
+sources.
 
 #### Batch Upload Knowledge Documents
 
@@ -673,7 +709,9 @@ Content-Type: application/json
 ```
 
 This explicit transition updates both the SQLite catalog and all current
-ChromaDB chunk metadata; it does not create a new content version.
+ChromaDB chunk metadata; it does not create a new content version. The
+transition fails without complete title, authors, year, and source citation
+metadata.
 
 #### Update Knowledge Document Metadata
 

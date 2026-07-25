@@ -91,6 +91,25 @@ score only when it clearly leads the next document, and otherwise returns no
 evidence. All policy values are configurable with
 `NIR_KNOWLEDGE_RETRIEVAL_*` variables and do not require re-embedding.
 
+`utils.scientific_validation` is the shared release contract for calibration
+data. It validates matrix/target alignment, finite values, target variation,
+strict wavelength ordering, conflicting exact duplicates, and exact
+cross-partition leakage. It emits a deterministic data fingerprint and a
+reproducibility manifest containing the seed, protocol, parameters, and core
+library versions. DeerFlow training tools persist these reports and model
+registration rejects artifacts without passing evidence.
+
+`knowledge.evidence.assess_evidence` packages retrieval output for cited
+answers or decisions. Answer mode permits one reliable cited document;
+decision mode requires at least two independent quality A-C documents and
+explicit comparison of possible conflicts. Publication is rejected until
+title, authors, year, and source metadata are complete.
+DOIs use a soft gate: supplied values are normalized and syntax-validated,
+missing values are extracted from parsed text when possible, and publication
+readiness emits `doi_missing` without blocking a genuinely DOI-less source.
+Evidence assessment reports per-document DOI completeness without changing
+the independent-document decision threshold.
+
 Local embedding deployments use `NIR_KNOWLEDGE_EMBEDDING_MODEL`,
 `NIR_KNOWLEDGE_EMBEDDING_DIM`, `NIR_KNOWLEDGE_CHROMA_PATH`,
 `NIR_KNOWLEDGE_CATALOG_PATH`, `NIR_KNOWLEDGE_COLLECTION_NAME`, and

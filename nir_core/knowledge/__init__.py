@@ -10,5 +10,6 @@ Quick start:
 """
 
 from nir_core.knowledge.base import Chunk, SearchResult
+from nir_core.knowledge.evidence import assess_evidence
 
-__all__ = ["Chunk", "SearchResult"]
+__all__ = ["Chunk", "SearchResult", "assess_evidence"]

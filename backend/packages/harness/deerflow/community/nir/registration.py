@@ -10,7 +10,44 @@ from langchain.tools import InjectedToolCallId, tool
 
 from deerflow.tools.types import Runtime
 
-from ._common import _err, _ok, _resolve
+from ._common import _err, _ok, _resolve, _sha256_file
+
+
+def _registration_gate(metrics: dict) -> tuple[bool, str]:
+    """Require persisted scientific, quality, lineage, and replay evidence."""
+
+    data_hash = str(metrics.get("training_data_hash", "")).lower()
+    if len(data_hash) != 64 or any(character not in "0123456789abcdef" for character in data_hash):
+        return False, "training_data_hash is missing or is not a SHA-256 digest"
+
+    science = metrics.get("scientific_validation")
+    if not isinstance(science, dict) or science.get("passed") is not True:
+        return False, "scientific_validation is missing or did not pass"
+    dataset = science.get("dataset")
+    separation = science.get("partition_separation")
+    if not isinstance(dataset, dict) or dataset.get("passed") is not True:
+        return False, "dataset scientific validation did not pass"
+    if not isinstance(separation, dict) or separation.get("passed") is not True:
+        return False, "partition-separation leakage validation did not pass"
+
+    reproducibility = metrics.get("reproducibility")
+    if not isinstance(reproducibility, dict):
+        return False, "reproducibility manifest is missing"
+    if reproducibility.get("schema_version") != 1:
+        return False, "reproducibility manifest schema is unsupported"
+    if str(reproducibility.get("input_sha256", "")).lower() != data_hash:
+        return False, "reproducibility input hash does not match training_data_hash"
+    if not isinstance(reproducibility.get("random_state"), int):
+        return False, "reproducibility random_state is missing"
+
+    if isinstance(metrics.get("overall"), dict):
+        quality_passed = metrics["overall"].get("passed") is True
+    else:
+        quality = metrics.get("quality")
+        quality_passed = isinstance(quality, dict) and quality.get("passed") is True
+    if not quality_passed:
+        return False, "model quality gate did not pass"
+    return True, "all registration gates passed"
 
 
 def _resolve_registration_path(runtime: Runtime, path: str, *, read_only: bool) -> str:
@@ -72,6 +109,19 @@ def nir_register_model_tool(
         # Load metrics from file.
         with open(real_metrics, encoding="utf-8") as f:
             metrics = _json.load(f)
+        approved, gate_reason = _registration_gate(metrics)
+        if not approved:
+            return _err(f"Model registration rejected by mandatory scientific gate: {gate_reason}.")
+        manifest_path = real_model + ".manifest.json"
+        try:
+            with open(manifest_path, encoding="utf-8") as handle:
+                model_manifest = _json.load(handle)
+        except (OSError, _json.JSONDecodeError) as exc:
+            return _err(f"Model registration rejected: the model integrity manifest is missing or invalid ({type(exc).__name__}).")
+        if model_manifest.get("metrics_sha256") != _sha256_file(real_metrics):
+            return _err("Model registration rejected: metrics are not the exact provenance record bound to this model artifact.")
+        if str(model_manifest.get("training_data_sha256", "")).lower() != str(metrics["training_data_hash"]).lower():
+            return _err("Model registration rejected: model and metrics reference different training data.")
 
         # Compute a cryptographic artifact fingerprint. Training-data lineage
         # remains a separate field and is populated when metrics provide it.
@@ -112,6 +162,8 @@ def nir_register_model_tool(
                 "n_targets": int(metrics.get("n_targets", 1)),
                 "component_names": metrics.get("component_names"),
                 "registry_path": registry_path,
+                "scientific_gate": "passed",
+                "reproducibility_protocol": metrics["reproducibility"].get("protocol"),
             }
         )
     except Exception as exc:  # noqa: BLE001

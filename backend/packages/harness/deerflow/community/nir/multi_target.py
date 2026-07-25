@@ -14,6 +14,7 @@ from nir_core.io.resources import ResourceLimitError
 from deerflow.tools.types import Runtime
 
 from ._common import (
+    _bind_model_metrics,
     _err,
     _json_default,
     _load_npz_safely,
@@ -25,6 +26,12 @@ from ._common import (
 )
 from ._knowledge_hint import _build_knowledge_hint
 from ._resources import budget_for_runtime, resource_error
+from ._science_gate import (
+    dataset_science_gate,
+    reproducibility_evidence,
+    science_gate_error,
+    split_science_gate,
+)
 from .single_target import (
     _apply_wavelength_selection,
     _extract_rmsecv,
@@ -221,10 +228,20 @@ def nir_train_multi_model_tool(
             peak_multiplier=8.0,
             stage="multi_model_matrix_preflight",
         )
+        dataset_validation = dataset_science_gate(X, y, wv)
+        if validation_error := science_gate_error(dataset_validation):
+            return _err(validation_error)
 
         names = _parse_multi_component_names(data_dict, component_names, y.shape[1])
         raw_steps, steps = _parse_multi_pipeline(pipeline_steps)
         (X_tr_raw, y_tr), (X_val_raw, y_val), (X_te_raw, y_te) = split_dataset(X, y, test_ratio=test_ratio, val_ratio=val_ratio, random_state=42)
+        split_validation = split_science_gate(
+            calibration=X_tr_raw,
+            tuning=X_val_raw,
+            holdout=X_te_raw,
+        )
+        if validation_error := science_gate_error(split_validation):
+            return _err(validation_error)
 
         shared_pipe = None
         shared_desc = "none"
@@ -385,8 +402,30 @@ def nir_train_multi_model_tool(
             "n_total": len(per_component),
         }
         overall["passed"] = overall["n_passed"] == overall["n_total"]
+        training_data_hash = _sha256_file(real_in)
         metrics = {
-            "training_data_hash": _sha256_file(real_in),
+            "training_data_hash": training_data_hash,
+            "scientific_validation": {
+                "schema_version": 1,
+                "passed": True,
+                "dataset": dataset_validation,
+                "partition_separation": split_validation,
+            },
+            "reproducibility": reproducibility_evidence(
+                random_state=42,
+                protocol="multi_target_random_three_way_holdout",
+                input_sha256=training_data_hash,
+                parameters={
+                    "test_ratio": float(test_ratio),
+                    "val_ratio": float(val_ratio),
+                    "cv_folds": int(cv_folds),
+                    "cv_strategy": cv_strategy,
+                    "method": method,
+                    "max_components": int(max_components),
+                    "wavelength_selection": wavelength_selection,
+                    "shared_preprocessing": bool(shared_preprocessing),
+                },
+            ),
             "method": method,
             "n_targets": len(names),
             "component_names": names,
@@ -419,6 +458,11 @@ def nir_train_multi_model_tool(
         _write_trusted_model_artifact(artifact, real_model)
         with open(real_metrics, "w", encoding="utf-8") as file:
             json.dump(metrics, file, ensure_ascii=False, indent=2, default=_json_default)
+        _bind_model_metrics(
+            real_model,
+            real_metrics,
+            training_data_hash=training_data_hash,
+        )
         _write_multi_report(real_output_dir, metrics)
 
         concise_components = [

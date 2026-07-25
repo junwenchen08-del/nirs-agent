@@ -37,7 +37,13 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from nir_core.knowledge.config import get_config
-from nir_core.knowledge.governance import DocumentRecord, KnowledgeCatalog
+from nir_core.knowledge.evidence import assess_evidence
+from nir_core.knowledge.governance import (
+    DocumentRecord,
+    KnowledgeCatalog,
+    publication_readiness,
+    require_publication_ready,
+)
 from nir_core.knowledge.ingestion import ingest_document_bytes
 from nir_core.knowledge.vectorstore import ChromaDBRetriever
 
@@ -75,17 +81,23 @@ else:
 # ---------------------------------------------------------------------------
 
 
-def _do_search(query: str, top_k: int = 5) -> dict:
+def _do_search(
+    query: str,
+    top_k: int = 5,
+    purpose: str = "answer",
+) -> dict:
     """Search the knowledge base and return JSON-serializable results."""
     decision = _retriever.search_with_diagnostics(query, top_k=top_k)
     results = list(decision.results)
     retrieval = decision.diagnostics()
+    evidence_assessment = assess_evidence(results, purpose=purpose)
     if not results:
         return {
             "results": [],
             "count": 0,
             "query": query,
             "retrieval": retrieval,
+            "evidence_assessment": evidence_assessment,
             "error": None,
         }
 
@@ -110,7 +122,7 @@ def _do_search(query: str, top_k: int = 5) -> dict:
                 "evidence_id": r.chunk.id,
                 "chunk_id": r.chunk.id,
                 "doc_id": meta.get("doc_id", ""),
-                "content": r.chunk.content[:1000],
+                "content": r.chunk.content[:3000],
                 "source": r.chunk.source,
                 "score": round(r.score, 4),
                 "title": meta.get("title", ""),
@@ -138,6 +150,7 @@ def _do_search(query: str, top_k: int = 5) -> dict:
         "count": len(output),
         "query": query,
         "retrieval": retrieval,
+        "evidence_assessment": evidence_assessment,
         "error": None,
     }
 
@@ -152,6 +165,7 @@ def _do_list_documents() -> dict:
         {
             **record.model_dump(),
             "chunk_count": chunk_counts.get(record.doc_id, 0),
+            "publication_readiness": publication_readiness(record),
         }
         for record in _catalog.list()
     ]
@@ -257,6 +271,11 @@ def _do_set_review_status(doc_id: str, review_status: str) -> dict:
     record = _catalog.get(doc_id)
     if record is None:
         return {"error": "Document not found", "doc_id": doc_id}
+    if review_status == "published":
+        try:
+            require_publication_ready(record)
+        except ValueError as exc:
+            return {"error": str(exc), "doc_id": doc_id}
     if not _retriever.update_document_metadata(
         doc_id, {"review_status": review_status}
     ):
@@ -391,11 +410,14 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             query = req.get("query", "")
             top_k = int(req.get("top_k", 5))
+            purpose = str(req.get("purpose", "answer"))
             if not query:
                 self._send_json(400, {"error": "Missing 'query' field"})
                 return
             try:
-                self._send_json(200, _do_search(query, top_k))
+                self._send_json(200, _do_search(query, top_k, purpose))
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
             except Exception as exc:  # noqa: BLE001
                 self._send_json(
                     500,

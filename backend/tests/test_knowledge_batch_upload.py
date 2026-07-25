@@ -115,11 +115,57 @@ def test_batch_upload_rejects_too_many_files_before_forwarding(monkeypatch) -> N
     assert forwarded is False
 
 
+def test_single_upload_normalizes_valid_doi_before_forwarding(monkeypatch) -> None:
+    def fake_kb_request(method, path, body=None, timeout=60.0):
+        assert method == "POST"
+        assert path == "/documents"
+        assert body["doi"] == "10.1000/nir.paper"
+        return {
+            "doc_id": "doi:10.1000/nir.paper",
+            "chunks_added": 1,
+            "doi": body["doi"],
+        }
+
+    client = _make_client(monkeypatch, fake_kb_request)
+    response = client.post(
+        "/api/knowledge/documents",
+        data={"doi": "https://doi.org/10.1000/NIR.PAPER."},
+        files={"file": ("paper.md", b"paper", "text/markdown")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["doc_id"] == "doi:10.1000/nir.paper"
+
+
+def test_single_upload_rejects_invalid_doi_before_forwarding(monkeypatch) -> None:
+    forwarded = False
+
+    def fake_kb_request(method, path, body=None, timeout=60.0):
+        nonlocal forwarded
+        forwarded = True
+        return {}
+
+    client = _make_client(monkeypatch, fake_kb_request)
+    response = client.post(
+        "/api/knowledge/documents",
+        data={"doi": "not a DOI"},
+        files={"file": ("paper.md", b"paper", "text/markdown")},
+    )
+
+    assert response.status_code == 422
+    assert "canonical form" in response.json()["detail"]
+    assert forwarded is False
+
+
 def test_search_exposes_retrieval_abstention_diagnostics(monkeypatch) -> None:
     def fake_kb_request(method, path, body=None, timeout=60.0):
         assert method == "POST"
         assert path == "/search"
-        assert body == {"query": "unrelated query", "top_k": 5}
+        assert body == {
+            "query": "unrelated query",
+            "top_k": 5,
+            "purpose": "answer",
+        }
         return {
             "results": [],
             "count": 0,
@@ -147,6 +193,47 @@ def test_search_exposes_retrieval_abstention_diagnostics(monkeypatch) -> None:
     assert payload["retrieval"]["abstained"] is True
     assert payload["retrieval"]["reason"] == "below_weak_score"
     assert payload["retrieval"]["top_score"] == 0.51
+
+
+def test_search_forwards_decision_purpose_and_evidence_assessment(
+    monkeypatch,
+) -> None:
+    def fake_kb_request(method, path, body=None, timeout=60.0):
+        assert method == "POST"
+        assert path == "/search"
+        assert body == {
+            "query": "SNV or MSC?",
+            "top_k": 8,
+            "purpose": "decision",
+        }
+        return {
+            "results": [],
+            "count": 0,
+            "query": "SNV or MSC?",
+            "retrieval": None,
+            "evidence_assessment": {
+                "schema_version": 1,
+                "purpose": "decision",
+                "status": "insufficient",
+                "decision_allowed": False,
+                "limitations": ["decision_requires_two_independent_documents"],
+            },
+        }
+
+    client = _make_client(monkeypatch, fake_kb_request)
+    response = client.post(
+        "/api/knowledge/search",
+        json={
+            "query": "SNV or MSC?",
+            "top_k": 8,
+            "purpose": "decision",
+        },
+    )
+
+    assert response.status_code == 200
+    assessment = response.json()["evidence_assessment"]
+    assert assessment["purpose"] == "decision"
+    assert assessment["decision_allowed"] is False
 
 
 def test_set_document_status_forwards_publication_transition(monkeypatch) -> None:
@@ -235,4 +322,24 @@ def test_update_document_metadata_rejects_empty_request(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "No metadata fields supplied"
+    assert forwarded is False
+
+
+def test_update_document_metadata_rejects_invalid_doi_before_forwarding(
+    monkeypatch,
+) -> None:
+    forwarded = False
+
+    def fake_kb_request(method, path, body=None, timeout=60.0):
+        nonlocal forwarded
+        forwarded = True
+        return {}
+
+    client = _make_client(monkeypatch, fake_kb_request)
+    response = client.patch(
+        "/api/knowledge/documents/doc-1/metadata",
+        json={"doi": "invalid"},
+    )
+
+    assert response.status_code == 422
     assert forwarded is False

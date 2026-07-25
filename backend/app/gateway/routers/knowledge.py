@@ -26,7 +26,7 @@ import urllib.request
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +121,7 @@ class KnowledgeDocument(BaseModel):
     review_status: str = "draft"
     content_sha256: str = ""
     version: int = 1
+    publication_readiness: dict[str, object] | None = None
 
 
 class KnowledgeDocumentsResponse(BaseModel):
@@ -146,6 +147,7 @@ class KnowledgeSearchRequest(BaseModel):
 
     query: str
     top_k: int = Field(default=5, ge=1, le=20)
+    purpose: str = Field(default="answer", pattern="^(answer|decision)$")
 
 
 class KnowledgeSearchResult(BaseModel):
@@ -190,6 +192,7 @@ class KnowledgeSearchResponse(BaseModel):
     count: int
     query: str
     retrieval: KnowledgeRetrievalDiagnostics | None = None
+    evidence_assessment: dict[str, object] | None = None
 
 
 class KnowledgeUploadResponse(BaseModel):
@@ -225,6 +228,13 @@ class KnowledgeMetadataRequest(BaseModel):
     language: str | None = Field(default=None, min_length=1, max_length=50)
     domains: list[str] | None = None
     quality_tier: str | None = Field(default=None, pattern="^[A-E]$")
+
+    @field_validator("doi")
+    @classmethod
+    def _validate_doi(cls, value: str | None) -> str | None:
+        from nir_core.knowledge.governance import require_valid_doi
+
+        return require_valid_doi(value)
 
 
 class KnowledgeMetadataResponse(BaseModel):
@@ -314,7 +324,12 @@ async def _build_document_body(
     if authors:
         body["authors"] = authors
     if doi:
-        body["doi"] = doi
+        from nir_core.knowledge.governance import require_valid_doi
+
+        try:
+            body["doi"] = require_valid_doi(doi)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     if source_type:
         body["source_type"] = source_type
     if domains:
@@ -354,12 +369,21 @@ async def get_stats() -> KnowledgeStatsResponse:
 @router.post("/search", response_model=KnowledgeSearchResponse)
 async def search(req: KnowledgeSearchRequest) -> KnowledgeSearchResponse:
     """Test semantic search against the knowledge base."""
-    data = await _kb_request_async("POST", "/search", body={"query": req.query, "top_k": req.top_k})
+    data = await _kb_request_async(
+        "POST",
+        "/search",
+        body={
+            "query": req.query,
+            "top_k": req.top_k,
+            "purpose": req.purpose,
+        },
+    )
     return KnowledgeSearchResponse(
         results=[KnowledgeSearchResult(**r) for r in data.get("results", [])],
         count=data.get("count", 0),
         query=data.get("query", req.query),
         retrieval=data.get("retrieval"),
+        evidence_assessment=data.get("evidence_assessment"),
     )
 
 

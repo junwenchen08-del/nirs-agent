@@ -20,7 +20,16 @@ QualityTier = Literal["A", "B", "C", "D", "E"]
 CatalogAction = Literal["created", "unchanged", "updated", "duplicate"]
 
 _DOI_PREFIX_RE = re.compile(r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", re.IGNORECASE)
+_DOI_VALUE_RE = re.compile(r"^10\.\d{4,9}/\S+$", re.IGNORECASE)
+_DOI_SEARCH_RE = re.compile(r"\b10\.\d{4,9}/[^\s<>\"']+", re.IGNORECASE)
 _SPACE_RE = re.compile(r"\s+")
+_DOI_EXPECTED_SOURCE_TYPES = {
+    "article",
+    "conference_paper",
+    "document",
+    "journal",
+    "journal_article",
+}
 
 
 def content_sha256(content: bytes) -> str:
@@ -33,8 +42,31 @@ def normalize_doi(doi: str | None) -> str | None:
     if not doi:
         return None
     normalized = _DOI_PREFIX_RE.sub("", unicodedata.normalize("NFKC", doi).strip())
-    normalized = normalized.strip().rstrip(".,;)").casefold()
+    normalized = normalized.strip().rstrip(".,;)]}").casefold()
     return normalized or None
+
+
+def is_valid_doi(doi: str | None) -> bool:
+    """Return whether a DOI has a valid registrant prefix and non-space suffix."""
+    normalized = normalize_doi(doi)
+    return bool(normalized and _DOI_VALUE_RE.fullmatch(normalized))
+
+
+def require_valid_doi(doi: str | None) -> str | None:
+    """Normalize an optional DOI and reject malformed values."""
+    normalized = normalize_doi(doi)
+    if normalized is not None and not is_valid_doi(normalized):
+        raise ValueError("doi must match the canonical form 10.<registrant>/<suffix>")
+    return normalized
+
+
+def extract_doi(text: str) -> str | None:
+    """Extract the first syntactically valid DOI from parsed document text."""
+    for match in _DOI_SEARCH_RE.finditer(text or ""):
+        candidate = normalize_doi(match.group(0))
+        if is_valid_doi(candidate):
+            return candidate
+    return None
 
 
 def _normalize_identity_text(value: str) -> str:
@@ -50,7 +82,7 @@ def stable_document_id(
     year: int | None = None,
 ) -> str:
     """Build a stable ID using DOI, bibliography, then source content hash."""
-    normalized_doi = normalize_doi(doi)
+    normalized_doi = require_valid_doi(doi)
     if normalized_doi:
         return f"doi:{normalized_doi}"
 
@@ -112,7 +144,55 @@ class DocumentRecord(BaseModel):
     @field_validator("doi")
     @classmethod
     def _normalize_record_doi(cls, value: str | None) -> str | None:
-        return normalize_doi(value)
+        return require_valid_doi(value)
+
+
+def publication_readiness(record: DocumentRecord) -> dict[str, Any]:
+    """Return deterministic metadata requirements for publication."""
+
+    missing: list[str] = []
+    warnings: list[dict[str, str]] = []
+    if not record.title.strip():
+        missing.append("title")
+    if not record.authors:
+        missing.append("authors")
+    if record.year is None:
+        missing.append("year")
+    if not record.source.strip():
+        missing.append("source")
+    expects_doi = record.source_type.casefold() in _DOI_EXPECTED_SOURCE_TYPES
+    if expects_doi and not record.doi:
+        warnings.append(
+            {
+                "code": "doi_missing",
+                "message": (
+                    "No DOI is recorded. Publication is allowed, but verify "
+                    "that this source genuinely has no DOI."
+                ),
+            }
+        )
+    ready = not missing
+    if not ready:
+        message = "publication requires: " + ", ".join(missing)
+    elif warnings:
+        message = "ready for publication with warning: DOI is missing"
+    else:
+        message = "ready for publication"
+    return {
+        "ready": ready,
+        "missing_fields": missing,
+        "warnings": warnings,
+        "doi_status": (
+            "valid" if record.doi else ("missing" if expects_doi else "not_applicable")
+        ),
+        "message": message,
+    }
+
+
+def require_publication_ready(record: DocumentRecord) -> None:
+    readiness = publication_readiness(record)
+    if not readiness["ready"]:
+        raise ValueError(str(readiness["message"]))
 
 
 @dataclass(frozen=True)
@@ -201,6 +281,8 @@ class KnowledgeCatalog:
 
     def register(self, record: DocumentRecord) -> CatalogWriteResult:
         """Create, deduplicate, or version a document metadata record."""
+        if record.review_status == "published":
+            require_publication_ready(record)
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             duplicate_row = connection.execute(
@@ -293,6 +375,11 @@ class KnowledgeCatalog:
         self, doc_id: str, review_status: ReviewStatus
     ) -> DocumentRecord | None:
         """Change governance state without creating a new content version."""
+        current = self.get(doc_id)
+        if current is None:
+            return None
+        if review_status == "published":
+            require_publication_ready(current)
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             cursor = connection.execute(
@@ -335,6 +422,8 @@ class KnowledgeCatalog:
             payload.update(dict(updates))
             payload["updated_at"] = now
             updated = DocumentRecord.model_validate(payload)
+            if updated.review_status == "published":
+                require_publication_ready(updated)
             connection.execute(
                 """
                 UPDATE kb_documents SET

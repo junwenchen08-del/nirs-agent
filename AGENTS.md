@@ -184,6 +184,19 @@ applies the calibrated strong/weak score plus cross-document-margin policy in
 `nir_core.knowledge.retrieval_policy`. The `/search` response exposes the
 decision diagnostics. `NIR_KNOWLEDGE_RETRIEVAL_*` tuning does not require an
 index rebuild, but every change must be rerun against the versioned benchmark.
+`nir_core.utils.scientific_validation` is mandatory in every primary training
+entry point: it blocks invalid wavelength axes, conflicting duplicate spectra,
+and exact cross-partition leakage, then records a replay manifest. Model
+manifests bind the exact metrics and training-data hashes; registration rejects
+missing, failed, mismatched, or quality-failing evidence. Knowledge search also
+returns an `evidence_assessment`: `answer` mode needs cited evidence, while
+`decision` mode requires at least two independent quality A-C documents.
+Publishing requires title, authors, year, and source metadata, and agents must
+abstain when the requested evidence mode is not allowed.
+DOI handling is a soft gate: normalize and validate supplied values, extract a
+missing DOI from parsed text, reject malformed values, and expose
+`doi_missing` plus evidence-level DOI completeness without blocking legitimate
+DOI-less publications.
 
 Rule of thumb: **root `make` = the full application**; **`backend/Makefile` and `frontend/`
 (`pnpm`) = per-module work.**

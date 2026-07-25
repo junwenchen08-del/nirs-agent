@@ -338,6 +338,13 @@ from deerflow.config import get_app_config
   multi-target training tools live in their corresponding modules; preserve
   the historical modeling exports and private decision helpers still imported
   by regression tests.
+  Every primary training path must also call the shared `_science_gate`
+  adapter before fitting. Persist `scientific_validation` (dataset and
+  partition-separation reports) plus `reproducibility` in metrics. Exact
+  duplicate spectra across partitions and duplicate spectra with conflicting
+  targets are blocking. `_bind_model_metrics` adds the metrics and
+  training-data hashes to the model manifest; registration must reject any
+  missing/failed scientific or quality gate and any model/metrics mismatch.
   During an active
   NIR workflow, `NIRWorkflowMiddleware` hard-denies script writes (`.py`,
   notebooks, R/Julia/MATLAB files) and shell-based Python execution so a loader
@@ -362,7 +369,16 @@ from deerflow.config import get_app_config
   knowledge server's `retrieval` diagnostics, including abstention reason,
   top score, cross-document margin, candidate count, and returned result
   count. Attempt history stores model and metrics paths for post-run
-  traceability. The deterministic evaluator in
+  traceability. Search requests accept `purpose=answer|decision` and also
+  return `evidence_assessment`. Decision mode requires two independent
+  published quality A-C documents; tool instructions require
+  `[KB:evidence_id]` markers, separation of evidence from inference, explicit
+  conflict comparison, and abstention when `decision_allowed` is false.
+  Publication requires complete title, authors, year, and source metadata
+  before vector metadata is changed. DOI is a soft gate: malformed values are
+  rejected at Gateway/core boundaries, valid values are normalized, ingestion
+  extracts a missing DOI from parsed text, and missing DOI warnings do not
+  block legitimate publications. The deterministic evaluator in
   `deerflow.community.nir.evaluation` scores the versioned scenarios under
   `evals/nir/`; `make eval-nir TRACES=...` produces machine-readable JSON and a
   Markdown scorecard without invoking an LLM. `NIRWorkflowMiddleware` retains

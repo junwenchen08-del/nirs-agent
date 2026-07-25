@@ -65,6 +65,13 @@ interface KnowledgeDocument {
   language: string;
   domains: string[];
   quality_tier: KnowledgeQualityTier;
+  publication_readiness?: {
+    ready: boolean;
+    missing_fields: string[];
+    warnings: Array<{ code: string; message: string }>;
+    doi_status: "valid" | "missing" | "not_applicable";
+    message: string;
+  } | null;
 }
 
 interface KnowledgeStats {
@@ -491,8 +498,15 @@ function DocumentTable({
   };
 
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full min-w-[860px] text-sm">
+    <div className="w-full overflow-x-auto rounded-lg border">
+      <table className="w-full min-w-[640px] table-fixed text-sm">
+        <colgroup>
+          <col />
+          <col className="w-16" />
+          <col className="w-16" />
+          <col className="w-20" />
+          <col className="w-32" />
+        </colgroup>
         <thead className="bg-muted/50">
           <tr>
             <th className="px-3 py-2 text-left font-medium">
@@ -542,39 +556,50 @@ function DocumentTable({
                   {doc.review_status !== "published" && (
                     <Button
                       variant="outline"
-                      size="sm"
+                      size="icon-sm"
                       onClick={() => onPublish(doc)}
-                      disabled={publishingDocId !== null}
+                      disabled={
+                        publishingDocId !== null ||
+                        doc.publication_readiness?.ready === false
+                      }
+                      title={
+                        doc.publication_readiness?.ready === false ||
+                        doc.publication_readiness?.warnings?.length
+                          ? doc.publication_readiness.message
+                          : undefined
+                      }
+                      aria-label={
+                        publishingDocId === doc.doc_id
+                          ? t.settings.knowledge.publishingButton
+                          : t.settings.knowledge.publishButton
+                      }
                     >
                       {publishingDocId === doc.doc_id ? (
                         <Loader2Icon className="size-4 animate-spin" />
                       ) : (
                         <CheckIcon className="size-4" />
                       )}
-                      {publishingDocId === doc.doc_id
-                        ? t.settings.knowledge.publishingButton
-                        : t.settings.knowledge.publishButton}
                     </Button>
                   )}
                   <Button
                     variant="outline"
-                    size="sm"
+                    size="icon-sm"
                     onClick={() => onEdit(doc)}
                     disabled={publishingDocId !== null}
+                    title={t.settings.knowledge.editButton}
+                    aria-label={t.settings.knowledge.editButton}
                   >
                     <PencilIcon className="size-4" />
-                    {t.settings.knowledge.editButton}
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="icon-sm"
                     onClick={() => onDelete(doc)}
                     disabled={publishingDocId === doc.doc_id}
+                    title={t.settings.knowledge.deleteButton}
+                    aria-label={t.settings.knowledge.deleteButton}
                   >
                     <Trash2Icon className="size-4" />
-                    <span className="sr-only">
-                      {t.settings.knowledge.deleteButton}
-                    </span>
                   </Button>
                 </div>
               </td>

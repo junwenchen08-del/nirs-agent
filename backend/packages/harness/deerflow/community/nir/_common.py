@@ -155,6 +155,48 @@ def _write_trusted_model_artifact(artifact, real_model_path: str) -> None:
     os.replace(manifest_tmp, manifest_path)
 
 
+def _bind_model_metrics(
+    real_model_path: str,
+    real_metrics_path: str,
+    *,
+    training_data_hash: str,
+) -> None:
+    """Bind the exact metrics/provenance record to an existing model manifest."""
+
+    manifest_path = _model_manifest_path(real_model_path)
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("Cannot bind metrics because the model manifest is missing or invalid.") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise ValueError("Cannot bind metrics to an unsupported model manifest.")
+    actual_artifact_hash = _artifact_digest(Path(real_model_path))
+    if manifest.get("sha256") != actual_artifact_hash:
+        raise ValueError("Cannot bind metrics to a model that failed integrity verification.")
+    normalized_data_hash = str(training_data_hash).lower()
+    if len(normalized_data_hash) != 64 or any(character not in "0123456789abcdef" for character in normalized_data_hash):
+        raise ValueError("training_data_hash must be a SHA-256 digest")
+
+    metrics_hash = _artifact_digest(Path(real_metrics_path))
+    manifest["metrics_sha256"] = metrics_hash
+    manifest["training_data_sha256"] = normalized_data_hash
+    signing_key = os.environ.get("NIR_ARTIFACT_SIGNING_KEY")
+    if signing_key:
+        binding = f"{actual_artifact_hash}:{metrics_hash}:{normalized_data_hash}"
+        manifest["provenance_hmac_sha256"] = hmac.new(
+            signing_key.encode("utf-8"),
+            binding.encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest()
+
+    temporary = manifest_path.with_name(manifest_path.name + ".tmp")
+    temporary.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, manifest_path)
+
+
 def _load_trusted_model_artifact(real_model_path: str, virtual_model_path: str):
     """Verify model provenance/integrity before invoking joblib.load.
 

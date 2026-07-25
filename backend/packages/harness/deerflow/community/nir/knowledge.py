@@ -63,7 +63,11 @@ def _knowledge_http_headers() -> dict[str, str]:
     return headers
 
 
-def _search_knowledge_via_http(query: str, top_k: int) -> str:
+def _search_knowledge_via_http(
+    query: str,
+    top_k: int,
+    purpose: str,
+) -> str:
     """Fallback: search knowledge base via HTTP.
 
     Used when ``nir_core.knowledge`` cannot be imported in the backend
@@ -77,7 +81,7 @@ def _search_knowledge_via_http(query: str, top_k: int) -> str:
 
     # Search
     url = base_url + "/search"
-    payload = json.dumps({"query": query, "top_k": top_k}).encode("utf-8")
+    payload = json.dumps({"query": query, "top_k": top_k, "purpose": purpose}).encode("utf-8")
 
     try:
         req = urllib.request.Request(
@@ -110,6 +114,7 @@ def nir_search_knowledge_tool(
     runtime: Runtime,
     query: str,
     top_k: int = 5,
+    purpose: str = "answer",
     tool_call_id: Annotated[str, InjectedToolCallId] = "",  # noqa: ARG001
 ) -> str:
     """Search the NIR knowledge base (papers / docs) for relevant sections.
@@ -133,6 +138,15 @@ def nir_search_knowledge_tool(
     - Previous call returned ``count: 0`` for the same query (the knowledge
       base is empty or the retriever intentionally abstained).
 
+    Set ``purpose="decision"`` whenever the retrieved literature will change a
+    preprocessing choice, model choice, acceptance threshold, or reported
+    recommendation. Decision mode requires at least two independent published
+    documents with quality tier A-C. If ``decision_allowed`` is false, abstain
+    and state what evidence is missing. For every material claim, copy the
+    corresponding ``[KB:evidence_id]`` marker from ``evidence_assessment``;
+    clearly label any synthesis beyond the cited passages as an inference and
+    compare potentially conflicting findings before recommending an action.
+
     The knowledge base is populated offline via
     ``python -m nir_core.knowledge.cli import-dir <papers_dir>``. If the
     base is empty or available evidence is too weak/ambiguous, this tool
@@ -144,15 +158,20 @@ def nir_search_knowledge_tool(
             ``"SNV vs MSC for soil organic carbon"`` or
             ``"typical R2 for PLS on wheat protein"``.
         top_k: Maximum number of matching sections to return (default 5).
+        purpose: ``answer`` for cited factual answers or ``decision`` for
+            evidence used to choose/recommend an action.
 
     Returns:
         JSON with a list of matching paper sections. Each entry includes
-        the chunk content (truncated to 1000 chars), source file, similarity
+        the chunk content (bounded to 3000 chars), source file, similarity
         stable evidence/chunk/document IDs, citation metadata, source file,
         similarity score, trust marker, and detected NIR entities. Document
         inventory is intentionally served by the separate management API.
     """
     global _knowledge_search_mode, _knowledge_http_call_count
+    normalized_purpose = str(purpose).strip().lower()
+    if normalized_purpose not in {"answer", "decision"}:
+        return _err("purpose must be 'answer' or 'decision'")
 
     # Periodically retry direct import even after switching to HTTP,
     # so a transient failure doesn't permanently disable the fast path.
@@ -175,6 +194,12 @@ def nir_search_knowledge_tool(
             else:
                 results = retriever.search(query, top_k=top_k)
                 retrieval = None
+            from nir_core.knowledge.evidence import assess_evidence
+
+            evidence_assessment = assess_evidence(
+                results,
+                purpose=normalized_purpose,
+            )
             _knowledge_search_mode = "direct"
 
             if not results:
@@ -185,6 +210,7 @@ def nir_search_knowledge_tool(
                         "count": 0,
                         "query": query,
                         "retrieval": retrieval,
+                        "evidence_assessment": evidence_assessment,
                         "message": (
                             "No sufficiently reliable knowledge evidence was found; weak or ambiguous vector matches were withheld."
                             if abstained
@@ -214,7 +240,7 @@ def nir_search_knowledge_tool(
                         "evidence_id": r.chunk.id,
                         "chunk_id": r.chunk.id,
                         "doc_id": meta.get("doc_id", ""),
-                        "content": r.chunk.content[:1000],
+                        "content": r.chunk.content[:3000],
                         "source": r.chunk.source,
                         "score": round(r.score, 4),
                         "title": meta.get("title", ""),
@@ -243,6 +269,7 @@ def nir_search_knowledge_tool(
                     "count": len(output),
                     "query": query,
                     "retrieval": retrieval,
+                    "evidence_assessment": evidence_assessment,
                 }
             )
         except Exception as exc:  # noqa: BLE001
@@ -254,4 +281,8 @@ def nir_search_knowledge_tool(
             _knowledge_search_mode = "http"
 
     # Fallback: HTTP search server (runs on host with Anaconda Python)
-    return _search_knowledge_via_http(query, top_k)
+    return _search_knowledge_via_http(
+        query,
+        top_k,
+        normalized_purpose,
+    )

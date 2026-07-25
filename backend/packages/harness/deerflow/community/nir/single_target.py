@@ -14,6 +14,7 @@ from nir_core.io.resources import ResourceLimitError
 from deerflow.tools.types import Runtime
 
 from ._common import (
+    _bind_model_metrics,
     _err,
     _json_default,
     _load_npz_safely,
@@ -25,6 +26,12 @@ from ._common import (
 )
 from ._knowledge_hint import _build_knowledge_hint
 from ._resources import budget_for_runtime, resource_error
+from ._science_gate import (
+    dataset_science_gate,
+    reproducibility_evidence,
+    science_gate_error,
+    split_science_gate,
+)
 from .artifacts import _build_model_artifact, _write_plots_and_report
 from .candidate_selection import (
     _choose_model_candidate,
@@ -841,6 +848,9 @@ def nir_train_model_tool(
             peak_multiplier=8.0,
             stage="model_matrix_preflight",
         )
+        dataset_validation = dataset_science_gate(X, y, wv)
+        if validation_error := science_gate_error(dataset_validation):
+            return _err(validation_error)
 
         budget.checkpoint("data_split")
         (X_tr, y_tr), (X_val, y_val), (X_te, y_te) = split_dataset(
@@ -850,6 +860,13 @@ def nir_train_model_tool(
             val_ratio=val_ratio,
             random_state=42,
         )
+        split_validation = split_science_gate(
+            calibration=X_tr,
+            tuning=X_val,
+            holdout=X_te,
+        )
+        if validation_error := science_gate_error(split_validation):
+            return _err(validation_error)
 
         # ★ v3: Leakage-safe inline preprocessing when pipeline_steps given.
         best_pipe = None
@@ -902,8 +919,29 @@ def nir_train_model_tool(
         y_pred_val = predict_fn(model, X_val)
         y_pred_te = predict_fn(model, X_te)
 
+        training_data_hash = _sha256_file(real_in)
         metrics = {
-            "training_data_hash": _sha256_file(real_in),
+            "training_data_hash": training_data_hash,
+            "scientific_validation": {
+                "schema_version": 1,
+                "passed": True,
+                "dataset": dataset_validation,
+                "partition_separation": split_validation,
+            },
+            "reproducibility": reproducibility_evidence(
+                random_state=42,
+                protocol="random_three_way_holdout",
+                input_sha256=training_data_hash,
+                parameters={
+                    "test_ratio": float(test_ratio),
+                    "val_ratio": float(val_ratio),
+                    "cv_folds": int(cv_folds),
+                    "cv_strategy": cv_strategy,
+                    "method": method,
+                    "max_components": int(max_components),
+                    "wavelength_selection": wavelength_selection,
+                },
+            ),
             "method": method,
             "n_components": best_n,
             "domain": domain,
@@ -984,6 +1022,11 @@ def nir_train_model_tool(
         os.makedirs(os.path.dirname(real_metrics), exist_ok=True)
         with open(real_metrics, "w", encoding="utf-8") as f:
             json.dump(metrics, f, ensure_ascii=False, indent=2, default=_json_default)
+        _bind_model_metrics(
+            real_model,
+            real_metrics,
+            training_data_hash=training_data_hash,
+        )
 
         # Generate plots + report.
         from nir_core.models import SpectralData

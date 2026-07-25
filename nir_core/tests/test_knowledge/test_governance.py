@@ -10,6 +10,9 @@ from nir_core.knowledge.governance import (
     DocumentRecord,
     KnowledgeCatalog,
     content_sha256,
+    extract_doi,
+    is_valid_doi,
+    publication_readiness,
     stable_document_id,
 )
 from nir_core.knowledge.ingestion import ingest_document_bytes
@@ -38,6 +41,18 @@ def test_stable_document_id_prefers_normalized_doi() -> None:
 
     assert first == "doi:10.1000/abc.123"
     assert second == first
+
+
+def test_doi_validation_and_extraction_reject_malformed_values() -> None:
+    assert is_valid_doi("https://doi.org/10.1000/ABC.123") is True
+    assert is_valid_doi("not-a-doi") is False
+    assert (
+        extract_doi("Available at https://doi.org/10.1016/j.chemo.2025.01.004.")
+        == "10.1016/j.chemo.2025.01.004"
+    )
+
+    with pytest.raises(ValueError, match="canonical form"):
+        stable_document_id(content=b"paper", doi="not-a-doi")
 
 
 def test_stable_document_id_uses_normalized_bibliographic_identity() -> None:
@@ -72,6 +87,7 @@ def _record(*, digest: str, title: str = "Paper") -> DocumentRecord:
         year=2024,
         doi="10.1000/test",
         source_type="journal",
+        source="paper.pdf",
         language="en",
         domains=["soil"],
         quality_tier="B",
@@ -103,6 +119,9 @@ def test_catalog_filters_review_status(tmp_path: Path) -> None:
         DocumentRecord(
             doc_id="sha256:draft",
             title="Draft",
+            authors=["Reviewer"],
+            year=2024,
+            source="draft.pdf",
             review_status="draft",
             content_sha256="b" * 64,
         )
@@ -116,6 +135,44 @@ def test_catalog_filters_review_status(tmp_path: Path) -> None:
     assert updated is not None
     assert updated.review_status == "published"
     assert updated.version == 1
+
+
+def test_catalog_rejects_publication_with_incomplete_citation_metadata(
+    tmp_path: Path,
+) -> None:
+    catalog = KnowledgeCatalog(tmp_path / "catalog.sqlite3")
+    catalog.register(
+        DocumentRecord(
+            doc_id="sha256:incomplete",
+            title="Incomplete paper",
+            source="paper.pdf",
+            review_status="draft",
+            content_sha256="c" * 64,
+        )
+    )
+
+    with pytest.raises(ValueError, match="authors, year"):
+        catalog.set_review_status("sha256:incomplete", "published")
+
+    assert catalog.get("sha256:incomplete").review_status == "draft"
+
+
+def test_publication_allows_missing_doi_with_explicit_warning() -> None:
+    readiness = publication_readiness(
+        DocumentRecord(
+            doc_id="bib:paper",
+            title="Paper without DOI",
+            authors=["Researcher"],
+            year=1992,
+            source="legacy-paper.pdf",
+            source_type="journal",
+            content_sha256="d" * 64,
+        )
+    )
+
+    assert readiness["ready"] is True
+    assert readiness["doi_status"] == "missing"
+    assert readiness["warnings"][0]["code"] == "doi_missing"
 
 
 def test_catalog_updates_editable_metadata_without_new_content_version(
@@ -235,3 +292,42 @@ def test_ingestion_replaces_changed_version_with_same_doi(tmp_path: Path) -> Non
     assert second.record.version == 2
     assert len(retriever.replacements) == 2
     assert retriever.replacements[-1][1][0].metadata["document_version"] == 2
+
+
+def test_ingestion_extracts_doi_from_document_text(tmp_path: Path) -> None:
+    catalog = KnowledgeCatalog(tmp_path / "catalog.sqlite3")
+    retriever = _FakeRetriever()
+
+    result = ingest_document_bytes(
+        filename="paper.md",
+        content=(
+            b"# Paper\n\nDOI: 10.5555/NIR.AUTO.2026\n\nSNV preprocessing was evaluated."
+        ),
+        retriever=retriever,
+        catalog=catalog,
+        title="Auto DOI",
+        authors=["Alice"],
+        year=2026,
+    )
+
+    assert result.record.doi == "10.5555/nir.auto.2026"
+    assert result.record.doc_id == "doi:10.5555/nir.auto.2026"
+    assert retriever.replacements[0][1][0].metadata["doi"] == result.record.doi
+
+
+def test_ingestion_rejects_invalid_supplied_doi_before_indexing(
+    tmp_path: Path,
+) -> None:
+    catalog = KnowledgeCatalog(tmp_path / "catalog.sqlite3")
+    retriever = _FakeRetriever()
+
+    with pytest.raises(ValueError, match="canonical form"):
+        ingest_document_bytes(
+            filename="paper.md",
+            content=b"paper content",
+            retriever=retriever,
+            catalog=catalog,
+            doi="invalid identifier",
+        )
+
+    assert retriever.replacements == []
