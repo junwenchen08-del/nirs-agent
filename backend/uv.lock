@@ -3438,6 +3438,7 @@ deep = [
 dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "ruff" },
 ]
 ensemble = [
     { name = "lightgbm" },
@@ -3449,6 +3450,7 @@ knowledge = [
     { name = "markdownify" },
     { name = "pypdf" },
     { name = "python-docx" },
+    { name = "python-dotenv" },
     { name = "sentence-transformers" },
 ]
 mat73 = [
@@ -3470,6 +3472,8 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "python-docx", marker = "extra == 'knowledge'", specifier = ">=1.0" },
+    { name = "python-dotenv", marker = "extra == 'knowledge'", specifier = ">=1.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.11" },
     { name = "scikit-learn", specifier = ">=1.2.0" },
     { name = "scipy", specifier = ">=1.10.0" },
     { name = "sentence-transformers", marker = "extra == 'knowledge'", specifier = ">=2.0" },

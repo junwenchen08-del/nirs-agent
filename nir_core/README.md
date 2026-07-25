@@ -67,6 +67,42 @@ small NIR calibration sets: eight GBM candidates and four Random Forest /
 Extra Trees candidates. They avoid very deep or oversized forests that are
 both slow and prone to overfitting.
 
+Public MAT/CSV loaders enforce a configurable `ResourceBudget` before parsing
+and after materializing the spectral matrix. Defaults are 512 MiB per file,
+50 million matrix elements, 100,000 samples, 50,000 wavelengths, 256 targets,
+4 GiB estimated peak memory, and 900 seconds. Override them with the matching
+`NIR_MAX_*` environment variables documented in the root README.
+
+Embedding changes are evaluation-gated. `knowledge.evaluation` compares
+separately indexed retrievers using labeled Chinese/multilingual cases and
+reports Recall@K, MRR, nDCG@K, no-hit accuracy, latency, and language slices.
+Start from `knowledge/retrieval_eval_cases.example.json`; the current four-paper
+BGE-M3 corpus has a versioned 28-case set at
+`knowledge/retrieval_eval_cases.bge-m3.v1.json` and its measured baseline at
+`knowledge/retrieval_eval_baseline.bge-m3.v1.md`. The post-retrieval policy
+comparison is recorded at
+`knowledge/retrieval_eval_baseline.bge-m3.policy-v1.md`. Do not compare two
+embedding models against one shared vector index.
+
+`knowledge.retrieval_policy` over-fetches vector candidates, caps chunks per
+document, and applies calibrated abstention before returning evidence. The
+default BGE-M3 policy accepts a strong score directly, accepts a mid-range
+score only when it clearly leads the next document, and otherwise returns no
+evidence. All policy values are configurable with
+`NIR_KNOWLEDGE_RETRIEVAL_*` variables and do not require re-embedding.
+
+Local embedding deployments use `NIR_KNOWLEDGE_EMBEDDING_MODEL`,
+`NIR_KNOWLEDGE_EMBEDDING_DIM`, `NIR_KNOWLEDGE_CHROMA_PATH`,
+`NIR_KNOWLEDGE_CATALOG_PATH`, `NIR_KNOWLEDGE_COLLECTION_NAME`, and
+`NIR_KNOWLEDGE_INDEX_VERSION`. The repo-root `.env` is loaded when
+`python-dotenv` is installed. Model or dimension changes require a fresh,
+isolated index.
+
+The DeerFlow integration keeps orchestration in `community.nir.modeling` while
+data splitting, candidate policy, single-target fitting, multi-target helpers,
+artifact persistence, and registration live in six focused modules. Existing
+tool names remain stable through the modeling facade.
+
 ## Testing
 
 ```bash

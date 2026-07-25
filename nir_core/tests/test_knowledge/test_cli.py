@@ -13,7 +13,16 @@ def test_build_parser_has_all_subcommands() -> None:
     """The parser exposes all expected subcommands."""
     parser = build_parser()
     # Each subcommand should be parseable without errors.
-    for cmd in ("add", "import-dir", "list", "search", "delete", "rebuild", "stats"):
+    for cmd in (
+        "add",
+        "import-dir",
+        "list",
+        "search",
+        "delete",
+        "set-status",
+        "rebuild",
+        "stats",
+    ):
         # parse_args returns Namespace; we just check it doesn't raise.
         if cmd == "add":
             args = parser.parse_args([cmd, "paper.pdf", "--year", "2023"])
@@ -34,6 +43,10 @@ def test_build_parser_has_all_subcommands() -> None:
             args = parser.parse_args([cmd, "doc123"])
             assert args.command == "delete"
             assert args.doc_id == "doc123"
+        elif cmd == "set-status":
+            args = parser.parse_args([cmd, "doc123", "published"])
+            assert args.doc_id == "doc123"
+            assert args.review_status == "published"
         elif cmd == "rebuild":
             args = parser.parse_args([cmd])
             assert args.command == "rebuild"
@@ -73,7 +86,10 @@ def test_cmd_rebuild_nonexistent_path(tmp_path: Path) -> None:
     """rebuild handles a non-existent DB path gracefully."""
     from nir_core.knowledge.config import KnowledgeConfig, set_config
 
-    cfg = KnowledgeConfig(chroma_path=str(tmp_path / "nonexistent_db"))
+    cfg = KnowledgeConfig(
+        chroma_path=str(tmp_path / "nonexistent_db"),
+        catalog_path=str(tmp_path / "catalog.sqlite3"),
+    )
     set_config(cfg)
 
     from nir_core.knowledge.cli import cmd_rebuild
@@ -93,7 +109,10 @@ def test_cmd_rebuild_existing_path(tmp_path: Path) -> None:
     db_path.mkdir()
     (db_path / "dummy.txt").write_text("dummy")
 
-    cfg = KnowledgeConfig(chroma_path=str(db_path))
+    cfg = KnowledgeConfig(
+        chroma_path=str(db_path),
+        catalog_path=str(tmp_path / "catalog.sqlite3"),
+    )
     set_config(cfg)
 
     from nir_core.knowledge.cli import cmd_rebuild

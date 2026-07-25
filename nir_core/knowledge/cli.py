@@ -22,10 +22,10 @@ import json
 import sys
 from pathlib import Path
 
-from nir_core.knowledge.chunker import chunk_document
 from nir_core.knowledge.config import get_config, get_retriever
-from nir_core.knowledge.entity_extractor import extract_entities
-from nir_core.knowledge.parser import SUPPORTED_EXTENSIONS, parse_document
+from nir_core.knowledge.governance import KnowledgeCatalog
+from nir_core.knowledge.ingestion import ingest_document_bytes
+from nir_core.knowledge.parser import SUPPORTED_EXTENSIONS
 
 
 # ---------------------------------------------------------------------------
@@ -37,34 +37,31 @@ def cmd_add(args: argparse.Namespace) -> int:
     """Add a single document to the knowledge base."""
     retriever = get_retriever()
     cfg = get_config()
-
-    markdown = parse_document(args.file_path)
-    doc_id = Path(args.file_path).stem
-
-    chunks = chunk_document(
-        markdown,
-        source=args.file_path,
-        strategy=cfg.chunk_strategy,
+    catalog = KnowledgeCatalog(cfg.catalog_path)
+    path = Path(args.file_path)
+    result = ingest_document_bytes(
+        filename=path.name,
+        content=path.read_bytes(),
+        retriever=retriever,
+        catalog=catalog,
+        title=args.title,
+        authors=args.authors,
+        year=args.year,
+        doi=args.doi,
+        source_type=args.source_type,
+        domains=args.domains,
+        quality_tier=args.quality_tier,
+        review_status=args.review_status,
+        chunk_strategy=cfg.chunk_strategy,
         max_tokens=cfg.chunk_max_tokens,
-        doc_id=doc_id,
+        overlap_percent=cfg.chunk_overlap,
+        index_version=cfg.index_version,
     )
-
-    entities = extract_entities(markdown)
-    for chunk in chunks:
-        chunk.metadata.update(
-            {
-                "title": args.title or doc_id,
-                "year": args.year,
-                **entities,
-            }
-        )
-
-    count = retriever.add_documents(chunks)
-    print(f"Added {count} chunks from {args.file_path} (doc_id={doc_id})")
-    if entities["methods"]:
-        print(f"  Methods detected: {', '.join(entities['methods'])}")
-    if entities["models"]:
-        print(f"  Models detected: {', '.join(entities['models'])}")
+    print(
+        f"{result.action}: {result.chunks_added} chunks from {args.file_path} "
+        f"(doc_id={result.record.doc_id}, version={result.record.version}, "
+        f"status={result.record.review_status})"
+    )
     return 0
 
 
@@ -72,6 +69,7 @@ def cmd_import_dir(args: argparse.Namespace) -> int:
     """Recursively import all supported documents from a directory."""
     retriever = get_retriever()
     cfg = get_config()
+    catalog = KnowledgeCatalog(cfg.catalog_path)
 
     dir_path = Path(args.directory)
     files = [
@@ -90,52 +88,52 @@ def cmd_import_dir(args: argparse.Namespace) -> int:
     errors = 0
     for i, file_path in enumerate(files, 1):
         try:
-            markdown = parse_document(str(file_path))
-            doc_id = file_path.stem
-
-            chunks = chunk_document(
-                markdown,
-                source=str(file_path),
-                strategy=cfg.chunk_strategy,
+            result = ingest_document_bytes(
+                filename=file_path.name,
+                content=file_path.read_bytes(),
+                retriever=retriever,
+                catalog=catalog,
+                title=file_path.stem,
+                quality_tier=args.quality_tier,
+                review_status=args.review_status,
+                chunk_strategy=cfg.chunk_strategy,
                 max_tokens=cfg.chunk_max_tokens,
-                doc_id=doc_id,
+                overlap_percent=cfg.chunk_overlap,
+                index_version=cfg.index_version,
             )
-
-            entities = extract_entities(markdown)
-            for chunk in chunks:
-                chunk.metadata.update({"title": doc_id, **entities})
-
-            retriever.add_documents(chunks)
-            total_chunks += len(chunks)
-            print(f"  [{i}/{len(files)}] {file_path.name} -> {len(chunks)} chunks")
+            total_chunks += result.chunks_added
+            print(
+                f"  [{i}/{len(files)}] {file_path.name} -> {result.action}, "
+                f"{result.chunks_added} chunks"
+            )
         except Exception as exc:  # noqa: BLE001
             errors += 1
             print(f"  [{i}/{len(files)}] {file_path.name} -> ERROR: {exc}")
 
     print(
-        f"\nDone: {len(files) - errors}/{len(files)} files, "
-        f"{total_chunks} chunks total"
+        f"\nDone: {len(files) - errors}/{len(files)} files, {total_chunks} chunks total"
     )
     return 0 if errors == 0 else 1
 
 
 def cmd_list(args: argparse.Namespace) -> int:
     """List all documents in the knowledge base."""
-    retriever = get_retriever()
-    docs = retriever.list_documents()
+    cfg = get_config()
+    catalog = KnowledgeCatalog(cfg.catalog_path)
+    docs = [record.model_dump() for record in catalog.list()]
 
     if not docs:
         print("Knowledge base is empty.")
         return 0
 
-    print(f"{'doc_id':<40} {'title':<40} {'year':>6} {'chunks':>7}")
-    print("-" * 95)
+    print(f"{'doc_id':<48} {'title':<32} {'status':<12} {'ver':>3}")
+    print("-" * 100)
     for doc in docs:
         print(
-            f"{doc.get('doc_id', ''):<40} "
-            f"{doc.get('title', ''):<40} "
-            f"{str(doc.get('year', '')):>6} "
-            f"{doc.get('chunk_count', 0):>7}"
+            f"{doc.get('doc_id', ''):<48} "
+            f"{doc.get('title', ''):<32} "
+            f"{doc.get('review_status', ''):<12} "
+            f"{doc.get('version', 1):>3}"
         )
     print(f"\nTotal: {len(docs)} documents")
     return 0
@@ -172,12 +170,34 @@ def cmd_search(args: argparse.Namespace) -> int:
 def cmd_delete(args: argparse.Namespace) -> int:
     """Delete a document by doc_id."""
     retriever = get_retriever()
-    success = retriever.delete_document(args.doc_id)
-    if success:
+    cfg = get_config()
+    catalog = KnowledgeCatalog(cfg.catalog_path)
+    vector_deleted = retriever.delete_document(args.doc_id)
+    catalog_deleted = catalog.delete(args.doc_id)
+    if vector_deleted or catalog_deleted:
         print(f"Deleted document: {args.doc_id}")
     else:
         print(f"Not found or delete failed: {args.doc_id}")
         return 1
+    return 0
+
+
+def cmd_set_status(args: argparse.Namespace) -> int:
+    """Set draft/review/publication state and mirror it into vector metadata."""
+    retriever = get_retriever()
+    cfg = get_config()
+    catalog = KnowledgeCatalog(cfg.catalog_path)
+    record = catalog.get(args.doc_id)
+    if record is None:
+        print(f"Document not found: {args.doc_id}")
+        return 1
+    if not retriever.update_document_metadata(
+        args.doc_id, {"review_status": args.review_status}
+    ):
+        print(f"Vector chunks not found: {args.doc_id}")
+        return 1
+    updated = catalog.set_review_status(args.doc_id, args.review_status)
+    print(f"Document status: {args.doc_id} -> {updated.review_status}")
     return 0
 
 
@@ -194,6 +214,11 @@ def cmd_rebuild(args: argparse.Namespace) -> int:
     else:
         print(f"DB path does not exist: {db_path}")
 
+    catalog_path = Path(cfg.catalog_path)
+    if catalog_path.exists() and not catalog_path.is_relative_to(db_path):
+        catalog_path.unlink()
+        print(f"Cleared {catalog_path}")
+
     print("Rebuild complete. Use 'import-dir' to re-import documents.")
     return 0
 
@@ -202,8 +227,10 @@ def cmd_stats(args: argparse.Namespace) -> int:
     """Print knowledge base statistics."""
     retriever = get_retriever()
     cfg = get_config()
-    docs = retriever.list_documents()
-    total_chunks = sum(d.get("chunk_count", 0) for d in docs)
+    catalog = KnowledgeCatalog(cfg.catalog_path)
+    docs = catalog.list()
+    vector_docs = retriever.list_documents()
+    total_chunks = sum(d.get("chunk_count", 0) for d in vector_docs)
     print(f"Documents: {len(docs)}")
     print(f"Total chunks: {total_chunks}")
     print(f"Database path: {cfg.chroma_path}")
@@ -228,10 +255,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_add.add_argument("--title", help="Document title")
     p_add.add_argument("--year", type=int, help="Publication year")
     p_add.add_argument("--authors", nargs="*", help="Author names")
+    p_add.add_argument("--doi", help="Digital Object Identifier")
+    p_add.add_argument(
+        "--source-type", help="journal, standard, internal_document, ..."
+    )
+    p_add.add_argument("--domains", nargs="*", help="Domain tags")
+    p_add.add_argument("--quality-tier", choices=list("ABCDE"), default="C")
+    p_add.add_argument(
+        "--review-status",
+        choices=("draft", "needs_review", "published", "retired"),
+        default="draft",
+    )
     p_add.set_defaults(func=cmd_add)
 
-    p_import = sub.add_parser("import-dir", help="Import all documents from a directory")
+    p_import = sub.add_parser(
+        "import-dir", help="Import all documents from a directory"
+    )
     p_import.add_argument("directory", help="Directory path")
+    p_import.add_argument("--quality-tier", choices=list("ABCDE"), default="C")
+    p_import.add_argument(
+        "--review-status",
+        choices=("draft", "needs_review", "published", "retired"),
+        default="draft",
+    )
     p_import.set_defaults(func=cmd_import_dir)
 
     p_list = sub.add_parser("list", help="List all documents")
@@ -245,6 +291,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_del = sub.add_parser("delete", help="Delete a document")
     p_del.add_argument("doc_id", help="Document ID")
     p_del.set_defaults(func=cmd_delete)
+
+    p_status = sub.add_parser("set-status", help="Set document review status")
+    p_status.add_argument("doc_id", help="Stable document ID")
+    p_status.add_argument(
+        "review_status",
+        choices=("draft", "needs_review", "published", "retired"),
+    )
+    p_status.set_defaults(func=cmd_set_status)
 
     p_rebuild = sub.add_parser("rebuild", help="Rebuild index (clears all data)")
     p_rebuild.set_defaults(func=cmd_rebuild)

@@ -80,7 +80,7 @@
 │  │DOCX→MD   │  │naive/qa  │  │ 中英文别名     │  │ HNSW 索引  │   │
 │  └──────────┘  └──────────┘  └────────────────┘  └────────────┘   │
 │                          │                                        │
-│              ChromaDB (.chromadb/) + all-MiniLM-L6-v2             │
+│              ChromaDB (.chromadb-bge-m3/) + BGE-M3                │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -212,7 +212,7 @@ class ChromaDBRetriever:
     """ChromaDB 向量检索实现"""
 
     def __init__(self, db_path, embedding_model, collection_name):
-        self._model = SentenceTransformer(embedding_model)     # all-MiniLM-L6-v2, 384维
+        self._model = SentenceTransformer(embedding_model)     # BGE-M3, 1024维
         self._client = chromadb.PersistentClient(path=db_path)  # 本地持久化
         self._collection = self._client.get_or_create_collection(
             collection_name, metadata={"hnsw:space": "cosine"}
@@ -595,7 +595,7 @@ def nir_search_knowledge_tool(runtime, query, top_k=5):
 │  ┌─────────────────────────────────────────────┴───────┐    │
 │  │  _search_server.py (Anaconda Python, port 8089)     │    │
 │  │  · ChromaDB (.chromadb/)                            │    │
-│  │  · all-MiniLM-L6-v2 嵌入模型                       │    │
+│  │  · BGE-M3 1024维嵌入模型                           │    │
 │  └─────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -660,7 +660,7 @@ docker exec deer-flow-gateway curl http://host.docker.internal:8089/health
 **注意事项：**
 - 搜索服务器需要手动启动，重启电脑后需重新运行
 - 搜索服务器端口：8089（可通过 `--port` 参数修改）
-- 嵌入模型路径：`nir_core/knowledge/all-MiniLM-L6-v2/`（本地加载，不联网）
+- 嵌入模型路径：`D:\Models\bge-m3`（本地加载，不联网）
 
 ---
 
@@ -684,10 +684,11 @@ knowledge = [
 
 | 模型 | 维度 | 大小 | 中文支持 | 当前使用 |
 |------|------|------|---------|---------|
-| `all-MiniLM-L6-v2` | 384 | ~90MB | 一般 | ✅ |
+| `BGE-M3` | 1024 | ~2.3GB | 优秀 | ✅ |
 | `BAAI/bge-small-zh-v1.5` | 512 | ~100MB | 优秀 | 未来可选 |
 
-模型下载：从 hf-mirror.com 手动下载到 `nir_core/knowledge/all-MiniLM-L6-v2/`（HuggingFace 在国内被屏蔽）。
+模型下载：从 BAAI/bge-m3 下载到 `D:\Models\bge-m3`，通过
+`NIR_KNOWLEDGE_EMBEDDING_MODEL` 配置本地路径。
 
 ---
 
@@ -742,8 +743,8 @@ nir_core/knowledge/
 ├── cli.py                       # CLI 管理工具
 ├── _search_server.py            # HTTP 搜索服务器 (Docker-Host 桥接)
 ├── _import_papers.py            # 批量导入脚本 (设置环境变量)
-├── .chromadb/                   # ChromaDB 持久化数据 (gitignore)
-└── all-MiniLM-L6-v2/           # 嵌入模型 (gitignore)
+├── .chromadb-bge-m3/            # ChromaDB 持久化数据 (gitignore)
+└── .knowledge_catalog.bge-m3.sqlite3  # 治理目录 (gitignore)
 
 nir_core/tests/test_knowledge/
 ├── __init__.py

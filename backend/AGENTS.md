@@ -228,13 +228,29 @@ from deerflow.config import get_app_config
   arrays. Version-3 artifacts persist a compact PCA Hotelling T²/Q reference
   fitted in final model space; `nir_predict` scores new samples against that
   training domain and reports legacy artifacts as drift-unavailable instead of
-  comparing a batch with itself.
+  comparing a batch with itself. Every prediction attempt, including rejected
+  artifacts, writes a privacy-minimized event to the locked and fsynced
+  SHA-256 chain at `/mnt/user-data/outputs/prediction-audit.jsonl`. Events carry
+  runtime attribution, model/input hashes, dimensions, aggregate prediction
+  and drift summaries, output path, duration, and bounded errors, but never raw
+  spectra or row-level predictions. Audit storage or chain-integrity failures
+  fail closed. `_prediction_audit.verify_prediction_audit` verifies the full
+  chain. When reference drift is available, `_drift_monitor` atomically updates
+  per-model state in `prediction-drift-state.json`. Its validated environment
+  policy defaults to three consecutive batches with drift score >= 0.50 for an
+  alert and two consecutive batches <= 0.10 for recovery. It emits only state
+  transitions to the hash-chained `prediction-drift-alerts.jsonl`, preventing
+  duplicate alert spam; `nir_predict.drift_monitoring` exposes state, policy,
+  alert id, transition, and recommended action. Monitoring persistence errors
+  are explicit in the prediction result and audit event but do not discard a
+  completed prediction.
   The deployable single-target lifecycle is pinned by
   `tests/test_nir_end_to_end_regression.py`. It runs CSV normalization,
   leakage-safe inline preprocessing, PLS training, approved registry insertion,
   verified model reload, clean and shifted prediction batches, training-domain
-  drift detection, and artifact-tamper rejection in one deterministic test;
-  only the sandbox virtual-path resolver is mocked. Run it with
+  drift detection, continuous-alert transition, prediction audit chaining, and
+  artifact-tamper rejection in one deterministic test; only the sandbox
+  virtual-path resolver is mocked. Run it with
   `make test-nir-e2e` from `backend/`. `make test-nir` runs every backend NIR
   regression. Pushes to `Duan` execute the same backend gate plus the fast
   `nir_core` gate in GitHub Actions and, after repository-level activation,
@@ -308,15 +324,45 @@ from deerflow.config import get_app_config
   `action_required=confirm_field_mapping`, and `nir_load_data` accepts explicit
   `x_var`, `y_var`, `wv_var`, and `transpose` overrides. The backend depends on
   `nir-core[mat73]`, so the h5py runtime required for MAT v7.3 is installed in
-  normal backend and Docker environments. During an active
+  normal backend and Docker environments.
+  NIR file loading and modeling are bounded by `nir_core.io.resources`.
+  Public MAT/CSV loaders perform file-size preflight and matrix/memory checks;
+  Gateway tools add run-linked deadline and cooperative cancellation checks at
+  safe stage boundaries. Resource errors must preserve their stable `code`,
+  `stage`, actual value, and configured limit in tool JSON. Cooperative
+  cancellation does not hard-kill a model fit already executing inside a
+  third-party library. Modeling responsibilities are separated into
+  `data_splitting`, `candidate_selection`, `single_target`, `multi_target`,
+  `artifacts`, and `registration`. `modeling.py` remains the compatibility
+  facade and higher-level orchestration layer. Standard single-target and
+  multi-target training tools live in their corresponding modules; preserve
+  the historical modeling exports and private decision helpers still imported
+  by regression tests.
+  During an active
   NIR workflow, `NIRWorkflowMiddleware` hard-denies script writes (`.py`,
   notebooks, R/Julia/MATLAB files) and shell-based Python execution so a loader
   error cannot push the agent into an ad-hoc scipy/sklearn fallback.
   Version-3 multi-output artifacts store component names, models, preprocessing,
   and per-target selection metadata, and `nir_predict` emits an N-by-K CSV.
   Successful knowledge retrieval stores bounded source identifiers in
-  `nir_workflow.knowledge_evidence`, while attempt history stores model and
-  metrics paths for post-run traceability. The deterministic evaluator in
+  `nir_workflow.knowledge_evidence`, preferring stable `evidence_id`/`chunk_id`
+  over renamable source paths. Knowledge ingestion is governed by the
+  `nir_core.knowledge` SQLite catalog: DOI/bibliography/content-hash document
+  IDs, SHA-256 idempotency, content versions, quality tiers, and
+  `draft`/`needs_review`/`published`/`retired` states. ChromaDB remains the
+  vector backend. Search enforces `published` metadata, and returned evidence
+  is marked `untrusted_evidence`. `cjk-section-v2` bounds Chinese text without
+  whitespace and retains section paths, page markers, neighbor IDs, and index
+  versions. Gateway uploads default to `draft`; `PATCH
+  /api/knowledge/documents/{doc_id}/status` performs explicit publication or
+  retirement. `PATCH /api/knowledge/documents/{doc_id}/metadata` synchronizes
+  editable title, author, year, DOI, language, domain, and quality-tier fields
+  across the SQLite catalog and existing ChromaDB chunks without re-embedding
+  or incrementing the content version. Search responses preserve the
+  knowledge server's `retrieval` diagnostics, including abstention reason,
+  top score, cross-document margin, candidate count, and returned result
+  count. Attempt history stores model and metrics paths for post-run
+  traceability. The deterministic evaluator in
   `deerflow.community.nir.evaluation` scores the versioned scenarios under
   `evals/nir/`; `make eval-nir TRACES=...` produces machine-readable JSON and a
   Markdown scorecard without invoking an LLM. `NIRWorkflowMiddleware` retains

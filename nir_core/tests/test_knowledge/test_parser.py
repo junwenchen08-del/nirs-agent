@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from nir_core.knowledge.parser import SUPPORTED_EXTENSIONS, _normalize_pdf_text, parse_document
+from nir_core.knowledge.parser import (
+    SUPPORTED_EXTENSIONS,
+    _format_pdf_pages,
+    _normalize_pdf_text,
+    parse_document,
+)
 
 
 def test_parse_txt(tmp_path: Path) -> None:
@@ -49,7 +54,7 @@ def test_parse_csv_truncates_large_file(tmp_path: Path) -> None:
     result = parse_document(p)
     # Only the first 50 data rows should be present.
     assert "99" not in result  # row 100 value
-    assert "0" in result      # row 1 value
+    assert "0" in result  # row 1 value
 
 
 def test_parse_csv_handles_bom_quotes_pipes_and_ragged_rows(tmp_path: Path) -> None:
@@ -141,6 +146,7 @@ def test_supported_extensions_includes_common() -> None:
 # _normalize_pdf_text
 # ---------------------------------------------------------------------------
 
+
 def test_normalize_removes_inter_cjk_spaces() -> None:
     """Spaces between CJK characters (a pypdf artifact) are removed."""
     raw = "近 红 外 光 谱 定 量 分 析"
@@ -176,3 +182,10 @@ def test_normalize_collapses_repeated_cjk_spaces() -> None:
     raw = "近  红\n外  光\t谱"
     result = _normalize_pdf_text(raw)
     assert result == "近红外光谱"
+
+
+def test_format_pdf_pages_adds_one_based_page_markers() -> None:
+    result = _format_pdf_pages(["first", "second"])
+
+    assert "<!-- page: 1 -->" in result
+    assert "<!-- page: 2 -->" in result

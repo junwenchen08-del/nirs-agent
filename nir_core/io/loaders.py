@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import os
 import re
+from functools import wraps
 from pathlib import Path
+from typing import Callable, TypeVar, cast
 
 import numpy as np
 
+from nir_core.io.resources import ResourceBudget
 from nir_core.io.schema import (
     csv_profile_numeric_matrix,
     infer_mat_mapping,
@@ -30,7 +33,29 @@ from nir_core.models import SpectralData
 # Public API
 # ---------------------------------------------------------------------------
 
+_Loader = TypeVar("_Loader", bound=Callable[..., SpectralData])
 
+
+def _bounded_loaded_data(loader: _Loader) -> _Loader:
+    """Apply post-parse matrix and memory limits to every public loader."""
+
+    @wraps(loader)
+    def wrapped(*args, **kwargs) -> SpectralData:
+        data = loader(*args, **kwargs)
+        y = np.asarray(data.y) if data.y is not None else None
+        target_count = 0 if y is None else (1 if y.ndim <= 1 else int(y.shape[1]))
+        ResourceBudget().check_array(
+            np.asarray(data.X),
+            target_count=target_count,
+            peak_multiplier=3.0,
+            stage="loaded_spectral_matrix",
+        )
+        return data
+
+    return cast(_Loader, wrapped)
+
+
+@_bounded_loaded_data
 def load_mat(
     filepath: str,
     x_var: str | None = None,
@@ -96,6 +121,7 @@ def load_mat(
     """
     if not Path(filepath).exists():
         raise FileNotFoundError(f"File not found: {filepath}")
+    ResourceBudget().check_file(filepath, stage="mat_file_preflight")
 
     # Detect HDF5 magic to decide between loadmat and h5py.
     with open(filepath, "rb") as fh:
@@ -105,6 +131,7 @@ def load_mat(
     return _load_mat_v5(filepath, x_var, y_var, wv_var, subset, transpose)
 
 
+@_bounded_loaded_data
 def load_csv(
     filepath: str,
     delimiter: str | None = None,
@@ -180,6 +207,7 @@ def load_csv(
     """
     if not Path(filepath).exists():
         raise FileNotFoundError(f"File not found: {filepath}")
+    ResourceBudget().check_file(filepath, stage="csv_file_preflight")
     if y_col is not None and y_cols is not None:
         raise ValueError("y_col and y_cols are mutually exclusive")
 

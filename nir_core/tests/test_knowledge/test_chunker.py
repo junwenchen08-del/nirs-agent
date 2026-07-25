@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nir_core.knowledge.chunker import chunk_document
+from nir_core.knowledge.chunker import CHUNKER_VERSION, chunk_document, estimate_tokens
 
 
 def test_chunk_naive_basic() -> None:
@@ -16,7 +16,7 @@ def test_chunk_naive_basic() -> None:
         assert chunk.chunk_index == i
         assert chunk.source == "test.txt"
         assert "doc_id" in chunk.metadata
-        assert chunk.id.endswith(f"_chunk_{i}")
+        assert chunk.id.endswith(f"-{i:04d}")
 
 
 def test_chunk_naive_single_paragraph() -> None:
@@ -118,7 +118,7 @@ def test_chunk_doc_id_explicit() -> None:
     chunks = chunk_document(
         "content here", source="t.md", strategy="naive", doc_id="my_paper"
     )
-    assert chunks[0].id == "my_paper_chunk_0"
+    assert chunks[0].id == f"my_paper#{CHUNKER_VERSION}-0000"
     assert chunks[0].metadata["doc_id"] == "my_paper"
 
 
@@ -138,3 +138,50 @@ def test_chunk_overlap_clamped() -> None:
         text, source="t.txt", strategy="naive", max_tokens=5, overlap_percent=200
     )
     assert len(chunks) > 0
+
+
+def test_estimate_tokens_counts_chinese_without_spaces() -> None:
+    """Chinese text contributes to the size budget even without whitespace."""
+    assert estimate_tokens("近红外光谱") >= 5
+
+
+def test_long_chinese_paragraph_is_split_to_budget() -> None:
+    """A single long Chinese paragraph cannot bypass max_tokens."""
+    text = "近红外光谱可用于无损分析。" * 40
+
+    chunks = chunk_document(
+        text,
+        source="paper.md",
+        strategy="naive",
+        max_tokens=60,
+        doc_id="paper",
+    )
+
+    assert len(chunks) > 1
+    assert all(estimate_tokens(chunk.content) <= 60 for chunk in chunks)
+
+
+def test_chunk_metadata_preserves_section_path_and_versions() -> None:
+    text = "# 方法\n\n## 光谱预处理\n\n采用 SNV。"
+
+    chunks = chunk_document(
+        text,
+        source="paper.md",
+        strategy="section",
+        doc_id="paper",
+    )
+
+    target = next(chunk for chunk in chunks if "采用 SNV" in chunk.content)
+    assert target.metadata["section_path"] == ["方法", "光谱预处理"]
+    assert target.metadata["chunker_version"] == CHUNKER_VERSION
+    assert target.id.startswith(f"paper#{CHUNKER_VERSION}-")
+
+
+def test_chunk_metadata_preserves_pdf_page_numbers_without_marker_text() -> None:
+    text = "<!-- page: 3 -->\n\n本页讨论 SNV。"
+
+    chunk = chunk_document(text, source="paper.pdf", doc_id="paper")[0]
+
+    assert chunk.metadata["page_start"] == 3
+    assert chunk.metadata["page_end"] == 3
+    assert "<!-- page:" not in chunk.content

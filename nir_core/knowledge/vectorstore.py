@@ -1,9 +1,9 @@
 """ChromaDB-backed retriever implementation.
 
 Design notes:
-- Local persistent storage (``.chromadb/``), zero external services.
+- Local persistent storage (``.chromadb-bge-m3/``), zero external services.
 - HNSW cosine index — 10K chunks query in <10ms.
-- ``sentence-transformers`` local embedding (all-MiniLM-L6-v2, 384 dim).
+- ``sentence-transformers`` local BGE-M3 embedding (1024 dimensions).
 - Metadata filtering via ChromaDB ``where`` clauses.
 - ``get_related_entities`` always returns ``[]`` today — the hook exists so
   the future ``GraphEnhancedRetriever`` can populate it without touching
@@ -21,15 +21,12 @@ from typing import Any
 # sentence_transformers is imported anywhere.
 os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
-# If the embedding_model is a local directory, force offline mode to
-# prevent HuggingFace network calls (which fail in CN without a mirror).
-if os.path.isdir(
-    os.path.join(os.path.dirname(__file__), "all-MiniLM-L6-v2")
-):
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-
 from nir_core.knowledge.base import Chunk, SearchResult
+from nir_core.knowledge.retrieval_policy import (
+    RetrievalDecision,
+    RetrievalPolicy,
+    apply_retrieval_policy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +36,16 @@ class ChromaDBRetriever:
 
     def __init__(
         self,
-        db_path: str = "nir_core/knowledge/.chromadb",
-        embedding_model: str = "all-MiniLM-L6-v2",
-        collection_name: str = "nir_papers",
+        db_path: str = "nir_core/knowledge/.chromadb-bge-m3",
+        embedding_model: str = "BAAI/bge-m3",
+        collection_name: str = "nir_papers_bge_m3",
+        retrieval_policy: RetrievalPolicy | None = None,
     ) -> None:
+        # Local embedding directories must not trigger HuggingFace lookups.
+        if os.path.isdir(embedding_model):
+            os.environ.setdefault("HF_HUB_OFFLINE", "1")
+            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
         # Lazy imports so importing this module doesn't drag in the heavy
         # chromadb / sentence-transformers stack unless actually used.
         import chromadb
@@ -55,6 +58,7 @@ class ChromaDBRetriever:
             name=collection_name,
             metadata={"hnsw:space": "cosine"},
         )
+        self._retrieval_policy = retrieval_policy or RetrievalPolicy()
 
     # ------------------------------------------------------------------
     # search
@@ -65,10 +69,38 @@ class ChromaDBRetriever:
         query: str,
         top_k: int = 5,
         where: dict[str, Any] | None = None,
+        published_only: bool = True,
     ) -> list[SearchResult]:
-        """Semantic search. Returns up to ``top_k`` results sorted by score."""
+        """Semantic search with answerability and document-diversity policy."""
+        decision = self.search_with_diagnostics(
+            query,
+            top_k=top_k,
+            where=where,
+            published_only=published_only,
+        )
+        return list(decision.results)
+
+    def search_with_diagnostics(
+        self,
+        query: str,
+        top_k: int = 5,
+        where: dict[str, Any] | None = None,
+        published_only: bool = True,
+    ) -> RetrievalDecision:
+        """Search and return both selected evidence and policy diagnostics."""
         if self._collection.count() == 0:
-            return []
+            return apply_retrieval_policy(
+                [],
+                top_k=top_k,
+                policy=self._retrieval_policy,
+            )
+
+        effective_where = where
+        if published_only:
+            publication_filter: dict[str, Any] = {"review_status": "published"}
+            effective_where = (
+                {"$and": [publication_filter, where]} if where else publication_filter
+            )
 
         query_emb = self._model.encode([query])
         # sentence-transformers may return numpy array; coerce to list.
@@ -78,10 +110,14 @@ class ChromaDBRetriever:
         if isinstance(emb_list[0], (list, tuple)):
             emb_list = emb_list[0]
 
+        candidate_count = min(
+            self._collection.count(),
+            self._retrieval_policy.candidate_count(top_k),
+        )
         results = self._collection.query(
             query_embeddings=[emb_list],
-            n_results=top_k,
-            where=where,
+            n_results=candidate_count,
+            where=effective_where,
         )
 
         out: list[SearchResult] = []
@@ -108,7 +144,11 @@ class ChromaDBRetriever:
                     related_entities=[],
                 )
             )
-        return out
+        return apply_retrieval_policy(
+            out,
+            top_k=top_k,
+            policy=self._retrieval_policy,
+        )
 
     # ------------------------------------------------------------------
     # graph hook (no-op today)
@@ -156,6 +196,37 @@ class ChromaDBRetriever:
         )
         return len(chunks)
 
+    def replace_document(self, doc_id: str, chunks: list[Chunk]) -> int:
+        """Delete stale chunks for ``doc_id`` and upsert its current version."""
+        if not chunks:
+            return 0
+        if any(chunk.metadata.get("doc_id") != doc_id for chunk in chunks):
+            raise ValueError("all replacement chunks must belong to doc_id")
+
+        self._collection.delete(where={"doc_id": doc_id})
+        contents = [chunk.content for chunk in chunks]
+        embeddings = self._model.encode(contents)
+        embeddings_list = (
+            embeddings.tolist() if hasattr(embeddings, "tolist") else list(embeddings)
+        )
+        metadatas = [
+            _sanitise_metadata(
+                {
+                    **chunk.metadata,
+                    "source": chunk.source,
+                    "chunk_index": chunk.chunk_index,
+                }
+            )
+            for chunk in chunks
+        ]
+        self._collection.upsert(
+            ids=[chunk.id for chunk in chunks],
+            embeddings=embeddings_list,
+            documents=contents,
+            metadatas=metadatas,
+        )
+        return len(chunks)
+
     def delete_document(self, doc_id: str) -> bool:
         """Delete all chunks whose ``doc_id`` matches."""
         try:
@@ -164,6 +235,20 @@ class ChromaDBRetriever:
         except Exception as exc:  # noqa: BLE001
             logger.warning("delete_document failed for %s: %s", doc_id, exc)
             return False
+
+    def update_document_metadata(self, doc_id: str, updates: dict[str, Any]) -> bool:
+        """Apply primitive-safe metadata updates to all chunks of a document."""
+        data = self._collection.get(where={"doc_id": doc_id}, include=["metadatas"])
+        ids = data.get("ids", [])
+        if not ids:
+            return False
+        metadatas = data.get("metadatas", [])
+        updated = [
+            _sanitise_metadata({**(metadata or {}), **updates})
+            for metadata in metadatas
+        ]
+        self._collection.update(ids=ids, metadatas=updated)
+        return True
 
     def list_documents(self) -> list[dict[str, Any]]:
         """Return one entry per distinct ``doc_id`` in the collection."""
@@ -182,6 +267,9 @@ class ChromaDBRetriever:
                     "title": meta.get("title", ""),
                     "source": meta.get("source", ""),
                     "year": meta.get("year"),
+                    "review_status": meta.get("review_status", ""),
+                    "quality_tier": meta.get("quality_tier", ""),
+                    "version": meta.get("document_version", 1),
                     "chunk_count": 1,
                 }
             else:

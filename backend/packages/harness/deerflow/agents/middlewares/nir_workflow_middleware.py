@@ -86,7 +86,16 @@ def _knowledge_evidence_ids(payload: Mapping[str, Any]) -> list[str]:
     for result in results:
         identifier: Any = result if isinstance(result, str) else None
         if isinstance(result, Mapping):
-            for key in ("id", "document_id", "source", "path", "title"):
+            for key in (
+                "evidence_id",
+                "chunk_id",
+                "id",
+                "doc_id",
+                "document_id",
+                "source",
+                "path",
+                "title",
+            ):
                 if result.get(key):
                     identifier = result[key]
                     break

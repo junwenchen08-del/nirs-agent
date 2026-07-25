@@ -602,6 +602,29 @@ Content-Type: application/json
 }
 ```
 
+The response contains ranked `results` plus a `retrieval` decision object:
+
+```json
+{
+  "results": [],
+  "count": 0,
+  "query": "unrelated query",
+  "retrieval": {
+    "abstained": true,
+    "reason": "below_weak_score",
+    "candidate_count": 20,
+    "result_count": 0,
+    "top_score": 0.51,
+    "runner_up_document_score": 0.49,
+    "document_margin": 0.02
+  }
+}
+```
+
+An abstained response intentionally withholds weak or cross-document-ambiguous
+vector neighbors. Retrieval-policy tuning does not require rebuilding the
+embedding index.
+
 #### Upload Knowledge Document
 
 ```http
@@ -613,6 +636,16 @@ Content-Type: multipart/form-data
 - `file`: One PDF, DOCX, TXT, Markdown, HTML, or CSV file.
 - `title` (optional): Display title stored with document chunks.
 - `year` (optional): Publication year metadata.
+- `authors` (optional, repeated field): Author names.
+- `doi` (optional): Preferred stable source identifier.
+- `source_type` (optional): For example `journal`, `standard`, or `internal_document`.
+- `domains` (optional, repeated field): Domain tags such as `soil` or `pharma`.
+- `quality_tier` (optional): `A` through `E`; defaults to `C`.
+- `review_status` (optional): `draft`, `needs_review`, `published`, or `retired`; defaults to `draft`.
+
+The response includes the stable `doc_id`, content SHA-256, version, ingestion
+action (`created`, `unchanged`, `updated`, or `duplicate`), and chunk count.
+Only `published` documents are returned by knowledge search.
 
 #### Batch Upload Knowledge Documents
 
@@ -625,6 +658,44 @@ Content-Type: multipart/form-data
 - `files`: Up to 20 supported documents.
 - `title` (optional): Shared title metadata.
 - `year` (optional): Shared year metadata.
+- `quality_tier` (optional): Shared quality tier; defaults to `C`.
+- `review_status` (optional): Shared review state; defaults to `draft`.
+
+#### Set Knowledge Document Status
+
+```http
+PATCH /api/knowledge/documents/{doc_id}/status
+Content-Type: application/json
+
+{
+  "review_status": "published"
+}
+```
+
+This explicit transition updates both the SQLite catalog and all current
+ChromaDB chunk metadata; it does not create a new content version.
+
+#### Update Knowledge Document Metadata
+
+```http
+PATCH /api/knowledge/documents/{doc_id}/metadata
+Content-Type: application/json
+
+{
+  "title": "Updated title",
+  "authors": ["Alice Zhang", "Bob Li"],
+  "year": 2025,
+  "doi": "10.1000/example",
+  "language": "zh-en",
+  "domains": ["soil", "wheat"],
+  "quality_tier": "A"
+}
+```
+
+All fields are optional, but at least one must be supplied. The endpoint
+updates the SQLite catalog and the metadata of every existing ChromaDB chunk.
+It does not reparse the source, recompute embeddings, change `doc_id`, or
+increment the content version.
 
 #### Delete Knowledge Document
 

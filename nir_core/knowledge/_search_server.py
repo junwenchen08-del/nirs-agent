@@ -17,6 +17,7 @@ Endpoints:
     POST /documents                -> {"doc_id": "...", "chunks_added": N}
          Body: {"filename": "paper.pdf", "content_b64": "...",
                 "title": "...", "year": 2023}
+    PATCH /documents/{doc_id}/metadata -> updated descriptive metadata
     DELETE /documents/{doc_id}     -> {"deleted": true, "doc_id": "..."}
 """
 
@@ -24,10 +25,8 @@ import base64
 import json
 import os
 import sys
-import tempfile
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from pathlib import Path
-from urllib.parse import urlparse, unquote
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import unquote, urlparse
 
 # Set env vars BEFORE any heavy imports
 os.environ["USE_TF"] = "0"
@@ -37,20 +36,19 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from nir_core.knowledge.chunker import chunk_document
 from nir_core.knowledge.config import get_config
-from nir_core.knowledge.entity_extractor import extract_entities
-from nir_core.knowledge.parser import parse_document
+from nir_core.knowledge.governance import DocumentRecord, KnowledgeCatalog
+from nir_core.knowledge.ingestion import ingest_document_bytes
 from nir_core.knowledge.vectorstore import ChromaDBRetriever
 
 # --- Initialize retriever (loaded once at startup) ---
 _cfg = get_config()
-_model_path = str(Path(__file__).parent / "all-MiniLM-L6-v2")
 _retriever = ChromaDBRetriever(
     db_path=_cfg.chroma_path,
-    embedding_model=_model_path,
+    embedding_model=_cfg.embedding_model,
     collection_name=_cfg.collection_name,
 )
+_catalog = KnowledgeCatalog(_cfg.catalog_path)
 
 # 20 MB upload cap (matches backend upload limit)
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -63,7 +61,8 @@ _MAX_BODY_BYTES = 60 * 1024 * 1024
 _AUTH_TOKEN = os.environ.get("NIR_KNOWLEDGE_TOKEN", "")
 
 print(f"[knowledge-server] ChromaDB: {_cfg.chroma_path}")
-print(f"[knowledge-server] Model: {_model_path}")
+print(f"[knowledge-server] Model: {_cfg.embedding_model}")
+print(f"[knowledge-server] Index: {_cfg.index_version}")
 print("[knowledge-server] Retriever initialized")
 if _AUTH_TOKEN:
     print("[knowledge-server] Auth: enabled (token from NIR_KNOWLEDGE_TOKEN)")
@@ -78,9 +77,17 @@ else:
 
 def _do_search(query: str, top_k: int = 5) -> dict:
     """Search the knowledge base and return JSON-serializable results."""
-    results = _retriever.search(query, top_k=top_k)
+    decision = _retriever.search_with_diagnostics(query, top_k=top_k)
+    results = list(decision.results)
+    retrieval = decision.diagnostics()
     if not results:
-        return {"results": [], "count": 0, "query": query, "error": None}
+        return {
+            "results": [],
+            "count": 0,
+            "query": query,
+            "retrieval": retrieval,
+            "error": None,
+        }
 
     output = []
     for r in results:
@@ -100,9 +107,22 @@ def _do_search(query: str, top_k: int = 5) -> dict:
 
         output.append(
             {
+                "evidence_id": r.chunk.id,
+                "chunk_id": r.chunk.id,
+                "doc_id": meta.get("doc_id", ""),
                 "content": r.chunk.content[:1000],
                 "source": r.chunk.source,
                 "score": round(r.score, 4),
+                "title": meta.get("title", ""),
+                "authors": _load("authors"),
+                "year": meta.get("year"),
+                "doi": meta.get("doi", ""),
+                "section_path": _load("section_path"),
+                "page_start": meta.get("page_start"),
+                "page_end": meta.get("page_end"),
+                "quality_tier": meta.get("quality_tier", ""),
+                "review_status": meta.get("review_status", ""),
+                "content_trust": meta.get("content_trust", "untrusted_evidence"),
                 "entities": {
                     "methods": _load("methods"),
                     "models": _load("models"),
@@ -113,37 +133,42 @@ def _do_search(query: str, top_k: int = 5) -> dict:
             }
         )
 
-    return {"results": output, "count": len(output), "query": query, "error": None}
+    return {
+        "results": output,
+        "count": len(output),
+        "query": query,
+        "retrieval": retrieval,
+        "error": None,
+    }
 
 
 def _do_list_documents() -> dict:
     """List all documents in the knowledge base."""
-    docs = _retriever.list_documents()
-    # Normalise keys for JSON output
-    out = []
-    for d in docs:
-        out.append(
-            {
-                "doc_id": d.get("doc_id", ""),
-                "title": d.get("title", "") or d.get("doc_id", ""),
-                "source": d.get("source", ""),
-                "year": d.get("year"),
-                "chunk_count": d.get("chunk_count", 0),
-            }
-        )
+    chunk_counts = {
+        document.get("doc_id", ""): document.get("chunk_count", 0)
+        for document in _retriever.list_documents()
+    }
+    out = [
+        {
+            **record.model_dump(),
+            "chunk_count": chunk_counts.get(record.doc_id, 0),
+        }
+        for record in _catalog.list()
+    ]
     return {"documents": out, "count": len(out), "error": None}
 
 
 def _do_stats() -> dict:
     """Return knowledge base statistics."""
-    docs = _retriever.list_documents()
-    total_chunks = sum(d.get("chunk_count", 0) for d in docs)
+    vector_docs = _retriever.list_documents()
+    total_chunks = sum(d.get("chunk_count", 0) for d in vector_docs)
     return {
-        "documents": len(docs),
+        "documents": len(_catalog.list()),
         "total_chunks": total_chunks,
         "db_path": _cfg.chroma_path,
         "embedding_model": _cfg.embedding_model,
         "collection_name": _cfg.collection_name,
+        "index_version": _cfg.index_version,
         "error": None,
     }
 
@@ -153,6 +178,12 @@ def _do_add_document(
     content_b64: str,
     title: str | None = None,
     year: int | None = None,
+    authors: list[str] | None = None,
+    doi: str | None = None,
+    source_type: str | None = None,
+    domains: list[str] | None = None,
+    quality_tier: str = "C",
+    review_status: str = "draft",
 ) -> dict:
     """Parse, chunk, extract entities, and add a document to the KB.
 
@@ -175,64 +206,122 @@ def _do_add_document(
             "chunks_added": 0,
         }
 
-    doc_id = Path(filename).stem
-    suffix = Path(filename).suffix.lower()
-
-    # Write to temp file so parser can sniff the format by extension.
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(raw)
-        tmp_path = tmp.name
-
     try:
-        markdown = parse_document(tmp_path)
-        chunks = chunk_document(
-            markdown,
-            source=filename,
-            strategy=_cfg.chunk_strategy,
+        result = ingest_document_bytes(
+            filename=filename,
+            content=raw,
+            retriever=_retriever,
+            catalog=_catalog,
+            title=title,
+            authors=authors,
+            year=year,
+            doi=doi,
+            source_type=source_type,
+            domains=domains,
+            quality_tier=quality_tier,
+            review_status=review_status,
+            chunk_strategy=_cfg.chunk_strategy,
             max_tokens=_cfg.chunk_max_tokens,
-            doc_id=doc_id,
+            overlap_percent=_cfg.chunk_overlap,
+            index_version=_cfg.index_version,
         )
-        entities = extract_entities(markdown)
-        for chunk in chunks:
-            chunk.metadata.update(
-                {
-                    "title": title or doc_id,
-                    "year": year,
-                    **entities,
-                }
-            )
-        count = _retriever.add_documents(chunks)
         return {
-            "doc_id": doc_id,
-            "chunks_added": count,
-            "title": title or doc_id,
-            "methods": entities.get("methods", []),
-            "models": entities.get("models", []),
-            "datasets": entities.get("datasets", []),
-            "metrics": entities.get("metrics", []),
+            **result.record.model_dump(),
+            "action": result.action,
+            "chunks_added": result.chunks_added,
             "error": None,
         }
     except Exception as exc:  # noqa: BLE001
         return {
             "error": f"{type(exc).__name__}: {exc}",
-            "doc_id": doc_id,
+            "doc_id": None,
             "chunks_added": 0,
         }
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
 
 
 def _do_delete_document(doc_id: str) -> dict:
     """Delete all chunks belonging to ``doc_id``."""
-    success = _retriever.delete_document(doc_id)
+    vector_deleted = _retriever.delete_document(doc_id)
+    catalog_deleted = _catalog.delete(doc_id)
+    success = vector_deleted or catalog_deleted
     return {
         "deleted": success,
         "doc_id": doc_id,
         "error": None if success else "delete failed",
     }
+
+
+def _do_set_review_status(doc_id: str, review_status: str) -> dict:
+    if review_status not in {"draft", "needs_review", "published", "retired"}:
+        return {"error": f"Invalid review_status: {review_status}"}
+    record = _catalog.get(doc_id)
+    if record is None:
+        return {"error": "Document not found", "doc_id": doc_id}
+    if not _retriever.update_document_metadata(
+        doc_id, {"review_status": review_status}
+    ):
+        return {"error": "Vector chunks not found", "doc_id": doc_id}
+    updated = _catalog.set_review_status(doc_id, review_status)
+    return {"error": None, **updated.model_dump()}
+
+
+_EDITABLE_METADATA_FIELDS = {
+    "title",
+    "authors",
+    "year",
+    "doi",
+    "language",
+    "domains",
+    "quality_tier",
+}
+
+
+def _metadata_for_vectors(record: DocumentRecord) -> dict:
+    return {
+        "title": record.title,
+        "authors": record.authors,
+        "year": record.year,
+        "doi": record.doi,
+        "language": record.language,
+        "domains": record.domains,
+        "quality_tier": record.quality_tier,
+    }
+
+
+def _do_update_document_metadata(doc_id: str, updates: dict) -> dict:
+    """Update catalog and chunk metadata without re-embedding content."""
+    unsupported = sorted(set(updates) - _EDITABLE_METADATA_FIELDS)
+    if unsupported:
+        return {
+            "error": f"Unsupported metadata fields: {', '.join(unsupported)}",
+            "doc_id": doc_id,
+        }
+    if not updates:
+        return {"error": "No metadata fields supplied", "doc_id": doc_id}
+
+    existing = _catalog.get(doc_id)
+    if existing is None:
+        return {"error": "Document not found", "doc_id": doc_id}
+
+    try:
+        candidate = DocumentRecord.model_validate({**existing.model_dump(), **updates})
+    except ValueError as exc:
+        return {"error": str(exc), "doc_id": doc_id}
+
+    if not _retriever.update_document_metadata(
+        doc_id, _metadata_for_vectors(candidate)
+    ):
+        return {"error": "Vector chunks not found", "doc_id": doc_id}
+
+    try:
+        updated = _catalog.update_metadata(doc_id, updates)
+    except ValueError as exc:
+        _retriever.update_document_metadata(doc_id, _metadata_for_vectors(existing))
+        return {"error": str(exc), "doc_id": doc_id}
+    if updated is None:
+        _retriever.update_document_metadata(doc_id, _metadata_for_vectors(existing))
+        return {"error": "Document not found", "doc_id": doc_id}
+    return {"error": None, **updated.model_dump()}
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +426,19 @@ class _Handler(BaseHTTPRequestHandler):
                 year = int(year)
             try:
                 self._send_json(
-                    200, _do_add_document(filename, content_b64, title, year)
+                    200,
+                    _do_add_document(
+                        filename,
+                        content_b64,
+                        title,
+                        year,
+                        authors=req.get("authors"),
+                        doi=req.get("doi"),
+                        source_type=req.get("source_type"),
+                        domains=req.get("domains"),
+                        quality_tier=req.get("quality_tier", "C"),
+                        review_status=req.get("review_status", "draft"),
+                    ),
                 )
             except Exception as exc:  # noqa: BLE001
                 self._send_json(
@@ -350,6 +451,33 @@ class _Handler(BaseHTTPRequestHandler):
                 )
             return
 
+        self._send_json(404, {"error": "Not found"})
+
+    def do_PATCH(self) -> None:
+        if not self._check_auth():
+            self._send_json(401, {"error": "Unauthorized"})
+            return
+        path = urlparse(self.path).path
+        if path.startswith("/documents/") and path.endswith("/status"):
+            encoded_doc_id = path[len("/documents/") : -len("/status")].rstrip("/")
+            doc_id = unquote(encoded_doc_id)
+            req = self._read_json_body()
+            if not doc_id or req is None or not req.get("review_status"):
+                self._send_json(400, {"error": "Missing doc_id or review_status"})
+                return
+            result = _do_set_review_status(doc_id, req["review_status"])
+            self._send_json(400 if result.get("error") else 200, result)
+            return
+        if path.startswith("/documents/") and path.endswith("/metadata"):
+            encoded_doc_id = path[len("/documents/") : -len("/metadata")].rstrip("/")
+            doc_id = unquote(encoded_doc_id)
+            req = self._read_json_body()
+            if not doc_id or req is None:
+                self._send_json(400, {"error": "Missing doc_id or metadata body"})
+                return
+            result = _do_update_document_metadata(doc_id, req)
+            self._send_json(400 if result.get("error") else 200, result)
+            return
         self._send_json(404, {"error": "Not found"})
 
     def do_DELETE(self) -> None:

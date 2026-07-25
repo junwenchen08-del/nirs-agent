@@ -291,9 +291,7 @@ def test_active_nir_workflow_allows_non_script_artifact_write() -> None:
         ("/mnt/user-data/workspace/utils.py", "def helper():\n    return 42\n"),
     ],
 )
-def test_active_nir_workflow_allows_legitimate_python_module_files(
-    path: str, content: str
-) -> None:
+def test_active_nir_workflow_allows_legitimate_python_module_files(path: str, content: str) -> None:
     """Regression: script-suffix alone must NOT block legitimate Python module
     files. Only script suffix AND analysis-style imports should be blocked."""
     middleware = NIRWorkflowMiddleware()
@@ -598,6 +596,23 @@ def test_knowledge_task_completes_after_successful_search() -> None:
     assert isinstance(result, Command)
     assert result.update["nir_workflow"]["stage"] == "completed"
     assert result.update["nir_workflow"]["next_action"] == "none"
+
+
+def test_knowledge_evidence_prefers_stable_evidence_id() -> None:
+    from deerflow.agents.middlewares.nir_workflow_middleware import (
+        _knowledge_evidence_ids,
+    )
+
+    assert _knowledge_evidence_ids(
+        {
+            "results": [
+                {
+                    "evidence_id": "doi:10.1000/paper#cjk-section-v2-0001",
+                    "source": "renamable-file.pdf",
+                }
+            ]
+        }
+    ) == ["doi:10.1000/paper#cjk-section-v2-0001"]
 
 
 def test_successful_registration_automatically_enters_registered_stage() -> None:

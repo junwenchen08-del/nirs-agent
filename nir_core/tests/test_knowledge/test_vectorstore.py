@@ -33,14 +33,17 @@ for _mod in ("chromadb", "sentence_transformers"):
     except Exception as exc:  # noqa: BLE001 — catch binary-incompat errors too
         pytest.skip(f"{_mod} not available: {exc}", allow_module_level=True)
 
-from nir_core.knowledge.base import Chunk
-from nir_core.knowledge.vectorstore import ChromaDBRetriever
+from nir_core.knowledge.base import Chunk  # noqa: E402
+from nir_core.knowledge.config import get_config  # noqa: E402
+from nir_core.knowledge.vectorstore import ChromaDBRetriever  # noqa: E402
 
 # Use the local model path (avoids HuggingFace network dependency).
-_LOCAL_MODEL = os.path.join(
-    os.path.dirname(__file__), "..", "..", "knowledge", "all-MiniLM-L6-v2"
-)
-_LOCAL_MODEL = os.path.normpath(_LOCAL_MODEL)
+_LOCAL_MODEL = get_config().embedding_model
+if not os.path.isdir(_LOCAL_MODEL):
+    pytest.skip(
+        f"local BGE-M3 model not found: {_LOCAL_MODEL}",
+        allow_module_level=True,
+    )
 
 
 @pytest.fixture
@@ -67,6 +70,7 @@ def _make_chunks() -> list[Chunk]:
                 "title": "Soil Analysis",
                 "methods": ["snv"],
                 "datasets": ["soil"],
+                "review_status": "published",
             },
         ),
         Chunk(
@@ -81,6 +85,7 @@ def _make_chunks() -> list[Chunk]:
                 "models": ["pls"],
                 "metrics": ["r2"],
                 "datasets": ["corn"],
+                "review_status": "published",
             },
         ),
     ]
@@ -139,3 +144,58 @@ def test_score_in_range(retriever: ChromaDBRetriever) -> None:
     results = retriever.search("NIR spectroscopy", top_k=2)
     for r in results:
         assert 0.0 <= r.score <= 1.0
+
+
+def test_search_excludes_unpublished_documents_by_default(
+    retriever: ChromaDBRetriever,
+) -> None:
+    chunks = _make_chunks()
+    chunks[0].metadata["review_status"] = "draft"
+    retriever.add_documents(chunks)
+
+    published = retriever.search("SNV soil", top_k=2)
+    all_statuses = retriever.search("SNV soil", top_k=2, published_only=False)
+
+    assert all(
+        result.chunk.metadata.get("review_status") == "published"
+        for result in published
+    )
+    assert any(
+        result.chunk.metadata.get("review_status") == "draft" for result in all_statuses
+    )
+
+
+def test_replace_document_removes_stale_chunks(retriever: ChromaDBRetriever) -> None:
+    chunks = _make_chunks()
+    chunks.append(
+        Chunk(
+            id="paper1_chunk_1",
+            content="Old second chunk.",
+            source="soil_paper.pdf",
+            chunk_index=1,
+            metadata={"doc_id": "paper1", "review_status": "published"},
+        )
+    )
+    retriever.add_documents(chunks)
+
+    replacement = _make_chunks()[0]
+    replacement.content = "Updated soil paper."
+    assert retriever.replace_document("paper1", [replacement]) == 1
+
+    paper1 = [doc for doc in retriever.list_documents() if doc["doc_id"] == "paper1"]
+    assert paper1[0]["chunk_count"] == 1
+
+
+def test_update_document_metadata_can_publish_draft(
+    retriever: ChromaDBRetriever,
+) -> None:
+    chunk = _make_chunks()[0]
+    chunk.metadata["review_status"] = "draft"
+    retriever.add_documents([chunk])
+
+    assert retriever.search("SNV soil") == []
+    assert (
+        retriever.update_document_metadata("paper1", {"review_status": "published"})
+        is True
+    )
+    assert retriever.search("SNV soil")

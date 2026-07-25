@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  CheckIcon,
   FileIcon,
   Loader2Icon,
+  PencilIcon,
   RefreshCwIcon,
   SearchIcon,
   Trash2Icon,
@@ -24,10 +26,26 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetch } from "@/core/api/fetcher";
 import { getBackendBaseURL } from "@/core/config";
 import { useI18n } from "@/core/i18n/hooks";
+import {
+  type KnowledgeDocumentMetadata,
+  type KnowledgeMetadataResult,
+  type KnowledgeQualityTier,
+  type KnowledgeReviewStatus,
+  setKnowledgeDocumentStatus,
+  updateKnowledgeDocumentMetadata,
+  uploadKnowledgeDocumentsSequentially,
+} from "@/core/knowledge/api";
 
 import { SettingsSection } from "./settings-section";
 
@@ -41,6 +59,12 @@ interface KnowledgeDocument {
   source: string;
   year: number | null;
   chunk_count: number;
+  review_status: KnowledgeReviewStatus;
+  authors: string[];
+  doi: string | null;
+  language: string;
+  domains: string[];
+  quality_tier: KnowledgeQualityTier;
 }
 
 interface KnowledgeStats {
@@ -59,6 +83,21 @@ interface KnowledgeSearchResult {
     metrics: string[];
   };
   related_entities: string[];
+}
+
+interface KnowledgeRetrievalDiagnostics {
+  abstained: boolean;
+  reason: string;
+  candidate_count: number;
+  result_count: number;
+  top_score: number | null;
+  runner_up_document_score: number | null;
+  document_margin: number | null;
+}
+
+interface KnowledgeSearchResponse {
+  results: KnowledgeSearchResult[];
+  retrieval: KnowledgeRetrievalDiagnostics | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,35 +139,6 @@ async function apiGetStats(): Promise<KnowledgeStats> {
   };
 }
 
-interface BatchUploadResult {
-  filename: string;
-  success: boolean;
-  chunks_added?: number;
-  doc_id?: string;
-  error?: string;
-}
-
-async function apiUploadDocumentsBatch(
-  files: File[],
-  title: string,
-  year: string,
-): Promise<BatchUploadResult[]> {
-  const form = new FormData();
-  for (const f of files) {
-    form.append("files", f, f.name);
-  }
-  if (title) form.append("title", title);
-  if (year) form.append("year", year);
-
-  const resp = await fetch(
-    `${getBackendBaseURL()}/api/knowledge/documents/batch`,
-    { method: "POST", body: form },
-  );
-  if (!resp.ok) throw new Error(await readErrorDetail(resp));
-  const json = await resp.json();
-  return json.results as BatchUploadResult[];
-}
-
 async function apiDeleteDocument(docId: string): Promise<void> {
   const encoded = encodeURIComponent(docId);
   const resp = await fetch(
@@ -141,7 +151,7 @@ async function apiDeleteDocument(docId: string): Promise<void> {
 async function apiSearch(
   query: string,
   topK = 5,
-): Promise<KnowledgeSearchResult[]> {
+): Promise<KnowledgeSearchResponse> {
   const resp = await fetch(`${getBackendBaseURL()}/api/knowledge/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -149,7 +159,11 @@ async function apiSearch(
   });
   if (!resp.ok) throw new Error(await readErrorDetail(resp));
   const json = await resp.json();
-  return json.results as KnowledgeSearchResult[];
+  return {
+    results: json.results as KnowledgeSearchResult[],
+    retrieval:
+      (json.retrieval as KnowledgeRetrievalDiagnostics | undefined) ?? null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +181,8 @@ export function KnowledgeSettingsPage() {
   const [deleteTarget, setDeleteTarget] = useState<KnowledgeDocument | null>(
     null,
   );
+  const [publishingDocId, setPublishingDocId] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<KnowledgeDocument | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -222,6 +238,57 @@ export function KnowledgeSettingsPage() {
       t.settings.knowledge.deleteSuccess,
       t.settings.knowledge.deleteFailed,
     ],
+  );
+
+  const handlePublish = useCallback(
+    async (doc: KnowledgeDocument) => {
+      setPublishingDocId(doc.doc_id);
+      try {
+        const updated = await setKnowledgeDocumentStatus(
+          doc.doc_id,
+          "published",
+        );
+        setDocuments((current) =>
+          current.map((item) =>
+            item.doc_id === updated.doc_id
+              ? { ...item, review_status: updated.review_status }
+              : item,
+          ),
+        );
+        toast.success(
+          t.settings.knowledge.publishSuccess.replace(
+            "{title}",
+            doc.title || doc.doc_id,
+          ),
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        toast.error(
+          t.settings.knowledge.publishFailed.replace("{message}", msg),
+        );
+      } finally {
+        setPublishingDocId(null);
+      }
+    },
+    [t.settings.knowledge.publishFailed, t.settings.knowledge.publishSuccess],
+  );
+
+  const handleMetadataSaved = useCallback(
+    (updated: KnowledgeMetadataResult) => {
+      setDocuments((current) =>
+        current.map((item) =>
+          item.doc_id === updated.doc_id ? { ...item, ...updated } : item,
+        ),
+      );
+      setEditTarget(null);
+      toast.success(
+        t.settings.knowledge.metadataUpdateSuccess.replace(
+          "{title}",
+          updated.title || updated.doc_id,
+        ),
+      );
+    },
+    [t.settings.knowledge.metadataUpdateSuccess],
   );
 
   return (
@@ -293,6 +360,9 @@ export function KnowledgeSettingsPage() {
           <DocumentTable
             documents={documents}
             onDelete={(doc) => setDeleteTarget(doc)}
+            onEdit={setEditTarget}
+            onPublish={(doc) => void handlePublish(doc)}
+            publishingDocId={publishingDocId}
           />
         )}
 
@@ -305,6 +375,15 @@ export function KnowledgeSettingsPage() {
           onOpenChange={setUploadOpen}
           onSuccess={handleUploadSuccess}
         />
+
+        {editTarget && (
+          <EditMetadataDialog
+            key={editTarget.doc_id}
+            document={editTarget}
+            onClose={() => setEditTarget(null)}
+            onSaved={handleMetadataSaved}
+          />
+        )}
 
         {/* Delete confirm dialog */}
         <Dialog
@@ -384,14 +463,36 @@ function StatCard({
 function DocumentTable({
   documents,
   onDelete,
+  onEdit,
+  onPublish,
+  publishingDocId,
 }: {
   documents: KnowledgeDocument[];
   onDelete: (doc: KnowledgeDocument) => void;
+  onEdit: (doc: KnowledgeDocument) => void;
+  onPublish: (doc: KnowledgeDocument) => void;
+  publishingDocId: string | null;
 }) {
   const { t } = useI18n();
+  const statusLabels: Record<KnowledgeReviewStatus, string> = {
+    draft: t.settings.knowledge.statusDraft,
+    needs_review: t.settings.knowledge.statusNeedsReview,
+    published: t.settings.knowledge.statusPublished,
+    retired: t.settings.knowledge.statusRetired,
+  };
+  const statusVariants: Record<
+    KnowledgeReviewStatus,
+    "default" | "secondary" | "destructive" | "outline"
+  > = {
+    draft: "secondary",
+    needs_review: "outline",
+    published: "default",
+    retired: "destructive",
+  };
+
   return (
-    <div className="overflow-hidden rounded-lg border">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto rounded-lg border">
+      <table className="w-full min-w-[860px] text-sm">
         <thead className="bg-muted/50">
           <tr>
             <th className="px-3 py-2 text-left font-medium">
@@ -402,6 +503,9 @@ function DocumentTable({
             </th>
             <th className="px-3 py-2 text-left font-medium">
               {t.settings.knowledge.columnChunks}
+            </th>
+            <th className="px-3 py-2 text-left font-medium">
+              {t.settings.knowledge.columnStatus}
             </th>
             <th className="px-3 py-2 text-right font-medium">
               {t.settings.knowledge.columnActions}
@@ -428,19 +532,266 @@ function DocumentTable({
                 {doc.year ?? t.settings.knowledge.noYear}
               </td>
               <td className="px-3 py-2">{doc.chunk_count}</td>
+              <td className="px-3 py-2">
+                <Badge variant={statusVariants[doc.review_status]}>
+                  {statusLabels[doc.review_status]}
+                </Badge>
+              </td>
               <td className="px-3 py-2 text-right">
-                <Button variant="ghost" size="sm" onClick={() => onDelete(doc)}>
-                  <Trash2Icon className="size-4" />
-                  <span className="sr-only">
-                    {t.settings.knowledge.deleteButton}
-                  </span>
-                </Button>
+                <div className="flex justify-end gap-1">
+                  {doc.review_status !== "published" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onPublish(doc)}
+                      disabled={publishingDocId !== null}
+                    >
+                      {publishingDocId === doc.doc_id ? (
+                        <Loader2Icon className="size-4 animate-spin" />
+                      ) : (
+                        <CheckIcon className="size-4" />
+                      )}
+                      {publishingDocId === doc.doc_id
+                        ? t.settings.knowledge.publishingButton
+                        : t.settings.knowledge.publishButton}
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onEdit(doc)}
+                    disabled={publishingDocId !== null}
+                  >
+                    <PencilIcon className="size-4" />
+                    {t.settings.knowledge.editButton}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onDelete(doc)}
+                    disabled={publishingDocId === doc.doc_id}
+                  >
+                    <Trash2Icon className="size-4" />
+                    <span className="sr-only">
+                      {t.settings.knowledge.deleteButton}
+                    </span>
+                  </Button>
+                </div>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Metadata dialog
+// ---------------------------------------------------------------------------
+
+function parseMetadataList(value: string): string[] {
+  return [
+    ...new Set(
+      value
+        .split(/[,;，；\n]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function EditMetadataDialog({
+  document,
+  onClose,
+  onSaved,
+}: {
+  document: KnowledgeDocument;
+  onClose: () => void;
+  onSaved: (updated: KnowledgeMetadataResult) => void;
+}) {
+  const { t } = useI18n();
+  const [title, setTitle] = useState(document.title);
+  const [authors, setAuthors] = useState(document.authors.join(", "));
+  const [year, setYear] = useState(
+    document.year === null ? "" : String(document.year),
+  );
+  const [doi, setDoi] = useState(document.doi ?? "");
+  const [language, setLanguage] = useState(document.language);
+  const [domains, setDomains] = useState(document.domains.join(", "));
+  const [qualityTier, setQualityTier] = useState<KnowledgeQualityTier>(
+    document.quality_tier,
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    const parsedYear = year.trim() ? Number(year) : null;
+    if (
+      parsedYear !== null &&
+      (!Number.isInteger(parsedYear) || parsedYear < 1000 || parsedYear > 2100)
+    ) {
+      setError(t.settings.knowledge.invalidYear);
+      return;
+    }
+
+    const metadata: KnowledgeDocumentMetadata = {
+      title: title.trim(),
+      authors: parseMetadataList(authors),
+      year: parsedYear,
+      doi: doi.trim() || null,
+      language: language.trim() || "und",
+      domains: parseMetadataList(domains),
+      quality_tier: qualityTier,
+    };
+
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await updateKnowledgeDocumentMetadata(
+        document.doc_id,
+        metadata,
+      );
+      onSaved(updated);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      toast.error(
+        t.settings.knowledge.metadataUpdateFailed.replace("{message}", message),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t.settings.knowledge.editMetadataTitle}</DialogTitle>
+          <DialogDescription>
+            {t.settings.knowledge.editMetadataDescription}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4 py-2 sm:grid-cols-2">
+          <div className="space-y-1 sm:col-span-2">
+            <label className="text-sm font-medium">
+              {t.settings.knowledge.titleLabel}
+            </label>
+            <Input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              disabled={saving}
+            />
+          </div>
+
+          <div className="space-y-1 sm:col-span-2">
+            <label className="text-sm font-medium">
+              {t.settings.knowledge.authorsLabel}
+            </label>
+            <Input
+              value={authors}
+              onChange={(event) => setAuthors(event.target.value)}
+              placeholder={t.settings.knowledge.authorsPlaceholder}
+              disabled={saving}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium">
+              {t.settings.knowledge.yearLabel}
+            </label>
+            <Input
+              type="number"
+              min={1000}
+              max={2100}
+              value={year}
+              onChange={(event) => setYear(event.target.value)}
+              disabled={saving}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium">
+              {t.settings.knowledge.qualityTierLabel}
+            </label>
+            <Select
+              value={qualityTier}
+              onValueChange={(value) =>
+                setQualityTier(value as KnowledgeQualityTier)
+              }
+              disabled={saving}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(["A", "B", "C", "D", "E"] as const).map((tier) => (
+                  <SelectItem key={tier} value={tier}>
+                    {tier}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1 sm:col-span-2">
+            <label className="text-sm font-medium">
+              {t.settings.knowledge.doiLabel}
+            </label>
+            <Input
+              value={doi}
+              onChange={(event) => setDoi(event.target.value)}
+              placeholder={t.settings.knowledge.doiPlaceholder}
+              disabled={saving}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium">
+              {t.settings.knowledge.languageLabel}
+            </label>
+            <Input
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+              placeholder={t.settings.knowledge.languagePlaceholder}
+              disabled={saving}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium">
+              {t.settings.knowledge.domainsLabel}
+            </label>
+            <Input
+              value={domains}
+              onChange={(event) => setDomains(event.target.value)}
+              placeholder={t.settings.knowledge.domainsPlaceholder}
+              disabled={saving}
+            />
+          </div>
+        </div>
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            {t.common.cancel}
+          </Button>
+          <Button onClick={() => void handleSave()} disabled={saving}>
+            {saving && <Loader2Icon className="size-4 animate-spin" />}
+            {saving
+              ? t.settings.knowledge.savingMetadataButton
+              : t.settings.knowledge.saveMetadataButton}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -533,7 +884,11 @@ function UploadDialog({
     setUploading(true);
     setError(null);
     try {
-      const results = await apiUploadDocumentsBatch(files, title, year);
+      const results = await uploadKnowledgeDocumentsSequentially(
+        files,
+        title,
+        year,
+      );
       const totalChunks = results
         .filter((r) => r.success)
         .reduce((sum, r) => sum + (r.chunks_added ?? 0), 0);
@@ -713,11 +1068,13 @@ function UploadDialog({
 function SearchTest({
   onSearch,
 }: {
-  onSearch: (query: string, topK?: number) => Promise<KnowledgeSearchResult[]>;
+  onSearch: (query: string, topK?: number) => Promise<KnowledgeSearchResponse>;
 }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<KnowledgeSearchResult[] | null>(null);
+  const [retrieval, setRetrieval] =
+    useState<KnowledgeRetrievalDiagnostics | null>(null);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -726,12 +1083,14 @@ function SearchTest({
     setSearching(true);
     setError(null);
     try {
-      const r = await onSearch(query.trim(), 5);
-      setResults(r);
+      const response = await onSearch(query.trim(), 5);
+      setResults(response.results);
+      setRetrieval(response.retrieval);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
       setResults(null);
+      setRetrieval(null);
     } finally {
       setSearching(false);
     }
@@ -743,6 +1102,13 @@ function SearchTest({
       void handleSearch();
     }
   };
+
+  const abstentionReason =
+    retrieval?.reason === "below_weak_score"
+      ? t.settings.knowledge.searchReasonLowScore
+      : retrieval?.reason === "ambiguous_across_documents"
+        ? t.settings.knowledge.searchReasonAmbiguous
+        : t.settings.knowledge.searchReasonNoCandidates;
 
   return (
     <div className="space-y-3 border-t pt-6">
@@ -778,7 +1144,22 @@ function SearchTest({
         </Alert>
       )}
 
-      {results?.length === 0 && (
+      {results?.length === 0 && retrieval?.abstained && (
+        <Alert>
+          <AlertDescription>
+            {t.settings.knowledge.searchAbstained} {abstentionReason}
+            {retrieval.top_score !== null && (
+              <>
+                {" "}
+                {t.settings.knowledge.searchTopScore}:{" "}
+                {retrieval.top_score.toFixed(4)}
+              </>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {results?.length === 0 && !retrieval?.abstained && (
         <div className="text-muted-foreground text-sm">
           {t.settings.knowledge.searchEmpty}
         </div>

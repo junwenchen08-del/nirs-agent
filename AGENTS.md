@@ -112,14 +112,24 @@ require HMAC signing with `NIR_ARTIFACT_SIGNING_KEY` and
 `NIR_REQUIRE_SIGNED_ARTIFACTS=1`. Version-3 single-target and multi-target
 artifacts persist a training-only PCA T²/Q monitoring reference so prediction
 reports actual applicability-domain drift rather than self-reference distance.
+Every `nir_predict` attempt appends a privacy-minimized event to the locked,
+fsynced SHA-256 chain at
+`/mnt/user-data/outputs/prediction-audit.jsonl`; raw spectra and row-level
+predictions are excluded, and audit persistence failures fail closed.
+Available training-reference drift results also update an atomic model-hash
+scoped state file. The default hysteresis policy starts an alert after three
+consecutive batches at or above 0.50 drift and records recovery after two
+consecutive batches at or below 0.10. Alert/recovery transitions are appended
+once to a separate tamper-evident chain and surfaced in `nir_predict` results;
+monitor failures remain explicit without invalidating completed inference.
 Model registration uses locked atomic JSON replacement and records separate
 training-data and artifact SHA-256 hashes. Production quality gates do not
 relax for small samples, and significant bias prevents passage.
 `backend/tests/test_nir_end_to_end_regression.py` is the deployable-lifecycle
 regression anchor: real CSV normalization, leakage-safe inline preprocessing,
 training, approved registration, verified reload, prediction, training-domain
-drift detection, and tamper rejection run in one test with only virtual-path
-resolution mocked.
+drift detection, continuous-alert transition, prediction-audit chaining, and
+tamper rejection run in one test with only virtual-path resolution mocked.
 Pushes to `Duan` run the focused NIR release gate in
 `.github/workflows/nir-release-gate.yml`; Gitee-native repositories use the
 matching `.workflow/NIRPipeline.yml` after Gitee Go is enabled for the repo.
@@ -146,6 +156,34 @@ selection: PLS is the baseline, while Ridge, SVR, and Extra Trees are added only
 when dimensionality, tuning quality, sample count, and runtime caps justify
 them. An alternative must materially improve tuning RMSE; the final holdout is
 never used to choose the model family.
+
+The NIR retrieval knowledge base keeps vectors in ChromaDB and document
+governance in a lightweight SQLite catalog. Governed ingestion derives stable
+document IDs from DOI, normalized bibliography, or source SHA-256; content
+hashes make imports idempotent and stable-source updates replace stale chunks
+while incrementing the document version. `cjk-section-v2` applies a CJK-aware
+budget and records section path, PDF pages, neighboring chunk IDs, chunker
+version, and index version. Search is publication-gated (`published` only), and
+evidence returned to the workflow carries stable chunk IDs plus an
+`untrusted_evidence` marker. CLI and Gateway uploads default to `draft`; use the
+explicit status transition before documents become agent-searchable. Local
+embedding deployments are configured with `NIR_KNOWLEDGE_*` environment
+variables. Model or dimension changes must use an isolated ChromaDB path and
+index version; the current local candidate is BGE-M3 at 1024 dimensions.
+Knowledge uploads use a 600-second timeout in both Gateway and Nginx because
+CPU parsing and embedding of large PDFs can exceed the default proxy timeout.
+The knowledge settings UI can publish documents and edit descriptive metadata;
+metadata changes are synchronized to both the SQLite catalog and existing
+ChromaDB chunks without changing document identity or content version.
+The current four-document BGE-M3 retrieval benchmark is versioned in
+`nir_core/knowledge/retrieval_eval_cases.bge-m3.v1.json` with its measured
+raw and policy-v1 baselines beside it; keep negative and cross-document cases
+when extending it.
+Production search over-fetches candidates, caps chunks per document, and
+applies the calibrated strong/weak score plus cross-document-margin policy in
+`nir_core.knowledge.retrieval_policy`. The `/search` response exposes the
+decision diagnostics. `NIR_KNOWLEDGE_RETRIEVAL_*` tuning does not require an
+index rebuild, but every change must be rerun against the versioned benchmark.
 
 Rule of thumb: **root `make` = the full application**; **`backend/Makefile` and `frontend/`
 (`pnpm`) = per-module work.**

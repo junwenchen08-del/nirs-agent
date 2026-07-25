@@ -9,14 +9,96 @@ from __future__ import annotations
 
 import json
 import os
+import time
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated
 
 import numpy as np
 from langchain.tools import InjectedToolCallId, tool
+from nir_core.io.resources import ResourceLimitError
 
+from deerflow.runtime.user_context import resolve_runtime_user_id
 from deerflow.tools.types import Runtime
 
-from ._common import _err, _load_npz_safely, _load_trusted_model_artifact, _ok, _resolve
+from ._common import (
+    _err,
+    _load_npz_safely,
+    _load_trusted_model_artifact,
+    _ok,
+    _resolve,
+    _sha256_file,
+)
+from ._drift_monitor import observe_prediction_drift
+from ._prediction_audit import append_prediction_audit
+from ._resources import budget_for_runtime, check_spectral_data, resource_error
+
+_PREDICTION_AUDIT_PATH = "/mnt/user-data/outputs/prediction-audit.jsonl"
+_DRIFT_STATE_PATH = "/mnt/user-data/outputs/prediction-drift-state.json"
+_DRIFT_ALERTS_PATH = "/mnt/user-data/outputs/prediction-drift-alerts.jsonl"
+
+
+def _runtime_audit_attribution(runtime: Runtime, tool_call_id: str) -> dict[str, str | None]:
+    context = getattr(runtime, "context", None)
+    context = context if isinstance(context, dict) else {}
+    return {
+        "user_id": resolve_runtime_user_id(runtime),
+        "thread_id": str(context["thread_id"]) if context.get("thread_id") else None,
+        "run_id": str(context["run_id"]) if context.get("run_id") else None,
+        "trace_id": (str(context["deerflow_trace_id"]) if context.get("deerflow_trace_id") else None),
+        "tool_call_id": tool_call_id or None,
+    }
+
+
+def _prediction_summary_for_audit(payload: dict) -> dict | list[dict] | None:
+    if isinstance(payload.get("predictions_summary"), list):
+        return payload["predictions_summary"]
+    keys = ("prediction_mean", "prediction_min", "prediction_max")
+    if any(key in payload for key in keys):
+        return {key.removeprefix("prediction_"): payload[key] for key in keys}
+    return None
+
+
+def _drift_summary_for_audit(payload: dict, *, requested: bool) -> dict:
+    drift = payload.get("drift")
+    if not requested:
+        return {"requested": False}
+    if not isinstance(drift, dict):
+        return {"requested": True, "available": False}
+    summary = {
+        "requested": True,
+        "available": bool(drift.get("available")),
+        "method": drift.get("method"),
+        "drift_score": drift.get("drift_score"),
+        "reason": drift.get("reason"),
+    }
+    flagged = drift.get("flagged_indices")
+    if isinstance(flagged, list):
+        summary["flagged_count"] = len(flagged)
+    components = drift.get("per_component")
+    if isinstance(components, list):
+        summary["per_component"] = [
+            {
+                "name": component.get("name"),
+                "drift_score": component.get("drift_score"),
+                "flagged_count": len(component.get("flagged_indices") or []),
+            }
+            for component in components
+            if isinstance(component, dict)
+        ]
+    return summary
+
+
+def _drift_flagged_count(drift: dict) -> int | None:
+    flagged = drift.get("flagged_indices")
+    if isinstance(flagged, list):
+        return len(flagged)
+    components = drift.get("per_component")
+    if isinstance(components, list):
+        counts = [len(component.get("flagged_indices") or []) for component in components if isinstance(component, dict)]
+        return max(counts, default=0)
+    return None
 
 
 def _unwrap_model_artifact(artifact):
@@ -195,7 +277,9 @@ def nir_load_data_tool(
         from nir_core.io.sniffers import detect_format, inspect_file
         from nir_core.io.writers import save_npz
 
+        budget = budget_for_runtime(runtime)
         real_in = _resolve(runtime, file_path, read_only=True)
+        budget.check_file(real_in, stage="load_file_preflight")
 
         parsed_y_cols = _parse_y_cols(y_cols)
         if y_col is not None and parsed_y_cols is not None:
@@ -234,8 +318,15 @@ def nir_load_data_tool(
             )
         else:
             data = auto_detect_and_load(real_in)
+        check_spectral_data(
+            budget,
+            data,
+            stage="loaded_spectral_matrix",
+            peak_multiplier=3.0,
+        )
 
         if output_path:
+            budget.checkpoint("save_normalized_data")
             real_out = _resolve(runtime, output_path, read_only=False)
             os.makedirs(os.path.dirname(real_out), exist_ok=True)
             save_npz(data, real_out)
@@ -249,6 +340,7 @@ def nir_load_data_tool(
         summary["y_var_used"] = y_var
         summary["wv_var_used"] = wv_var
         summary["transpose_used"] = transpose
+        summary["resource_budget"] = budget.evidence()
         # ⭐ Surface the auto-detected layout so the agent can confirm y and
         # wv have been correctly separated from the raw CSV block. Without
         # these explicit fields the agent tends to "double-check" by writing
@@ -275,6 +367,8 @@ def nir_load_data_tool(
                 "nir_load_data with explicit y_col / wv_row if needed."
             )
         return _ok(summary)
+    except ResourceLimitError as exc:
+        return resource_error(exc)
     except MemoryError:
         return _err("内存不足: 文件过大，无法加载。请先用 nir_inspect 查看文件结构，或使用更小的数据子集。")
     except Exception as exc:  # noqa: BLE001
@@ -299,7 +393,9 @@ def nir_inspect_tool(
     try:
         from nir_core.io.sniffers import inspect_file
 
+        budget = budget_for_runtime(runtime)
         real_in = _resolve(runtime, file_path, read_only=True)
+        budget.check_file(real_in, stage="inspect_file_preflight")
         raw = inspect_file(real_in)
         # inspect_file returns a JSON string. Parse it so we can layer extra
         # advisory fields and re-serialize.
@@ -428,7 +524,10 @@ def nir_inspect_tool(
             ) + metadata_hint
         else:
             info["hint"] = ("No empty corner cell detected. The file may use a plain matrix layout (no separate y column or wavelength header). Pass y_col / wv_row to nir_load_data explicitly if needed.") + metadata_hint
+        info["resource_budget"] = budget.evidence()
         return _json.dumps(info, ensure_ascii=False)
+    except ResourceLimitError as exc:
+        return resource_error(exc)
     except Exception as exc:  # noqa: BLE001
         return _err(f"{type(exc).__name__}: {exc}")
 
@@ -449,7 +548,10 @@ def nir_predict_tool(
     wavelength selection metadata to raw spectra before inference. Version-3
     multi-output artifacts produce one named prediction column per component.
     Optionally runs PCA Hotelling T²/Q drift detection against the monitoring
-    reference persisted from the model's training domain.
+    reference persisted from the model's training domain. Every attempt is
+    appended to a tamper-evident audit chain without raw spectra or row-level
+    predictions. Available drift results also update a model-scoped continuous
+    monitor that emits alert and recovery events only on state transitions.
 
     Args:
         model_path: Virtual path to the .pkl model file.
@@ -462,15 +564,113 @@ def nir_predict_tool(
             train-time preprocessing applied.
 
     Returns:
-        JSON with predictions summary (count, mean, min, max) and optional
-        drift info. Individual predictions are saved to output_path if given.
+        JSON with predictions summary (count, mean, min, max), audit metadata,
+        and optional drift info. Individual predictions are saved to
+        output_path if given.
     """
+    started_at = time.perf_counter()
+    real_audit: str | None = None
+    model_sha256: str | None = None
+    data_sha256: str | None = None
+    input_shape: tuple[int, int] | None = None
+    artifact_format_version: object | None = None
+
+    def finish(payload: dict, error: Exception | None = None) -> str:
+        if real_audit is None:
+            original = f"; original error: {type(error).__name__}: {error}" if error else ""
+            return _err(f"Prediction audit storage is unavailable; prediction results were not released{original}")
+        attribution = _runtime_audit_attribution(runtime, tool_call_id)
+        if payload.get("status") == "ok":
+            drift = payload.get("drift")
+            if not detect_drift:
+                payload["drift_monitoring"] = {
+                    "status": "disabled",
+                    "reason": "drift_detection_not_requested",
+                }
+            elif not isinstance(drift, dict) or not drift.get("available"):
+                payload["drift_monitoring"] = {
+                    "status": "unavailable",
+                    "reason": (drift.get("reason", "drift_result_unavailable") if isinstance(drift, dict) else "drift_result_unavailable"),
+                }
+            elif model_sha256 is None or input_shape is None:
+                payload["drift_monitoring"] = {
+                    "status": "error",
+                    "error_type": "MissingPredictionLineage",
+                }
+            else:
+                try:
+                    output_directory = Path(real_audit).parent
+                    monitoring = observe_prediction_drift(
+                        state_path=output_directory / Path(_DRIFT_STATE_PATH).name,
+                        alerts_path=output_directory / Path(_DRIFT_ALERTS_PATH).name,
+                        model_sha256=model_sha256,
+                        model_path=model_path,
+                        data_sha256=data_sha256,
+                        drift_score=float(drift["drift_score"]),
+                        n_samples=input_shape[0],
+                        flagged_count=_drift_flagged_count(drift),
+                        attribution=attribution,
+                    )
+                    monitoring["state_path"] = _DRIFT_STATE_PATH
+                    monitoring["alerts_path"] = _DRIFT_ALERTS_PATH
+                    payload["drift_monitoring"] = monitoring
+                except Exception as monitoring_error:  # noqa: BLE001
+                    payload["drift_monitoring"] = {
+                        "status": "error",
+                        "error_type": type(monitoring_error).__name__,
+                    }
+        event_id = str(uuid.uuid4())
+        event = {
+            "schema_version": 1,
+            "event_id": event_id,
+            "occurred_at": datetime.now(UTC).isoformat(),
+            "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),
+            "status": "success" if payload.get("status") == "ok" else "error",
+            "attribution": attribution,
+            "model": {
+                "path": model_path,
+                "sha256": model_sha256,
+                "artifact_format_version": artifact_format_version,
+            },
+            "input": {
+                "path": data_path,
+                "sha256": data_sha256,
+                "n_samples": input_shape[0] if input_shape else None,
+                "n_wavelengths": input_shape[1] if input_shape else None,
+                "already_preprocessed": input_preprocessed,
+            },
+            "output_path": payload.get("output_path") or output_path,
+            "prediction_summary": _prediction_summary_for_audit(payload),
+            "drift": _drift_summary_for_audit(payload, requested=detect_drift),
+            "drift_monitoring": payload.get("drift_monitoring"),
+            "error": ({"type": type(error).__name__, "message": str(error)[:1000]} if error is not None else None),
+        }
+        try:
+            persisted = append_prediction_audit(real_audit, event)
+        except Exception as audit_error:  # noqa: BLE001
+            original = f"; original error: {type(error).__name__}: {error}" if error else ""
+            return _err(f"Prediction audit persistence failed; prediction results were not released: {type(audit_error).__name__}{original}")
+        payload["audit"] = {
+            "event_id": event_id,
+            "event_hash": persisted["event_hash"],
+            "path": _PREDICTION_AUDIT_PATH,
+        }
+        return _ok(payload)
+
     try:
+        real_audit = _resolve(runtime, _PREDICTION_AUDIT_PATH, read_only=False)
         real_model = _resolve(runtime, model_path, read_only=True)
         real_data = _resolve(runtime, data_path, read_only=True)
+        model_sha256 = _sha256_file(real_model)
+        data_sha256 = _sha256_file(real_data)
         artifact = _load_trusted_model_artifact(real_model, model_path)
+        if isinstance(artifact, dict):
+            artifact_format_version = artifact.get("version")
         data_dict = _load_npz_safely(real_data)
         X = np.asarray(data_dict["X"], dtype=float)
+        if X.ndim != 2:
+            raise ValueError("Prediction X must be a two-dimensional spectra matrix.")
+        input_shape = (int(X.shape[0]), int(X.shape[1]))
         wv = np.asarray(data_dict["wv"], dtype=float).ravel() if data_dict.get("wv") is not None and data_dict["wv"].size else None
 
         if isinstance(artifact, dict) and artifact.get("multi_output") is True:
@@ -481,7 +681,7 @@ def nir_predict_tool(
             preprocessing_config = artifact.get("preprocessing") or {}
             n_targets = int(artifact.get("n_targets", len(models)))
             if not (len(models) == len(names) == len(selections) == n_targets):
-                return _err("Multi-output artifact has inconsistent model, name, or wavelength-selection counts.")
+                raise ValueError("Multi-output artifact has inconsistent model, name, or wavelength-selection counts.")
 
             predictions: list[np.ndarray] = []
             preprocessing_applied: list[bool] = []
@@ -489,7 +689,7 @@ def nir_predict_tool(
             for index, model_item in enumerate(models):
                 if isinstance(preprocessing_config, list):
                     if len(preprocessing_config) != n_targets:
-                        return _err("Multi-output artifact has inconsistent preprocessing metadata.")
+                        raise ValueError("Multi-output artifact has inconsistent preprocessing metadata.")
                     component_preprocessing = preprocessing_config[index]
                 else:
                     component_preprocessing = preprocessing_config
@@ -559,11 +759,11 @@ def nir_predict_tool(
                     for index, values in enumerate(y_pred_multi):
                         writer.writerow([index, *(float(value) for value in values)])
                 result["output_path"] = output_path
-            return _ok(result)
+            return finish(result)
 
         model, preprocessing, wavelength_selection, monitoring_reference = _unwrap_model_artifact(artifact)
         if model is None:
-            return _err("Model artifact is missing the fitted model object.")
+            raise ValueError("Model artifact is missing the fitted model object.")
         X, preprocessing_applied = _apply_artifact_preprocessing(
             X,
             wv,
@@ -618,6 +818,9 @@ def nir_predict_tool(
                     w.writerow([i, float(v)])
             result["output_path"] = output_path
 
-        return _ok(result)
+        return finish(result)
     except Exception as exc:  # noqa: BLE001
-        return _err(f"{type(exc).__name__}: {exc}")
+        return finish(
+            {"status": "error", "error": f"{type(exc).__name__}: {exc}"},
+            exc,
+        )

@@ -1,0 +1,250 @@
+[
+  {
+    "query": "Which three techniques were tested to improve the linearity of near-infrared reflectance measurements of meat?",
+    "relevant_ids": [
+      "sha256:32ce31b7126941aca82de8f78f58ecd92e4fea2a830cfe7878af09a37dd68861"
+    ],
+    "expect_no_hit": false,
+    "language": "en",
+    "tags": ["single-document", "scatter-correction", "linearization"]
+  },
+  {
+    "query": "How does multiplicative scatter correction estimate and remove additive and multiplicative effects from each meat spectrum?",
+    "relevant_ids": [
+      "sha256:32ce31b7126941aca82de8f78f58ecd92e4fea2a830cfe7878af09a37dd68861"
+    ],
+    "expect_no_hit": false,
+    "language": "en",
+    "tags": ["single-document", "msc", "mechanism"]
+  },
+  {
+    "query": "为什么肉类样品的颗粒大小和非均匀性会影响近红外漫反射光谱及脂肪定量？",
+    "relevant_ids": [
+      "sha256:32ce31b7126941aca82de8f78f58ecd92e4fea2a830cfe7878af09a37dd68861"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "meat", "light-scatter"]
+  },
+  {
+    "query": "What role does the Saunderson correction play before applying the Kubelka-Munk transformation to meat reflectance data?",
+    "relevant_ids": [
+      "sha256:32ce31b7126941aca82de8f78f58ecd92e4fea2a830cfe7878af09a37dd68861"
+    ],
+    "expect_no_hit": false,
+    "language": "en",
+    "tags": ["single-document", "saunderson", "kubelka-munk"]
+  },
+  {
+    "query": "Geladi、MacDougall 和 Martens 的肉类近红外论文比较了哪些反射率变换与散射校正方法？",
+    "relevant_ids": [
+      "sha256:32ce31b7126941aca82de8f78f58ecd92e4fea2a830cfe7878af09a37dd68861"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "authors", "methods"]
+  },
+  {
+    "query": "TrSpecNet 如何利用 Transformer 对多台仪器采集的药品和小麦近红外光谱进行单成分定量分析？",
+    "relevant_ids": [
+      "sha256:39ff244a5bf698c2eb648f2f2d9d2664f5413a4c143a384be81280a5f4d9e82d"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "transformer", "instrument-transfer"]
+  },
+  {
+    "query": "DESpecNet 使用膨胀卷积和 SE 模块同时预测谷物中的哪些四种成分？",
+    "relevant_ids": [
+      "sha256:39ff244a5bf698c2eb648f2f2d9d2664f5413a4c143a384be81280a5f4d9e82d"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "despecnet", "multi-component"]
+  },
+  {
+    "query": "CTSpecNet 如何结合 CNN 的局部注意力和 Transformer 的全局注意力完成多水果干物质预测？",
+    "relevant_ids": [
+      "sha256:39ff244a5bf698c2eb648f2f2d9d2664f5413a4c143a384be81280a5f4d9e82d"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "ctspecnet", "multi-task"]
+  },
+  {
+    "query": "Which public fruit types were used to evaluate the CNN-Transformer multi-task NIR model CTSpecNet?",
+    "relevant_ids": [
+      "sha256:39ff244a5bf698c2eb648f2f2d9d2664f5413a4c143a384be81280a5f4d9e82d"
+    ],
+    "expect_no_hit": false,
+    "language": "en",
+    "tags": ["single-document", "ctspecnet", "fruit-dataset"]
+  },
+  {
+    "query": "由 231 个谷物样品构成的公开近红外数据集包含哪些待预测化学成分？",
+    "relevant_ids": [
+      "sha256:39ff244a5bf698c2eb648f2f2d9d2664f5413a4c143a384be81280a5f4d9e82d"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "grain-dataset", "analytes"]
+  },
+  {
+    "query": "小麦蛋白质近红外定量模型为什么选择 KS 数据集划分与 SG 平滑的组合？",
+    "relevant_ids": [
+      "sha256:542bea79a9ac603a961a7265dab0de36ffbba3e51d9b090c2d041fbf7c2c12c7"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "wheat", "ks-sg"]
+  },
+  {
+    "query": "轻量级一维卷积神经网络如何从烟草近红外光谱预测尼古丁含量？",
+    "relevant_ids": [
+      "sha256:542bea79a9ac603a961a7265dab0de36ffbba3e51d9b090c2d041fbf7c2c12c7"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "tobacco", "1d-cnn"]
+  },
+  {
+    "query": "烟草尼古丁定量建模比较了 CARS、LARS、SPA 和 GA 哪些波长变量选择方法？",
+    "relevant_ids": [
+      "sha256:542bea79a9ac603a961a7265dab0de36ffbba3e51d9b090c2d041fbf7c2c12c7"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "variable-selection", "tobacco"]
+  },
+  {
+    "query": "PLS、SVR、ELM 和 XGBoost 在烟草近红外定量模型中是如何进行对比的？",
+    "relevant_ids": [
+      "sha256:542bea79a9ac603a961a7265dab0de36ffbba3e51d9b090c2d041fbf7c2c12c7"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "model-comparison", "tobacco"]
+  },
+  {
+    "query": "Which metrics were used to compare GA-PLS, LARS-SVR, GA-ELM, GA-XGBoost, and lightweight 1D-CNN models?",
+    "relevant_ids": [
+      "sha256:542bea79a9ac603a961a7265dab0de36ffbba3e51d9b090c2d041fbf7c2c12c7"
+    ],
+    "expect_no_hit": false,
+    "language": "en",
+    "tags": ["single-document", "metrics", "model-comparison"]
+  },
+  {
+    "query": "SVAE 为什么在变分自编码器后增加回归网络，并将标签预测误差加入优化目标？",
+    "relevant_ids": [
+      "sha256:915242386d31cf3211d230af8f81b5dd6cd04e4fef055a2aba0357c787f91c8f"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "svae", "regression"]
+  },
+  {
+    "query": "SMMVAE 如何通过多峰先验分布和光谱相似性度量解决多工况近红外建模问题？",
+    "relevant_ids": [
+      "sha256:915242386d31cf3211d230af8f81b5dd6cd04e4fef055a2aba0357c787f91c8f"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "smmvae", "multi-condition"]
+  },
+  {
+    "query": "AdaSMMVAE 如何利用 Adaboost 提高模型对少样本工况的关注度？",
+    "relevant_ids": [
+      "sha256:915242386d31cf3211d230af8f81b5dd6cd04e4fef055a2aba0357c787f91c8f"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "adasmmvae", "class-imbalance"]
+  },
+  {
+    "query": "三聚氰胺甲醛多工况近红外数据集中，SMMVAE 和 AdaSMMVAE 预测的目标变量是什么？",
+    "relevant_ids": [
+      "sha256:915242386d31cf3211d230af8f81b5dd6cd04e4fef055a2aba0357c787f91c8f"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["single-document", "mf-process", "cloud-point"]
+  },
+  {
+    "query": "Why can a variational autoencoder be more robust to noise and nonlinear spectral features than traditional linear feature extraction?",
+    "relevant_ids": [
+      "sha256:915242386d31cf3211d230af8f81b5dd6cd04e4fef055a2aba0357c787f91c8f"
+    ],
+    "expect_no_hit": false,
+    "language": "en",
+    "tags": ["single-document", "vae", "robustness"]
+  },
+  {
+    "query": "比较近红外光谱中的 CNN 模型：多水果和谷物多任务模型与烟草尼古丁轻量级 1D-CNN 分别解决什么问题？",
+    "relevant_ids": [
+      "sha256:39ff244a5bf698c2eb648f2f2d9d2664f5413a4c143a384be81280a5f4d9e82d",
+      "sha256:542bea79a9ac603a961a7265dab0de36ffbba3e51d9b090c2d041fbf7c2c12c7"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["cross-document", "cnn", "applications"]
+  },
+  {
+    "query": "深度学习近红外模型如何分别处理多任务泛化、多工况特征分布和少样本工况不均衡？",
+    "relevant_ids": [
+      "sha256:39ff244a5bf698c2eb648f2f2d9d2664f5413a4c143a384be81280a5f4d9e82d",
+      "sha256:915242386d31cf3211d230af8f81b5dd6cd04e4fef055a2aba0357c787f91c8f"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["cross-document", "multi-task", "multi-condition"]
+  },
+  {
+    "query": "MSC 和 SNV 如何校正近红外光谱散射，英文肉类研究与中文小麦烟草建模分别怎样应用这些方法？",
+    "relevant_ids": [
+      "sha256:32ce31b7126941aca82de8f78f58ecd92e4fea2a830cfe7878af09a37dd68861",
+      "sha256:542bea79a9ac603a961a7265dab0de36ffbba3e51d9b090c2d041fbf7c2c12c7"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["cross-document", "msc", "snv"]
+  },
+  {
+    "query": "R²、RMSE 和 RPD 如何用于比较传统机器学习、卷积神经网络和变分自编码器近红外模型？",
+    "relevant_ids": [
+      "sha256:542bea79a9ac603a961a7265dab0de36ffbba3e51d9b090c2d041fbf7c2c12c7",
+      "sha256:915242386d31cf3211d230af8f81b5dd6cd04e4fef055a2aba0357c787f91c8f"
+    ],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["cross-document", "metrics", "model-comparison"]
+  },
+  {
+    "query": "量子纠缠散射校正算法如何消除近红外光谱中的暗物质吸收峰？",
+    "relevant_ids": [],
+    "expect_no_hit": true,
+    "language": "zh",
+    "tags": ["negative", "fabricated-method"]
+  },
+  {
+    "query": "How are graphene D and G Raman bands used to estimate monolayer defect density?",
+    "relevant_ids": [],
+    "expect_no_hit": true,
+    "language": "en",
+    "tags": ["negative", "raman"]
+  },
+  {
+    "query": "核磁共振氢谱中蛋白质酰胺氢的化学位移如何归属？",
+    "relevant_ids": [],
+    "expect_no_hit": true,
+    "language": "zh",
+    "tags": ["negative", "nmr"]
+  },
+  {
+    "query": "Which terahertz imaging features identify concealed explosive crystal polymorphs?",
+    "relevant_ids": [],
+    "expect_no_hit": true,
+    "language": "en",
+    "tags": ["negative", "terahertz"]
+  }
+]

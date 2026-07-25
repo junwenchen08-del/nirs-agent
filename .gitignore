@@ -22,9 +22,9 @@ nir_core.egg-info/
 dist/
 build/
 
-# Knowledge base local data (ChromaDB + embedding model)
-nir_core/knowledge/.chromadb/
-nir_core/knowledge/all-MiniLM-L6-v2/
+# Knowledge base local data (BGE-M3 ChromaDB + governance catalog)
+nir_core/knowledge/.chromadb-bge-m3/
+nir_core/knowledge/.knowledge_catalog.bge-m3.sqlite3
 
 # Temporary probe scripts
 probe_*.py

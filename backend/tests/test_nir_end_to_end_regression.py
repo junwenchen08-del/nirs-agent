@@ -69,6 +69,9 @@ def test_nir_lifecycle_from_csv_to_registered_prediction_and_tamper_rejection(tm
     metrics_file = tmp_path / "outputs" / "metrics.json"
     registry_file = tmp_path / "outputs" / "registry.json"
     predictions_file = tmp_path / "outputs" / "predictions.csv"
+    prediction_audit_file = tmp_path / "outputs" / "prediction-audit.jsonl"
+    drift_state_file = tmp_path / "outputs" / "prediction-drift-state.json"
+    drift_alerts_file = tmp_path / "outputs" / "prediction-drift-alerts.jsonl"
     _write_calibration_csv(upload_csv, X, y, wv)
     np.savez(clean_npz, X=X[:8], wv=wv)
     spectral_shift = np.linspace(-20.0, 20.0, n_wavelengths)
@@ -83,6 +86,7 @@ def test_nir_lifecycle_from_csv_to_registered_prediction_and_tamper_rejection(tm
         "metrics": "/mnt/user-data/outputs/metrics.json",
         "registry": "/mnt/user-data/outputs/registry.json",
         "predictions": "/mnt/user-data/outputs/predictions.csv",
+        "prediction_audit": "/mnt/user-data/outputs/prediction-audit.jsonl",
     }
     resolved = {
         virtual["csv"]: str(upload_csv),
@@ -93,6 +97,7 @@ def test_nir_lifecycle_from_csv_to_registered_prediction_and_tamper_rejection(tm
         virtual["metrics"]: str(metrics_file),
         virtual["registry"]: str(registry_file),
         virtual["predictions"]: str(predictions_file),
+        virtual["prediction_audit"]: str(prediction_audit_file),
     }
 
     def resolve(_runtime, path: str, *, read_only: bool) -> str:  # noqa: ARG001
@@ -174,6 +179,22 @@ def test_nir_lifecycle_from_csv_to_registered_prediction_and_tamper_rejection(tm
                 detect_drift=True,
             )
         )
+        second_shifted_payload = json.loads(
+            nir_predict_tool.func(
+                runtime=MagicMock(),
+                model_path=virtual["model"],
+                data_path=virtual["shifted"],
+                detect_drift=True,
+            )
+        )
+        alerting_shifted_payload = json.loads(
+            nir_predict_tool.func(
+                runtime=MagicMock(),
+                model_path=virtual["model"],
+                data_path=virtual["shifted"],
+                detect_drift=True,
+            )
+        )
         assert clean_payload["status"] == "ok"
         assert clean_payload["n_samples"] == 8
         assert clean_payload["preprocessing"]["applied"] is True
@@ -182,6 +203,23 @@ def test_nir_lifecycle_from_csv_to_registered_prediction_and_tamper_rejection(tm
         assert shifted_payload["status"] == "ok"
         assert shifted_payload["drift"]["drift_score"] >= 0.9
         assert shifted_payload["drift"]["drift_score"] > clean_payload["drift"]["drift_score"]
+        assert shifted_payload["drift_monitoring"]["state"] == "watch"
+        assert second_shifted_payload["drift_monitoring"]["state"] == "watch"
+        assert alerting_shifted_payload["drift_monitoring"]["state"] == "alert"
+        assert alerting_shifted_payload["drift_monitoring"]["transition"] == "alert_started"
+        assert alerting_shifted_payload["drift_monitoring"]["alert_emitted"] is True
+        drift_state = json.loads(drift_state_file.read_text(encoding="utf-8"))
+        assert drift_state["models"][record["artifact_sha256"]]["alert_active"] is True
+        drift_alerts = [json.loads(line) for line in drift_alerts_file.read_text(encoding="utf-8").splitlines()]
+        assert [event["event_type"] for event in drift_alerts] == ["drift_alert_started"]
+        audit_events = [json.loads(line) for line in prediction_audit_file.read_text(encoding="utf-8").splitlines()]
+        assert [event["status"] for event in audit_events] == [
+            "success",
+            "success",
+            "success",
+            "success",
+        ]
+        assert audit_events[1]["previous_event_hash"] == audit_events[0]["event_hash"]
 
         model_file.write_bytes(model_file.read_bytes() + b"tampered")
         tampered_payload = json.loads(
@@ -193,3 +231,6 @@ def test_nir_lifecycle_from_csv_to_registered_prediction_and_tamper_rejection(tm
         )
         assert tampered_payload["status"] == "error"
         assert "integrity check failed" in tampered_payload["error"]
+        audit_events = [json.loads(line) for line in prediction_audit_file.read_text(encoding="utf-8").splitlines()]
+        assert audit_events[-1]["status"] == "error"
+        assert audit_events[-1]["error"]["type"] == "ValueError"

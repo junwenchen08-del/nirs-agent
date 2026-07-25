@@ -102,17 +102,6 @@ def _search_knowledge_via_http(query: str, top_k: int) -> str:
     except Exception as exc:  # noqa: BLE001
         return _err(f"Knowledge search HTTP error: {type(exc).__name__}: {exc}")
 
-    # Also fetch the full document list so the agent knows all available papers
-    try:
-        docs_url = base_url + "/documents"
-        docs_req = urllib.request.Request(docs_url, headers=_knowledge_http_headers(), method="GET")
-        with urllib.request.urlopen(docs_req, timeout=10) as docs_resp:
-            docs_data = json.loads(docs_resp.read().decode("utf-8"))
-        data["available_documents"] = docs_data.get("documents", [])
-        data["total_documents"] = docs_data.get("count", 0)
-    except Exception:  # noqa: BLE001 — non-fatal, search still works
-        pass
-
     return _ok(data)
 
 
@@ -141,11 +130,13 @@ def nir_search_knowledge_tool(
     **WHEN NOT TO CALL:**
     - Same query already searched in this conversation (avoid duplicate tokens).
     - ``grade`` is A/B and user did not ask for optimization.
-    - Previous call returned ``count: 0`` (knowledge base is empty).
+    - Previous call returned ``count: 0`` for the same query (the knowledge
+      base is empty or the retriever intentionally abstained).
 
     The knowledge base is populated offline via
     ``python -m nir_core.knowledge.cli import-dir <papers_dir>``. If the
-    base is empty, this tool returns an empty result list (not an error).
+    base is empty or available evidence is too weak/ambiguous, this tool
+    returns an empty result list (not an error) plus retrieval diagnostics.
 
     Args:
         query: Natural-language query. When triggered by a ``knowledge_hint``,
@@ -157,11 +148,9 @@ def nir_search_knowledge_tool(
     Returns:
         JSON with a list of matching paper sections. Each entry includes
         the chunk content (truncated to 1000 chars), source file, similarity
-        score, and any NIR entities (methods / models / datasets) detected
-        in the chunk. The response also includes ``available_documents``
-        (a list of all documents in the knowledge base with title and
-        chunk_count) and ``total_documents`` so you can answer questions
-        about how many papers are available.
+        stable evidence/chunk/document IDs, citation metadata, source file,
+        similarity score, trust marker, and detected NIR entities. Document
+        inventory is intentionally served by the separate management API.
     """
     global _knowledge_search_mode, _knowledge_http_call_count
 
@@ -179,16 +168,28 @@ def nir_search_knowledge_tool(
             from nir_core.knowledge.config import get_retriever
 
             retriever = get_retriever()
-            results = retriever.search(query, top_k=top_k)
+            if hasattr(retriever, "search_with_diagnostics"):
+                decision = retriever.search_with_diagnostics(query, top_k=top_k)
+                results = list(decision.results)
+                retrieval = decision.diagnostics()
+            else:
+                results = retriever.search(query, top_k=top_k)
+                retrieval = None
             _knowledge_search_mode = "direct"
 
             if not results:
+                abstained = bool(retrieval and retrieval.get("abstained"))
                 return _ok(
                     {
                         "results": [],
                         "count": 0,
                         "query": query,
-                        "message": ("Knowledge base is empty or returned no matches. Populate it via `python -m nir_core.knowledge.cli import-dir <papers_dir>`."),
+                        "retrieval": retrieval,
+                        "message": (
+                            "No sufficiently reliable knowledge evidence was found; weak or ambiguous vector matches were withheld."
+                            if abstained
+                            else "Knowledge base is empty or returned no matches. Populate it via `python -m nir_core.knowledge.cli import-dir <papers_dir>`."
+                        ),
                     }
                 )
 
@@ -210,9 +211,22 @@ def nir_search_knowledge_tool(
 
                 output.append(
                     {
+                        "evidence_id": r.chunk.id,
+                        "chunk_id": r.chunk.id,
+                        "doc_id": meta.get("doc_id", ""),
                         "content": r.chunk.content[:1000],
                         "source": r.chunk.source,
                         "score": round(r.score, 4),
+                        "title": meta.get("title", ""),
+                        "authors": _load_entities("authors"),
+                        "year": meta.get("year"),
+                        "doi": meta.get("doi", ""),
+                        "section_path": _load_entities("section_path"),
+                        "page_start": meta.get("page_start"),
+                        "page_end": meta.get("page_end"),
+                        "quality_tier": meta.get("quality_tier", ""),
+                        "review_status": meta.get("review_status", ""),
+                        "content_trust": meta.get("content_trust", "untrusted_evidence"),
                         "entities": {
                             "methods": _load_entities("methods"),
                             "models": _load_entities("models"),
@@ -223,14 +237,12 @@ def nir_search_knowledge_tool(
                     }
                 )
 
-            documents = retriever.list_documents()
             return _ok(
                 {
                     "results": output,
                     "count": len(output),
                     "query": query,
-                    "available_documents": [{"doc_id": d.get("doc_id", ""), "title": d.get("title", ""), "chunk_count": d.get("chunk_count", 0)} for d in documents],
-                    "total_documents": len(documents),
+                    "retrieval": retrieval,
                 }
             )
         except Exception as exc:  # noqa: BLE001

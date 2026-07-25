@@ -621,6 +621,7 @@ def test_nir_predict_applies_artifact_wavelength_selection(tmp_path: Path):
     resolved = {
         virtual_model: str(model_file),
         virtual_data: str(data_file),
+        "/mnt/user-data/outputs/prediction-audit.jsonl": str(tmp_path / "prediction-audit.jsonl"),
     }
 
     with patch(
@@ -678,6 +679,7 @@ def test_nir_predict_applies_fitted_artifact_preprocessing(tmp_path: Path):
     resolved = {
         "/mnt/user-data/outputs/model-v2.pkl": str(model_file),
         "/mnt/user-data/uploads/raw-predict.npz": str(data_file),
+        "/mnt/user-data/outputs/prediction-audit.jsonl": str(tmp_path / "prediction-audit.jsonl"),
     }
     with patch(
         "deerflow.community.nir.io_tools._resolve",

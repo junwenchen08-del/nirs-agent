@@ -24,9 +24,7 @@ SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".txt", ".md", ".html", ".htm", ".csv")
 # Matches whitespace between two CJK characters (for PDF extraction cleanup).
 # CJK Unified Ideographs + CJK punctuation.
 _CJK_RANGE = r"\u4e00-\u9fff\u3000-\u303f\uff00-\uffef"
-_CJK_SPACE_CJK = re.compile(
-    rf"(?<=[{_CJK_RANGE}])\s+(?=[{_CJK_RANGE}])"
-)
+_CJK_SPACE_CJK = re.compile(rf"(?<=[{_CJK_RANGE}])\s+(?=[{_CJK_RANGE}])")
 
 
 def _normalize_pdf_text(text: str) -> str:
@@ -42,6 +40,14 @@ def _normalize_pdf_text(text: str) -> str:
     # Remove inter-CJK whitespace (common pypdf artifact for Chinese text).
     text = _CJK_SPACE_CJK.sub("", text)
     return text
+
+
+def _format_pdf_pages(pages: list[str]) -> str:
+    """Join extracted pages with machine-readable, one-based page markers."""
+    return "\n\n".join(
+        f"<!-- page: {page_number} -->\n\n{page_text}"
+        for page_number, page_text in enumerate(pages, 1)
+    )
 
 
 def parse_document(file_path: str | Path, params: dict[str, Any] | None = None) -> str:
@@ -92,18 +98,20 @@ def _parse_pdf(path: Path, params: dict[str, Any]) -> str:
 
         loader = PyPDFLoader(str(path))
         docs = loader.load()
-        text = "\n\n".join(d.page_content for d in docs)
+        text = _format_pdf_pages([document.page_content for document in docs])
         if text.strip():
             return _normalize_pdf_text(text)
         logger.warning("PyPDFLoader returned empty content for %s; trying pypdf", path)
     except Exception as exc:  # noqa: BLE001 — catch ValueError from tf/h5py too
-        logger.info("PyPDFLoader unavailable (%s); using pypdf directly", type(exc).__name__)
+        logger.info(
+            "PyPDFLoader unavailable (%s); using pypdf directly", type(exc).__name__
+        )
 
     from pypdf import PdfReader
 
     reader = PdfReader(str(path))
     pages = [page.extract_text() or "" for page in reader.pages]
-    return _normalize_pdf_text("\n\n".join(pages))
+    return _normalize_pdf_text(_format_pdf_pages(pages))
 
 
 def _parse_docx(path: Path) -> str:
@@ -142,7 +150,12 @@ def _parse_csv(path: Path) -> str:
     """CSV -> Markdown table (first 50 rows to avoid huge chunks)."""
 
     def markdown_cell(value: str) -> str:
-        return value.replace("|", r"\|").replace("\r\n", "<br>").replace("\n", "<br>").replace("\r", "<br>")
+        return (
+            value.replace("|", r"\|")
+            .replace("\r\n", "<br>")
+            .replace("\n", "<br>")
+            .replace("\r", "<br>")
+        )
 
     with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
         reader = csv.reader(handle)
@@ -154,7 +167,10 @@ def _parse_csv(path: Path) -> str:
     width = max(len(header), *(len(row) for row in rows)) if rows else len(header)
 
     def normalized(row: list[str]) -> list[str]:
-        return [markdown_cell(value) for value in [*row, *([""] * (width - len(row)))][:width]]
+        return [
+            markdown_cell(value)
+            for value in [*row, *([""] * (width - len(row)))][:width]
+        ]
 
     lines = [
         f"| {' | '.join(normalized(header))} |",

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
+from nir_core.io.resources import ResourceBudget
 from nir_core.io.schema import (
     csv_profile_numeric_matrix,
     flatten_mat_leaves,
@@ -141,6 +142,7 @@ def inspect_file(filepath: str) -> str:
         FileNotFoundError: If the file is missing.
         ValueError: If the file cannot be parsed at all.
     """
+    ResourceBudget().check_file(filepath, stage="inspect_file_preflight")
     fmt = detect_format(filepath)
 
     if fmt == "mat":

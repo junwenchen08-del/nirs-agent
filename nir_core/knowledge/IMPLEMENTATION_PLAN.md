@@ -171,8 +171,8 @@ class ChromaDBRetriever:
     def __init__(
         self,
         db_path: str = "nir_core/knowledge/.chromadb",
-        embedding_model: str = "all-MiniLM-L6-v2",
-        collection_name: str = "nir_papers",
+        embedding_model: str = "BAAI/bge-m3",
+        collection_name: str = "nir_papers_bge_m3",
     ):
         self._model = SentenceTransformer(embedding_model)
         self._client = chromadb.PersistentClient(path=db_path)
@@ -633,7 +633,7 @@ class KnowledgeConfig:
     collection_name: str = "nir_papers"
     
     # 嵌入模型
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str = "BAAI/bge-m3"
     embedding_dim: int = 384
     
     # 分块配置
@@ -1006,7 +1006,7 @@ dependencies = [
 
 ### 4.2 嵌入模型
 
-使用 `all-MiniLM-L6-v2`（384 维，模型大小 ~90MB）：
+使用 `BGE-M3`（1024 维，本地模型约 2.3GB）：
 - 首次使用时自动从 HuggingFace 下载
 - 纯本地运行，不需要 API key
 - 中英文均可处理（中文效果稍弱，但 NIR 论文多为英文）

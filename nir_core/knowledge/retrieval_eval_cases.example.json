@@ -1,0 +1,23 @@
+[
+  {
+    "query": "SNV 预处理如何减弱近红外光谱中的散射效应？",
+    "relevant_ids": ["replace-with-published-doc-id"],
+    "expect_no_hit": false,
+    "language": "zh",
+    "tags": ["preprocessing", "snv"]
+  },
+  {
+    "query": "CARS wavelength selection for NIR calibration",
+    "relevant_ids": ["replace-with-published-doc-id"],
+    "expect_no_hit": false,
+    "language": "en",
+    "tags": ["wavelength-selection", "cars"]
+  },
+  {
+    "query": "本知识库未收录的虚构仪器校准方法是什么？",
+    "relevant_ids": [],
+    "expect_no_hit": true,
+    "language": "zh",
+    "tags": ["negative"]
+  }
+]

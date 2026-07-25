@@ -207,9 +207,19 @@ def _load_trusted_model_artifact(real_model_path: str, virtual_model_path: str):
 # ---------------------------------------------------------------------------
 
 
-def _err(msg: str) -> str:
+def _err(
+    msg: str,
+    *,
+    code: str | None = None,
+    details: dict | None = None,
+) -> str:
     """Format an error as a JSON string for the LLM."""
-    return json.dumps({"status": "error", "error": msg}, ensure_ascii=False)
+    payload: dict = {"status": "error", "error": msg}
+    if code is not None:
+        payload["code"] = code
+    if details is not None:
+        payload["details"] = details
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _ok(payload: dict) -> str:

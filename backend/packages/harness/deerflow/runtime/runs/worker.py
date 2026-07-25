@@ -28,6 +28,7 @@ from langgraph.checkpoint.base import empty_checkpoint
 
 from deerflow.agents.goal_state import GoalEvaluation, GoalState
 from deerflow.config.app_config import AppConfig
+from deerflow.runtime.cancellation import register_run_cancellation, unregister_run_cancellation
 from deerflow.runtime.goal import (
     DEFAULT_MAX_GOAL_CONTINUATIONS,
     DEFAULT_MAX_NO_PROGRESS_CONTINUATIONS,
@@ -267,6 +268,7 @@ async def run_agent(
 
         # 1. Mark running
         await run_manager.set_status(run_id, RunStatus.running)
+        register_run_cancellation(run_id, record.abort_event)
 
         # Snapshot the latest pre-run checkpoint so rollback can restore it.
         if checkpointer is not None:
@@ -540,6 +542,7 @@ async def run_agent(
         )
 
     finally:
+        unregister_run_cancellation(run_id)
         # Persist any subagent step events still buffered (#3779) — including on
         # abort/exception paths, where the stream loop broke before its own flush.
         if subagent_events is not None:

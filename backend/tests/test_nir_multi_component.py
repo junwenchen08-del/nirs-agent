@@ -78,6 +78,7 @@ def test_train_and_predict_multi_component_model(tmp_path: Path) -> None:
         "/mnt/user-data/outputs/multi-metrics.json": str(metrics_file),
         "/mnt/user-data/outputs/multi": str(output_dir),
         "/mnt/user-data/outputs/predictions.csv": str(predictions_file),
+        "/mnt/user-data/outputs/prediction-audit.jsonl": str(tmp_path / "prediction-audit.jsonl"),
     }
 
     with patch(
@@ -184,6 +185,7 @@ def test_predict_multi_component_with_independent_preprocessing(tmp_path: Path) 
     paths = {
         "/mnt/user-data/outputs/independent.pkl": str(model_file),
         "/mnt/user-data/uploads/predict.npz": str(data_file),
+        "/mnt/user-data/outputs/prediction-audit.jsonl": str(tmp_path / "prediction-audit.jsonl"),
     }
 
     with patch(

@@ -35,6 +35,7 @@ router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 # Supported document extensions (must match parser.SUPPORTED_EXTENSIONS)
 _SUPPORTED_EXTS = {".pdf", ".docx", ".txt", ".md", ".markdown", ".html", ".htm", ".csv"}
 _MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB (reduces memory spike from base64 encoding)
+_UPLOAD_TIMEOUT_SECONDS = 600.0  # BGE-M3 CPU embedding can exceed two minutes for large PDFs.
 
 
 def _kb_base_url() -> str:
@@ -111,6 +112,15 @@ class KnowledgeDocument(BaseModel):
     source: str = ""
     year: int | None = None
     chunk_count: int = 0
+    authors: list[str] = Field(default_factory=list)
+    doi: str | None = None
+    source_type: str = "document"
+    language: str = "und"
+    domains: list[str] = Field(default_factory=list)
+    quality_tier: str = "C"
+    review_status: str = "draft"
+    content_sha256: str = ""
+    version: int = 1
 
 
 class KnowledgeDocumentsResponse(BaseModel):
@@ -128,6 +138,7 @@ class KnowledgeStatsResponse(BaseModel):
     db_path: str
     embedding_model: str
     collection_name: str
+    index_version: str = ""
 
 
 class KnowledgeSearchRequest(BaseModel):
@@ -145,6 +156,31 @@ class KnowledgeSearchResult(BaseModel):
     score: float
     entities: dict
     related_entities: list[str]
+    evidence_id: str = ""
+    chunk_id: str = ""
+    doc_id: str = ""
+    title: str = ""
+    authors: list[str] = Field(default_factory=list)
+    year: int | None = None
+    doi: str = ""
+    section_path: list[str] = Field(default_factory=list)
+    page_start: int | None = None
+    page_end: int | None = None
+    quality_tier: str = ""
+    review_status: str = ""
+    content_trust: str = "untrusted_evidence"
+
+
+class KnowledgeRetrievalDiagnostics(BaseModel):
+    """Answerability and diversity diagnostics from the retriever."""
+
+    abstained: bool = False
+    reason: str = ""
+    candidate_count: int = 0
+    result_count: int = 0
+    top_score: float | None = None
+    runner_up_document_score: float | None = None
+    document_margin: float | None = None
 
 
 class KnowledgeSearchResponse(BaseModel):
@@ -153,6 +189,7 @@ class KnowledgeSearchResponse(BaseModel):
     results: list[KnowledgeSearchResult]
     count: int
     query: str
+    retrieval: KnowledgeRetrievalDiagnostics | None = None
 
 
 class KnowledgeUploadResponse(BaseModel):
@@ -165,6 +202,41 @@ class KnowledgeUploadResponse(BaseModel):
     models: list[str] = Field(default_factory=list)
     datasets: list[str] = Field(default_factory=list)
     metrics: list[str] = Field(default_factory=list)
+    action: str = "created"
+    version: int = 1
+    review_status: str = "draft"
+    content_sha256: str = ""
+
+
+class KnowledgeStatusRequest(BaseModel):
+    review_status: str = Field(pattern="^(draft|needs_review|published|retired)$")
+
+
+class KnowledgeStatusResponse(BaseModel):
+    doc_id: str
+    review_status: str
+
+
+class KnowledgeMetadataRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=500)
+    authors: list[str] | None = None
+    year: int | None = Field(default=None, ge=1000, le=2100)
+    doi: str | None = Field(default=None, max_length=300)
+    language: str | None = Field(default=None, min_length=1, max_length=50)
+    domains: list[str] | None = None
+    quality_tier: str | None = Field(default=None, pattern="^[A-E]$")
+
+
+class KnowledgeMetadataResponse(BaseModel):
+    doc_id: str
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    year: int | None = None
+    doi: str | None = None
+    language: str = "und"
+    domains: list[str] = Field(default_factory=list)
+    quality_tier: str = "C"
+    review_status: str = "draft"
 
 
 class KnowledgeDeleteResponse(BaseModel):
@@ -204,6 +276,12 @@ async def _build_document_body(
     *,
     title: str | None = None,
     year: int | None = None,
+    authors: list[str] | None = None,
+    doi: str | None = None,
+    source_type: str | None = None,
+    domains: list[str] | None = None,
+    quality_tier: str = "C",
+    review_status: str = "draft",
 ) -> tuple[str, dict[str, object]]:
     """Validate an uploaded file and build the JSON body for the KB server."""
     if not file.filename:
@@ -233,6 +311,16 @@ async def _build_document_body(
         body["title"] = title
     if year is not None:
         body["year"] = year
+    if authors:
+        body["authors"] = authors
+    if doi:
+        body["doi"] = doi
+    if source_type:
+        body["source_type"] = source_type
+    if domains:
+        body["domains"] = domains
+    body["quality_tier"] = quality_tier
+    body["review_status"] = review_status
     return file.filename, body
 
 
@@ -259,6 +347,7 @@ async def get_stats() -> KnowledgeStatsResponse:
         db_path=data.get("db_path", ""),
         embedding_model=data.get("embedding_model", ""),
         collection_name=data.get("collection_name", ""),
+        index_version=data.get("index_version", ""),
     )
 
 
@@ -270,6 +359,7 @@ async def search(req: KnowledgeSearchRequest) -> KnowledgeSearchResponse:
         results=[KnowledgeSearchResult(**r) for r in data.get("results", [])],
         count=data.get("count", 0),
         query=data.get("query", req.query),
+        retrieval=data.get("retrieval"),
     )
 
 
@@ -278,6 +368,12 @@ async def upload_document(
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
     year: int | None = Form(default=None),
+    authors: list[str] | None = Form(default=None),
+    doi: str | None = Form(default=None),
+    source_type: str | None = Form(default=None),
+    domains: list[str] | None = Form(default=None),
+    quality_tier: str = Form(default="C"),
+    review_status: str = Form(default="draft"),
 ) -> KnowledgeUploadResponse:
     """Upload a document to the knowledge base.
 
@@ -285,9 +381,24 @@ async def upload_document(
     server, which runs the parser → chunker → entity_extractor → vectorstore
     pipeline.
     """
-    _, body = await _build_document_body(file, title=title, year=year)
+    _, body = await _build_document_body(
+        file,
+        title=title,
+        year=year,
+        authors=authors,
+        doi=doi,
+        source_type=source_type,
+        domains=domains,
+        quality_tier=quality_tier,
+        review_status=review_status,
+    )
 
-    data = await _kb_request_async("POST", "/documents", body=body, timeout=120.0)
+    data = await _kb_request_async(
+        "POST",
+        "/documents",
+        body=body,
+        timeout=_UPLOAD_TIMEOUT_SECONDS,
+    )
 
     if data.get("error"):
         raise HTTPException(status_code=500, detail=data["error"])
@@ -300,6 +411,10 @@ async def upload_document(
         models=data.get("models", []),
         datasets=data.get("datasets", []),
         metrics=data.get("metrics", []),
+        action=data.get("action", "created"),
+        version=data.get("version", 1),
+        review_status=data.get("review_status", review_status),
+        content_sha256=data.get("content_sha256", ""),
     )
 
 
@@ -312,6 +427,8 @@ async def upload_documents_batch(
     files: list[UploadFile] = File(...),
     title: str | None = Form(default=None),
     year: int | None = Form(default=None),
+    quality_tier: str = Form(default="C"),
+    review_status: str = Form(default="draft"),
 ) -> KnowledgeBatchUploadResponse:
     """Upload multiple documents to the knowledge base in one request.
 
@@ -334,9 +451,20 @@ async def upload_documents_batch(
     for file in files:
         filename = file.filename or "unknown"
         try:
-            filename, body = await _build_document_body(file, title=title, year=year)
+            filename, body = await _build_document_body(
+                file,
+                title=title,
+                year=year,
+                quality_tier=quality_tier,
+                review_status=review_status,
+            )
 
-            data = await _kb_request_async("POST", "/documents", body=body, timeout=120.0)
+            data = await _kb_request_async(
+                "POST",
+                "/documents",
+                body=body,
+                timeout=_UPLOAD_TIMEOUT_SECONDS,
+            )
 
             if data.get("error"):
                 results.append(
@@ -383,6 +511,54 @@ async def upload_documents_batch(
         failed=len(files) - succeeded,
         total_chunks_added=total_chunks,
     )
+
+
+@router.patch(
+    "/documents/{doc_id:path}/status",
+    response_model=KnowledgeStatusResponse,
+)
+async def set_document_status(doc_id: str, request: KnowledgeStatusRequest) -> KnowledgeStatusResponse:
+    """Publish, retire, or return a document to review without re-indexing it."""
+    import urllib.parse
+
+    encoded = urllib.parse.quote(doc_id, safe="")
+    data = await _kb_request_async(
+        "PATCH",
+        f"/documents/{encoded}/status",
+        body={"review_status": request.review_status},
+    )
+    if data.get("error"):
+        raise HTTPException(status_code=400, detail=data["error"])
+    return KnowledgeStatusResponse(
+        doc_id=data.get("doc_id", doc_id),
+        review_status=data.get("review_status", request.review_status),
+    )
+
+
+@router.patch(
+    "/documents/{doc_id:path}/metadata",
+    response_model=KnowledgeMetadataResponse,
+)
+async def update_document_metadata(
+    doc_id: str,
+    request: KnowledgeMetadataRequest,
+) -> KnowledgeMetadataResponse:
+    """Update descriptive metadata in the catalog and existing vector chunks."""
+    import urllib.parse
+
+    updates = request.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No metadata fields supplied")
+
+    encoded = urllib.parse.quote(doc_id, safe="")
+    data = await _kb_request_async(
+        "PATCH",
+        f"/documents/{encoded}/metadata",
+        body=updates,
+    )
+    if data.get("error"):
+        raise HTTPException(status_code=400, detail=data["error"])
+    return KnowledgeMetadataResponse(**data)
 
 
 @router.delete("/documents/{doc_id}", response_model=KnowledgeDeleteResponse)

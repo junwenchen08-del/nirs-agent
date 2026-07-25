@@ -83,6 +83,15 @@ the browser keeps only mappings plus the latest 12 aggregate summaries in
 user-scoped localStorage keys; complete evidence remains in the current response and can be
 exported as JSON.
 
+Knowledge settings submit multi-file PDF selections as sequential one-file
+requests. BGE-M3 CPU ingestion can take several minutes per document, so files
+must not share one batch-level proxy timeout even though the UI presents them
+as one selection. The document table exposes publication state and metadata
+editing; edits update descriptive catalog/chunk fields through Gateway without
+re-uploading or re-embedding the source document. The search test consumes
+Gateway retrieval diagnostics and distinguishes a calibrated abstention from
+an empty result, showing the rejection reason and top similarity score.
+
 `/goal` is a built-in composer command, not a skill activation. `src/components/workspace/input-box.tsx` intercepts `/goal`, `/goal clear`, and `/goal <condition>` before normal chat submission, calling Gateway `GET/PUT/DELETE /api/threads/{thread_id}/goal`. Setting `/goal <condition>` also submits the condition text as the next user task so the agent starts running immediately; status and clear do not start a run. Goal requests are tied to the current `threadId` with an `AbortController`, so switching threads or unmounting the composer aborts in-flight goal requests and stale responses cannot update the new thread's goal state. The chat pages render `GoalStatus` above the composer from `AgentThreadState.goal`, with local optimistic state until the next stream `values` update arrives.
 
 ### Key Patterns

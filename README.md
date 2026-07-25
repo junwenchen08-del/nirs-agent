@@ -254,6 +254,30 @@ CARS 的 Monte Carlo 子集使用 80% 训练样本，ARS 按权重从完整变�
 `NIR_REQUIRE_SIGNED_ARTIFACTS=1` 强制 HMAC 签名。NPZ 标签使用 Unicode 数组，读取始终保持
 `allow_pickle=False`；旧 object-array NPZ 需要用当前加载器重新导出。
 
+每次 `nir_predict` 调用（包括模型完整性校验失败）都会追加到
+`/mnt/user-data/outputs/prediction-audit.jsonl`。审计事件记录用户、线程、run/trace、工具调用、
+模型和输入 SHA-256、样本/波长数、聚合预测摘要、漂移摘要、输出路径、耗时与错误类型，但不保存
+原始光谱或逐样本预测值。事件通过 `previous_event_hash`/`event_hash` 串成 SHA-256 哈希链，写入使用
+线程锁、跨进程文件锁和 `fsync`；审计文件不可写或链尾已损坏时，预测结果会失败关闭而不会静默
+绕过审计。`deerflow.community.nir._prediction_audit.verify_prediction_audit` 可校验完整 JSONL 链。
+
+当预测产物带训练域参考且启用 `detect_drift` 时，系统还会按模型 SHA-256 在
+`/mnt/user-data/outputs/prediction-drift-state.json` 中连续累计批次状态。默认连续 3 个批次至少
+50% 样本越出适用域后进入告警，连续 2 个批次降至 10% 以下后记录恢复；中间区间不会触发状态
+翻转，从而避免单批噪声和告警抖动。告警开始/恢复事件只在状态转换时写入哈希链
+`prediction-drift-alerts.jsonl`，`nir_predict` 同时返回 `drift_monitoring.state`、活动告警 ID 和
+处置建议。告警监控存储异常会显式返回在 `drift_monitoring` 并进入预测审计，但不会隐藏已经完成的
+预测结果。
+
+可通过环境变量调整策略：
+
+```bash
+NIR_DRIFT_ALERT_THRESHOLD=0.50
+NIR_DRIFT_ALERT_CONSECUTIVE_BATCHES=3
+NIR_DRIFT_RECOVERY_THRESHOLD=0.10
+NIR_DRIFT_RECOVERY_CONSECUTIVE_BATCHES=2
+```
+
 ## 自主建模算法选择
 
 单成分的 `nir_train_auto_split_model`、`nir_train_partitioned_model`、`nir_analyze` 和
@@ -378,6 +402,48 @@ make dev
 
 ## nir_core 独立使用
 
+### 大型 MAT/CSV 资源预算
+
+所有公共 MAT/CSV 加载器和主要建模工具都会在解析前检查文件大小，并在加载后检查
+样本数、波长数、目标数、矩阵元素数和估算峰值内存。Gateway 运行还会在数据划分、
+预处理、候选选择、各成分/流水线和产物写入边界检查 15 分钟截止时间与取消信号。
+阶段边界取消是协作式软取消；单个正在执行的 sklearn/PyTorch 拟合不会被强制终止。
+
+默认值可通过以下环境变量覆盖：
+
+```bash
+NIR_MAX_FILE_BYTES=536870912
+NIR_MAX_MATRIX_ELEMENTS=50000000
+NIR_MAX_SAMPLES=100000
+NIR_MAX_WAVELENGTHS=50000
+NIR_MAX_TARGETS=256
+NIR_MAX_ESTIMATED_PEAK_BYTES=4294967296
+NIR_MAX_RUNTIME_SECONDS=900
+```
+
+超限结果包含稳定的 `code`、`stage`、实际值和限制值；成功的加载/建模结果包含
+`resource_budget` 高水位证据。
+
+建模实现按职责拆分为 `data_splitting.py`、`candidate_selection.py`、
+`single_target.py`、`multi_target.py`、`artifacts.py` 和 `registration.py`。
+标准单目标/多目标训练工具已分别由对应模块实现；`modeling.py` 仅保留兼容导出，
+以及自动划分、外部验证、一键分析、集合分析和比较等跨阶段编排。
+
+### 中文/多语言知识检索评测
+
+BGE-M3 使用独立的 1024 维索引；旧的 MiniLM 模型和 384 维索引已移除。使用
+`nir_core/knowledge/retrieval_eval_cases.example.json` 建立带相关文档 ID、语言和负例的
+NIR 查询集，再通过 `nir_core.knowledge.evaluation` 对分别重建的基线索引和候选索引比较
+Recall@K、MRR、nDCG@K、无结果准确率和延迟，完成迁移验收。
+当前四篇已发布文档对应的第一版评测集为
+`nir_core/knowledge/retrieval_eval_cases.bge-m3.v1.json`，包含 20 个单文档问题、
+4 个跨文档问题和 4 个无答案负例；基线结果记录在
+`nir_core/knowledge/retrieval_eval_baseline.bge-m3.v1.md`，启用拒答与文档多样化后的
+对比结果记录在 `nir_core/knowledge/retrieval_eval_baseline.bge-m3.policy-v1.md`。
+检索器会先扩大候选池，再限制单篇文档返回的分块数，以改善跨文档问题的证据覆盖；
+无答案判定使用强/弱两级相似度阈值和不同文档之间的分数差，不会再对每个问题强制
+返回向量近邻。搜索 API 的 `retrieval` 字段和网页搜索测试区会显示是否拒答及判定原因。
+
 `nir_core` 可以脱离 DeerFlow 独立使用：
 
 ```python
@@ -447,7 +513,7 @@ cd backend
 # 全部后端 NIR 回归
 make test-nir
 
-# 模型生命周期端到端回归：CSV → 训练/预处理 → 注册 → 预测/漂移 → 防篡改
+# 模型生命周期端到端回归：CSV → 训练/预处理 → 注册 → 预测/漂移/审计 → 防篡改
 make test-nir-e2e
 
 # 确定性工作流与评分器回归
@@ -488,6 +554,33 @@ NIR-Agent 内置化学计量学领域知识库，通过 `nir-knowledge` Skill �
 | `modeling-guide.md` | PLS/PCR/SVR 选择指南 |
 | `metrics-interpretation.md` | 指标解读（RMSEC/RMSECV/RMSEP、RPD分级） |
 | `troubleshooting.md` | 常见问题排查（过拟合、漂移、异常样本） |
+
+论文、标准等检索文档采用受治理的导入链：优先以 DOI 生成稳定 `doc_id`，其次使用
+“标题＋作者＋年份”哈希，最后使用源文件 SHA-256。SQLite 目录记录内容哈希、版本、
+质量等级和 `draft / needs_review / published / retired` 状态。重复文件不会重复向量化，
+同一稳定文档的新内容会替换旧分块并递增版本。智能体只检索 `published` 文档，返回
+稳定证据 ID、章节/页码、来源质量和 `untrusted_evidence` 信任标记。
+
+命令行导入默认保存为 `draft`。审核后使用：
+
+```bash
+python -m nir_core.knowledge.cli set-status <doc_id> published
+```
+
+也可以在网页的“设置 → 知识库”中查看每篇文档的审核状态，并点击“发布”使其进入
+智能体可检索范围。“编辑”按钮可修改标题、作者、年份、DOI、语言、领域标签和质量
+等级；保存时会同步更新 SQLite 目录与现有 ChromaDB 分块元数据，不会重新解析文档、
+生成向量或递增内容版本。
+
+分块器 `cjk-section-v2` 对无空格中文实施长度上限，并保留 Markdown 章节路径、PDF
+页码及相邻分块 ID。当前向量后端仍为 ChromaDB，不要求 PostgreSQL/pgvector。本地
+嵌入模型、维度、索引路径、集合名和索引版本可通过 `.env` 中的
+`NIR_KNOWLEDGE_*` 变量配置；更换模型或维度时必须使用全新的向量索引。
+候选扩展倍数、每篇文档最多分块数、强/弱相似度阈值和跨文档最小领先幅度也可通过
+`NIR_KNOWLEDGE_RETRIEVAL_*` 配置；调整这些检索策略参数不需要重新上传文档或重建索引。
+BGE-M3 在 CPU 上处理大型 PDF 可能需要数分钟，因此 Gateway 和 Nginx 的知识库
+上传链路使用 600 秒单文件超时。前端会把多文件选择拆成逐篇请求，避免多篇串行处理
+共享同一个总超时；浏览器收到最终结果前不要重复上传同一文件。
 
 ---
 

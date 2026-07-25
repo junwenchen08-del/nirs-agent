@@ -22,7 +22,7 @@ def test_batch_upload_forwards_each_valid_file_with_metadata(monkeypatch) -> Non
     def fake_kb_request(method, path, body=None, timeout=60.0):
         assert method == "POST"
         assert path == "/documents"
-        assert timeout == 120.0
+        assert timeout == knowledge._UPLOAD_TIMEOUT_SECONDS
         assert body is not None
         calls.append(body)
         raw = base64.b64decode(body["content_b64"])
@@ -53,6 +53,7 @@ def test_batch_upload_forwards_each_valid_file_with_metadata(monkeypatch) -> Non
     assert [call["filename"] for call in calls] == ["paper.txt", "notes.md"]
     assert all(call["title"] == "Batch title" for call in calls)
     assert all(call["year"] == 2024 for call in calls)
+    assert all(call["review_status"] == "draft" for call in calls)
     assert [base64.b64decode(call["content_b64"]) for call in calls] == [b"alpha", b"beta"]
 
 
@@ -111,4 +112,127 @@ def test_batch_upload_rejects_too_many_files_before_forwarding(monkeypatch) -> N
 
     assert response.status_code == 400
     assert "Too many files" in response.json()["detail"]
+    assert forwarded is False
+
+
+def test_search_exposes_retrieval_abstention_diagnostics(monkeypatch) -> None:
+    def fake_kb_request(method, path, body=None, timeout=60.0):
+        assert method == "POST"
+        assert path == "/search"
+        assert body == {"query": "unrelated query", "top_k": 5}
+        return {
+            "results": [],
+            "count": 0,
+            "query": "unrelated query",
+            "retrieval": {
+                "abstained": True,
+                "reason": "below_weak_score",
+                "candidate_count": 20,
+                "result_count": 0,
+                "top_score": 0.51,
+                "runner_up_document_score": 0.49,
+                "document_margin": 0.02,
+            },
+        }
+
+    client = _make_client(monkeypatch, fake_kb_request)
+    response = client.post(
+        "/api/knowledge/search",
+        json={"query": "unrelated query", "top_k": 5},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["results"] == []
+    assert payload["retrieval"]["abstained"] is True
+    assert payload["retrieval"]["reason"] == "below_weak_score"
+    assert payload["retrieval"]["top_score"] == 0.51
+
+
+def test_set_document_status_forwards_publication_transition(monkeypatch) -> None:
+    def fake_kb_request(method, path, body=None, timeout=60.0):
+        assert method == "PATCH"
+        assert path == "/documents/doi%3A10.1000%2Fpaper/status"
+        assert body == {"review_status": "published"}
+        return {
+            "doc_id": "doi:10.1000/paper",
+            "review_status": "published",
+        }
+
+    client = _make_client(monkeypatch, fake_kb_request)
+    response = client.patch(
+        "/api/knowledge/documents/doi%3A10.1000%2Fpaper/status",
+        json={"review_status": "published"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "doc_id": "doi:10.1000/paper",
+        "review_status": "published",
+    }
+
+
+def test_update_document_metadata_forwards_only_supplied_fields(monkeypatch) -> None:
+    def fake_kb_request(method, path, body=None, timeout=60.0):
+        assert method == "PATCH"
+        assert path == "/documents/doi%3A10.1000%2Fpaper/metadata"
+        assert body == {
+            "title": "Updated paper",
+            "authors": ["Alice", "Bob"],
+            "year": 2025,
+            "doi": "10.1000/paper",
+            "language": "en",
+            "domains": ["meat"],
+            "quality_tier": "A",
+        }
+        return {
+            "doc_id": "doi:10.1000/paper",
+            **body,
+            "source": "paper.pdf",
+            "source_type": "document",
+            "review_status": "published",
+            "content_sha256": "a" * 64,
+            "version": 1,
+        }
+
+    client = _make_client(monkeypatch, fake_kb_request)
+    response = client.patch(
+        "/api/knowledge/documents/doi%3A10.1000%2Fpaper/metadata",
+        json={
+            "title": "Updated paper",
+            "authors": ["Alice", "Bob"],
+            "year": 2025,
+            "doi": "10.1000/paper",
+            "language": "en",
+            "domains": ["meat"],
+            "quality_tier": "A",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["doc_id"] == "doi:10.1000/paper"
+    assert payload["title"] == "Updated paper"
+    assert payload["authors"] == ["Alice", "Bob"]
+    assert payload["quality_tier"] == "A"
+    assert payload["review_status"] == "published"
+    assert "chunk_count" not in payload
+
+
+def test_update_document_metadata_rejects_empty_request(monkeypatch) -> None:
+    forwarded = False
+
+    def fake_kb_request(method, path, body=None, timeout=60.0):
+        nonlocal forwarded
+        forwarded = True
+        return {}
+
+    client = _make_client(monkeypatch, fake_kb_request)
+    response = client.patch(
+        "/api/knowledge/documents/doc-1/metadata",
+        json={},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "No metadata fields supplied"
     assert forwarded is False

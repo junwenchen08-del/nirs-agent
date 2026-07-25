@@ -62,6 +62,7 @@ class KnowledgeRetriever(Protocol):
         query: str,
         top_k: int = 5,
         where: dict[str, Any] | None = None,
+        published_only: bool = True,
     ) -> list[SearchResult]:
         """Semantic search over the knowledge base.
 
@@ -70,6 +71,7 @@ class KnowledgeRetriever(Protocol):
             top_k: Maximum number of results to return.
             where: Optional ChromaDB-style metadata filter, e.g.
                 ``{"year": {"$gte": 2020}}``.
+            published_only: Enforce the publication gate by default.
         """
         ...
 
@@ -91,6 +93,14 @@ class KnowledgeRetriever(Protocol):
         Returns:
             Number of chunks added.
         """
+        ...
+
+    def replace_document(self, doc_id: str, chunks: list[Chunk]) -> int:
+        """Replace all existing chunks for one stable document ID."""
+        ...
+
+    def update_document_metadata(self, doc_id: str, updates: dict[str, Any]) -> bool:
+        """Update metadata on every current chunk for a document."""
         ...
 
     def delete_document(self, doc_id: str) -> bool:

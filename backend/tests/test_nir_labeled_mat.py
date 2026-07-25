@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from deerflow.community.nir.io_tools import nir_inspect_tool, nir_load_data_tool
 
 
-def test_nir_inspect_guides_labeled_mat_directly_to_nir_load_data() -> None:
+def test_nir_inspect_guides_labeled_mat_directly_to_nir_load_data(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "tablets.MAT"
+    input_path.write_bytes(b"")
     inspected = {
         "format": "mat",
         "labeled_matrix": True,
@@ -23,7 +28,10 @@ def test_nir_inspect_guides_labeled_mat_directly_to_nir_load_data() -> None:
     }
 
     with (
-        patch("deerflow.community.nir.io_tools._resolve", return_value="/tmp/tablets.MAT"),
+        patch(
+            "deerflow.community.nir.io_tools._resolve",
+            return_value=str(input_path),
+        ),
         patch("nir_core.io.sniffers.inspect_file", return_value=json.dumps(inspected)),
     ):
         result = nir_inspect_tool.func(
@@ -42,7 +50,11 @@ def test_nir_inspect_guides_labeled_mat_directly_to_nir_load_data() -> None:
     assert "without y_col, x_cols, wv_row, or Python scripts" in payload["hint"]
 
 
-def test_nir_inspect_surfaces_mapping_clarification_instead_of_guessing() -> None:
+def test_nir_inspect_surfaces_mapping_clarification_instead_of_guessing(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "ambiguous.mat"
+    input_path.write_bytes(b"")
     inspected = {
         "format": "mat",
         "shape": [10, 20],
@@ -56,7 +68,10 @@ def test_nir_inspect_surfaces_mapping_clarification_instead_of_guessing() -> Non
     }
 
     with (
-        patch("deerflow.community.nir.io_tools._resolve", return_value="/tmp/ambiguous.mat"),
+        patch(
+            "deerflow.community.nir.io_tools._resolve",
+            return_value=str(input_path),
+        ),
         patch("nir_core.io.sniffers.inspect_file", return_value=json.dumps(inspected)),
     ):
         result = nir_inspect_tool.func(
@@ -70,7 +85,11 @@ def test_nir_inspect_surfaces_mapping_clarification_instead_of_guessing() -> Non
     assert "Do not write a script" in payload["hint"]
 
 
-def test_nir_load_data_refuses_ambiguous_mapping_without_override() -> None:
+def test_nir_load_data_refuses_ambiguous_mapping_without_override(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "ambiguous.mat"
+    input_path.write_bytes(b"")
     inspected = {
         "format": "mat",
         "schema_mapping": {
@@ -81,7 +100,10 @@ def test_nir_load_data_refuses_ambiguous_mapping_without_override() -> None:
     }
 
     with (
-        patch("deerflow.community.nir.io_tools._resolve", return_value="/tmp/ambiguous.mat"),
+        patch(
+            "deerflow.community.nir.io_tools._resolve",
+            return_value=str(input_path),
+        ),
         patch("nir_core.io.sniffers.detect_format", return_value="mat"),
         patch(
             "nir_core.io.sniffers.inspect_file",
