@@ -1,0 +1,77 @@
+{
+  "migration_id": "legacy-bge-m3-v3.12.1",
+  "description": "Correct the four-document BGE-M3 corpus in place without changing stable document IDs or embeddings.",
+  "entries": [
+    {
+      "doc_id": "sha256:39ff244a5bf698c2eb648f2f2d9d2664f5413a4c143a384be81280a5f4d9e82d",
+      "expected_content_sha256": "39ff244a5bf698c2eb648f2f2d9d2664f5413a4c143a384be81280a5f4d9e82d",
+      "updates": {
+        "title": "基于深度学习的近红外光谱定量分析模型研究",
+        "authors": [
+          "卢丰"
+        ],
+        "year": 2024,
+        "source_type": "thesis"
+      },
+      "target_review_status": "published",
+      "evidence": [
+        "Indexed title page: 研究生姓名卢丰",
+        "Indexed title page: 论文答辩日期2024年5月30日"
+      ]
+    },
+    {
+      "doc_id": "sha256:32ce31b7126941aca82de8f78f58ecd92e4fea2a830cfe7878af09a37dd68861",
+      "expected_content_sha256": "32ce31b7126941aca82de8f78f58ecd92e4fea2a830cfe7878af09a37dd68861",
+      "updates": {
+        "title": "Linearization and Scatter-Correction for Near-Infrared Reflectance Spectra of Meat",
+        "authors": [
+          "P. Geladi",
+          "D. MacDougall",
+          "H. Martens"
+        ],
+        "year": 1985,
+        "doi": "10.1366/0003702854248656",
+        "source_type": "journal_article"
+      },
+      "target_review_status": "published",
+      "evidence": [
+        "Indexed article first page lists P. Geladi, D. MacDougall, and H. Martens",
+        "Applied Spectroscopy DOI landing page: https://journals.sagepub.com/doi/10.1366/0003702854248656"
+      ]
+    },
+    {
+      "doc_id": "sha256:915242386d31cf3211d230af8f81b5dd6cd04e4fef055a2aba0357c787f91c8f",
+      "expected_content_sha256": "915242386d31cf3211d230af8f81b5dd6cd04e4fef055a2aba0357c787f91c8f",
+      "updates": {
+        "title": "基于变分自编码器的近红外光谱建模",
+        "authors": [
+          "王劲夫"
+        ],
+        "year": 2023,
+        "source_type": "thesis"
+      },
+      "target_review_status": "published",
+      "evidence": [
+        "Indexed title page: 研究生王劲夫",
+        "Indexed title page: 学位授予日期2023年6月"
+      ]
+    },
+    {
+      "doc_id": "sha256:542bea79a9ac603a961a7265dab0de36ffbba3e51d9b090c2d041fbf7c2c12c7",
+      "expected_content_sha256": "542bea79a9ac603a961a7265dab0de36ffbba3e51d9b090c2d041fbf7c2c12c7",
+      "updates": {
+        "title": "基于机器学习的近红外光谱定量分析模型研究",
+        "authors": [
+          "赵峰媛"
+        ],
+        "year": 2024,
+        "source_type": "thesis"
+      },
+      "target_review_status": "published",
+      "evidence": [
+        "Indexed title page: 作者姓名赵峰媛",
+        "Indexed title page: 完成时间2024年4月"
+      ]
+    }
+  ]
+}

@@ -188,6 +188,7 @@ def test_catalog_updates_editable_metadata_without_new_content_version(
             "authors": ["Alice", "Bob"],
             "year": 2025,
             "doi": "https://doi.org/10.1000/UPDATED.",
+            "source_type": "journal_article",
             "language": "zh-en",
             "domains": ["soil", "wheat"],
             "quality_tier": "A",
@@ -199,6 +200,7 @@ def test_catalog_updates_editable_metadata_without_new_content_version(
     assert updated.authors == ["Alice", "Bob"]
     assert updated.year == 2025
     assert updated.doi == "10.1000/updated"
+    assert updated.source_type == "journal_article"
     assert updated.language == "zh-en"
     assert updated.domains == ["soil", "wheat"]
     assert updated.quality_tier == "A"

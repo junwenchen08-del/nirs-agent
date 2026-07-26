@@ -197,6 +197,11 @@ DOI handling is a soft gate: normalize and validate supplied values, extract a
 missing DOI from parsed text, reject malformed values, and expose
 `doi_missing` plus evidence-level DOI completeness without blocking legitimate
 DOI-less publications.
+Legacy knowledge metadata migrations use hash-pinned JSON manifests and the
+`audit-metadata` / `migrate-metadata` CLI commands. A real migration requires a
+new backup directory, temporarily withdraws published chunks, updates the
+catalog and Chroma metadata without re-embedding, and republishes only records
+that satisfy the current publication gate.
 
 Rule of thumb: **root `make` = the full application**; **`backend/Makefile` and `frontend/`
 (`pnpm`) = per-module work.**

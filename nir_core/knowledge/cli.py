@@ -23,8 +23,17 @@ import sys
 from pathlib import Path
 
 from nir_core.knowledge.config import get_config, get_retriever
-from nir_core.knowledge.governance import KnowledgeCatalog
+from nir_core.knowledge.governance import KnowledgeCatalog, require_publication_ready
 from nir_core.knowledge.ingestion import ingest_document_bytes
+from nir_core.knowledge.migration import (
+    ChromaMetadataStore,
+    apply_metadata_migration,
+    audit_catalog,
+    backup_knowledge_store,
+    load_migration_manifest,
+    migration_results_json,
+    preflight_migration,
+)
 from nir_core.knowledge.parser import SUPPORTED_EXTENSIONS
 
 
@@ -191,6 +200,8 @@ def cmd_set_status(args: argparse.Namespace) -> int:
     if record is None:
         print(f"Document not found: {args.doc_id}")
         return 1
+    if args.review_status == "published":
+        require_publication_ready(record)
     if not retriever.update_document_metadata(
         args.doc_id, {"review_status": args.review_status}
     ):
@@ -198,6 +209,63 @@ def cmd_set_status(args: argparse.Namespace) -> int:
         return 1
     updated = catalog.set_review_status(args.doc_id, args.review_status)
     print(f"Document status: {args.doc_id} -> {updated.review_status}")
+    return 0
+
+
+def cmd_audit_metadata(args: argparse.Namespace) -> int:
+    """Report publication readiness without mutating the knowledge base."""
+    cfg = get_config()
+    catalog = KnowledgeCatalog(cfg.catalog_path)
+    audit = audit_catalog(catalog)
+    print(json.dumps(audit, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_migrate_metadata(args: argparse.Namespace) -> int:
+    """Back up and apply a hash-pinned legacy metadata migration."""
+    cfg = get_config()
+    catalog = KnowledgeCatalog(cfg.catalog_path)
+    manifest = load_migration_manifest(args.manifest)
+    preflight_migration(catalog=catalog, manifest=manifest)
+    if not args.dry_run:
+        if not args.backup_dir:
+            raise ValueError("--backup-dir is required unless --dry-run is used")
+        backup = backup_knowledge_store(
+            catalog_path=cfg.catalog_path,
+            chroma_path=cfg.chroma_path,
+            destination=args.backup_dir,
+        )
+
+    metadata_store = ChromaMetadataStore(
+        db_path=cfg.chroma_path,
+        collection_name=cfg.collection_name,
+    )
+
+    preview = apply_metadata_migration(
+        catalog=catalog,
+        metadata_store=metadata_store,
+        manifest=manifest,
+        dry_run=True,
+    )
+    if args.dry_run:
+        print(json.dumps(migration_results_json(preview), ensure_ascii=False, indent=2))
+        return 0
+    results = apply_metadata_migration(
+        catalog=catalog,
+        metadata_store=metadata_store,
+        manifest=manifest,
+    )
+    print(
+        json.dumps(
+            {
+                "migration_id": manifest.migration_id,
+                "backup": str(backup),
+                "results": migration_results_json(results),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -299,6 +367,28 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("draft", "needs_review", "published", "retired"),
     )
     p_status.set_defaults(func=cmd_set_status)
+
+    p_audit = sub.add_parser(
+        "audit-metadata",
+        help="Report publication-readiness problems for existing documents",
+    )
+    p_audit.set_defaults(func=cmd_audit_metadata)
+
+    p_migrate = sub.add_parser(
+        "migrate-metadata",
+        help="Apply a hash-pinned metadata migration without re-embedding",
+    )
+    p_migrate.add_argument("manifest", help="Migration manifest JSON path")
+    p_migrate.add_argument(
+        "--backup-dir",
+        help="New directory that will receive catalog and Chroma backups",
+    )
+    p_migrate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and preview changes without writing data or a backup",
+    )
+    p_migrate.set_defaults(func=cmd_migrate_metadata)
 
     p_rebuild = sub.add_parser("rebuild", help="Rebuild index (clears all data)")
     p_rebuild.set_defaults(func=cmd_rebuild)

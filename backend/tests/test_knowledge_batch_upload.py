@@ -268,6 +268,7 @@ def test_update_document_metadata_forwards_only_supplied_fields(monkeypatch) -> 
             "authors": ["Alice", "Bob"],
             "year": 2025,
             "doi": "10.1000/paper",
+            "source_type": "journal_article",
             "language": "en",
             "domains": ["meat"],
             "quality_tier": "A",
@@ -276,7 +277,6 @@ def test_update_document_metadata_forwards_only_supplied_fields(monkeypatch) -> 
             "doc_id": "doi:10.1000/paper",
             **body,
             "source": "paper.pdf",
-            "source_type": "document",
             "review_status": "published",
             "content_sha256": "a" * 64,
             "version": 1,
@@ -290,6 +290,7 @@ def test_update_document_metadata_forwards_only_supplied_fields(monkeypatch) -> 
             "authors": ["Alice", "Bob"],
             "year": 2025,
             "doi": "10.1000/paper",
+            "source_type": "journal_article",
             "language": "en",
             "domains": ["meat"],
             "quality_tier": "A",
@@ -301,6 +302,7 @@ def test_update_document_metadata_forwards_only_supplied_fields(monkeypatch) -> 
     assert payload["doc_id"] == "doi:10.1000/paper"
     assert payload["title"] == "Updated paper"
     assert payload["authors"] == ["Alice", "Bob"]
+    assert payload["source_type"] == "journal_article"
     assert payload["quality_tier"] == "A"
     assert payload["review_status"] == "published"
     assert "chunk_count" not in payload

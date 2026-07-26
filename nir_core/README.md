@@ -110,6 +110,19 @@ readiness emits `doi_missing` without blocking a genuinely DOI-less source.
 Evidence assessment reports per-document DOI completeness without changing
 the independent-document decision threshold.
 
+Legacy published records can be audited and migrated in place without changing
+their stable document IDs, content versions, chunks, or embeddings. Migration
+manifests pin every update to the expected source SHA-256, withdraw published
+chunks while metadata changes, and republish only records that pass the current
+publication gate. Always preview and create a new backup directory:
+
+```bash
+python -m nir_core.knowledge.cli audit-metadata
+python -m nir_core.knowledge.cli migrate-metadata path/to/manifest.json --dry-run
+python -m nir_core.knowledge.cli migrate-metadata path/to/manifest.json \
+  --backup-dir path/to/new-backup-directory
+```
+
 Local embedding deployments use `NIR_KNOWLEDGE_EMBEDDING_MODEL`,
 `NIR_KNOWLEDGE_EMBEDDING_DIM`, `NIR_KNOWLEDGE_CHROMA_PATH`,
 `NIR_KNOWLEDGE_CATALOG_PATH`, `NIR_KNOWLEDGE_COLLECTION_NAME`, and

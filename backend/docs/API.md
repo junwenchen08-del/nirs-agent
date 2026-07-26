@@ -724,6 +724,7 @@ Content-Type: application/json
   "authors": ["Alice Zhang", "Bob Li"],
   "year": 2025,
   "doi": "10.1000/example",
+  "source_type": "journal_article",
   "language": "zh-en",
   "domains": ["soil", "wheat"],
   "quality_tier": "A"

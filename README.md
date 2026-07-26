@@ -459,6 +459,11 @@ DOI 采用软门禁：上传时规范化 `https://doi.org/...`/`doi:` 形式并�
 格式错误的 DOI 会被拒绝；期刊或论文型文档缺少 DOI 仍可发布，但会显示
 `doi_missing` 复核警告，决策证据同时报告 DOI 完整、部分完整或缺失。
 
+旧知识库记录不需要删除重传。使用 `audit-metadata` 检查旧数据，再通过带内容
+SHA-256 的迁移清单执行 `migrate-metadata --dry-run`；正式迁移必须指定一个新的
+`--backup-dir`。迁移会临时撤回文档、同步 SQLite 与 Chroma 元数据，并且只在当前
+发布门禁通过后恢复发布，文档 ID、内容版本、分块和嵌入均保持不变。
+
 `nir_core` 可以脱离 DeerFlow 独立使用：
 
 ```python
@@ -584,8 +589,8 @@ python -m nir_core.knowledge.cli set-status <doc_id> published
 
 也可以在网页的“设置 → 知识库”中查看每篇文档的审核状态，并点击“发布”使其进入
 智能体可检索范围。“编辑”按钮可修改标题、作者、年份、DOI、语言、领域标签和质量
-等级；保存时会同步更新 SQLite 目录与现有 ChromaDB 分块元数据，不会重新解析文档、
-生成向量或递增内容版本。
+等级；API 与迁移工具还可修正文献类型。保存时会同步更新 SQLite 目录与现有
+ChromaDB 分块元数据，不会重新解析文档、生成向量或递增内容版本。
 
 分块器 `cjk-section-v2` 对无空格中文实施长度上限，并保留 Markdown 章节路径、PDF
 页码及相邻分块 ID。当前向量后端仍为 ChromaDB，不要求 PostgreSQL/pgvector。本地

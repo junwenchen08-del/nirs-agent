@@ -225,6 +225,7 @@ class KnowledgeMetadataRequest(BaseModel):
     authors: list[str] | None = None
     year: int | None = Field(default=None, ge=1000, le=2100)
     doi: str | None = Field(default=None, max_length=300)
+    source_type: str | None = Field(default=None, min_length=1, max_length=100)
     language: str | None = Field(default=None, min_length=1, max_length=50)
     domains: list[str] | None = None
     quality_tier: str | None = Field(default=None, pattern="^[A-E]$")
@@ -243,6 +244,7 @@ class KnowledgeMetadataResponse(BaseModel):
     authors: list[str] = Field(default_factory=list)
     year: int | None = None
     doi: str | None = None
+    source_type: str = "document"
     language: str = "und"
     domains: list[str] = Field(default_factory=list)
     quality_tier: str = "C"
