@@ -36,7 +36,7 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from nir_core.knowledge.config import get_config
+from nir_core.knowledge.config import get_config, get_retriever
 from nir_core.knowledge.evidence import assess_evidence
 from nir_core.knowledge.governance import (
     DocumentRecord,
@@ -45,15 +45,10 @@ from nir_core.knowledge.governance import (
     require_publication_ready,
 )
 from nir_core.knowledge.ingestion import ingest_document_bytes
-from nir_core.knowledge.vectorstore import ChromaDBRetriever
 
 # --- Initialize retriever (loaded once at startup) ---
 _cfg = get_config()
-_retriever = ChromaDBRetriever(
-    db_path=_cfg.chroma_path,
-    embedding_model=_cfg.embedding_model,
-    collection_name=_cfg.collection_name,
-)
+_retriever = get_retriever(_cfg)
 _catalog = KnowledgeCatalog(_cfg.catalog_path)
 
 # 20 MB upload cap (matches backend upload limit)
@@ -69,6 +64,10 @@ _AUTH_TOKEN = os.environ.get("NIR_KNOWLEDGE_TOKEN", "")
 print(f"[knowledge-server] ChromaDB: {_cfg.chroma_path}")
 print(f"[knowledge-server] Model: {_cfg.embedding_model}")
 print(f"[knowledge-server] Index: {_cfg.index_version}")
+print(
+    "[knowledge-server] Reranker: "
+    + (_cfg.rerank_model if _cfg.rerank_enabled else "disabled")
+)
 print("[knowledge-server] Retriever initialized")
 if _AUTH_TOKEN:
     print("[knowledge-server] Auth: enabled (token from NIR_KNOWLEDGE_TOKEN)")
@@ -125,6 +124,16 @@ def _do_search(
                 "content": r.chunk.content[:3000],
                 "source": r.chunk.source,
                 "score": round(r.score, 4),
+                "dense_score": (
+                    round(float(meta["dense_score"]), 4)
+                    if "dense_score" in meta
+                    else None
+                ),
+                "rerank_score": (
+                    round(float(meta["rerank_score"]), 4)
+                    if "rerank_score" in meta
+                    else None
+                ),
                 "title": meta.get("title", ""),
                 "authors": _load("authors"),
                 "year": meta.get("year"),

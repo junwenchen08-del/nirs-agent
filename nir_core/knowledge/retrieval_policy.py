@@ -15,8 +15,8 @@ class RetrievalPolicy:
     candidate_multiplier: int = 4
     max_candidates: int = 80
     max_chunks_per_document: int = 2
-    strong_score_threshold: float = 0.62
-    weak_score_threshold: float = 0.58
+    strong_score_threshold: float = 0.63
+    weak_score_threshold: float = 0.60
     min_document_margin: float = 0.02
     answerability_enabled: bool = True
     diversity_enabled: bool = True
@@ -60,6 +60,9 @@ class RetrievalDecision:
     top_score: float | None
     runner_up_document_score: float | None
     document_margin: float | None
+    ranking_strategy: str = "dense"
+    top_rerank_score: float | None = None
+    rerank_error: str | None = None
 
     def diagnostics(self) -> dict[str, Any]:
         """Return a JSON-serializable diagnostic payload."""
@@ -71,6 +74,9 @@ class RetrievalDecision:
             "top_score": self.top_score,
             "runner_up_document_score": self.runner_up_document_score,
             "document_margin": self.document_margin,
+            "ranking_strategy": self.ranking_strategy,
+            "top_rerank_score": self.top_rerank_score,
+            "rerank_error": self.rerank_error,
         }
 
 
@@ -79,13 +85,24 @@ def _document_key(result: SearchResult) -> str:
     return str(metadata.get("doc_id") or result.chunk.source or result.chunk.id)
 
 
+def _dense_score(result: SearchResult) -> float:
+    metadata = result.chunk.metadata or {}
+    value = metadata.get("dense_score", result.score)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(result.score)
+
+
 def apply_retrieval_policy(
     candidates: list[SearchResult],
     *,
     top_k: int,
     policy: RetrievalPolicy,
+    ranking_strategy: str = "dense",
+    rerank_error: str | None = None,
 ) -> RetrievalDecision:
-    """Apply calibrated abstention, then greedy per-document diversity."""
+    """Apply dense-score abstention, then rank and diversify candidates."""
     if top_k < 1:
         raise ValueError("top_k must be at least 1")
     if not candidates:
@@ -97,15 +114,19 @@ def apply_retrieval_policy(
             top_score=None,
             runner_up_document_score=None,
             document_margin=None,
+            ranking_strategy=ranking_strategy,
+            top_rerank_score=None,
+            rerank_error=rerank_error,
         )
 
     ranked = sorted(candidates, key=lambda result: result.score, reverse=True)
-    top_score = float(ranked[0].score)
-    top_document = _document_key(ranked[0])
+    dense_ranked = sorted(candidates, key=_dense_score, reverse=True)
+    top_score = _dense_score(dense_ranked[0])
+    top_document = _document_key(dense_ranked[0])
     runner_up_document_score = next(
         (
-            float(result.score)
-            for result in ranked[1:]
+            _dense_score(result)
+            for result in dense_ranked[1:]
             if _document_key(result) != top_document
         ),
         None,
@@ -159,4 +180,9 @@ def apply_retrieval_policy(
         top_score=top_score,
         runner_up_document_score=runner_up_document_score,
         document_margin=document_margin,
+        ranking_strategy=ranking_strategy,
+        top_rerank_score=(
+            float(ranked[0].score) if ranking_strategy == "cross_encoder" else None
+        ),
+        rerank_error=rerank_error,
     )

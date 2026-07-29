@@ -184,6 +184,16 @@ applies the calibrated strong/weak score plus cross-document-margin policy in
 `nir_core.knowledge.retrieval_policy`. The `/search` response exposes the
 decision diagnostics. `NIR_KNOWLEDGE_RETRIEVAL_*` tuning does not require an
 index rebuild, but every change must be rerun against the versioned benchmark.
+Optional second-stage reranking lives in `nir_core.knowledge.reranker` and is
+configured by `NIR_KNOWLEDGE_RERANK_*`. It may reorder the dense candidate pool
+but must preserve dense cosine scores as the calibrated answerability signal,
+expose both dense and reranker scores plus the active ranking strategy, and
+fail open to dense ordering when model loading or inference fails. Reranker
+changes do not require an index rebuild, but must be evaluated against the
+same versioned cases. The current 24-document calibration uses 12
+document-diversified rerank candidates, a 512-token cross-encoder limit, and
+0.63/0.60 dense strong/weak thresholds; its report is
+`nir_core/knowledge/retrieval_eval_baseline.bge-m3.rerank-v1.md`.
 `nir_core.utils.scientific_validation` is mandatory in every primary training
 entry point: it blocks invalid wavelength axes, conflicting duplicate spectra,
 and exact cross-partition leakage, then records a replay manifest. Model

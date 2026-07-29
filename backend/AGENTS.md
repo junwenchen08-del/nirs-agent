@@ -368,7 +368,14 @@ from deerflow.config import get_app_config
   or incrementing the content version. Search responses preserve the
   knowledge server's `retrieval` diagnostics, including abstention reason,
   top score, cross-document margin, candidate count, and returned result
-  count. Attempt history stores model and metrics paths for post-run
+  count. Optional cross-encoder reranking may reorder the dense candidate pool,
+  but dense scores remain authoritative for the calibrated answerability gate.
+  Before cross-encoding, candidates are capped and document-diversified using
+  the configured per-document chunk limit so latency is bounded without losing
+  cross-document evidence.
+  Search results expose `dense_score` and `rerank_score`; diagnostics expose the
+  active `ranking_strategy` and any fail-open `rerank_error`. Attempt history
+  stores model and metrics paths for post-run
   traceability. Search requests accept `purpose=answer|decision` and also
   return `evidence_assessment`. Decision mode requires two independent
   published quality A-C documents; tool instructions require

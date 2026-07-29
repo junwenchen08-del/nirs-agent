@@ -440,9 +440,15 @@ Recall@K、MRR、nDCG@K、无结果准确率和延迟，完成迁移验收。
 4 个跨文档问题和 4 个无答案负例；基线结果记录在
 `nir_core/knowledge/retrieval_eval_baseline.bge-m3.v1.md`，启用拒答与文档多样化后的
 对比结果记录在 `nir_core/knowledge/retrieval_eval_baseline.bge-m3.policy-v1.md`。
+24 篇、805 个分块的扩展语料启用本地 `bge-reranker-v2-m3` 后，校准与性能结果记录在
+`nir_core/knowledge/retrieval_eval_baseline.bge-m3.rerank-v1.md`：28 项版本化评测的
+Recall@5 与负例准确率均为 1.0，平均检索延迟为 6.92 秒。
 检索器会先扩大候选池，再限制单篇文档返回的分块数，以改善跨文档问题的证据覆盖；
 无答案判定使用强/弱两级相似度阈值和不同文档之间的分数差，不会再对每个问题强制
-返回向量近邻。搜索 API 的 `retrieval` 字段和网页搜索测试区会显示是否拒答及判定原因。
+返回向量近邻。可选的本地交叉编码器会对候选池做第二阶段语义重排，但仍使用已校准的
+向量分数执行拒答门禁，避免把不可比较的重排分数套用到旧阈值。搜索结果同时返回
+`dense_score` 和 `rerank_score`，`retrieval.ranking_strategy` 标明实际排序链路；重排器
+加载或推理失败时会自动回退到向量排序，并在 `rerank_error` 中暴露失败类型。
 
 所有主要校准入口现在共享强制科学门禁。训练前会核对 X/y 行对齐、有限值、目标方差、
 波长轴长度与严格单调性，并阻断“相同光谱对应冲突参考值”的数据；划分后还会阻断跨
@@ -598,6 +604,11 @@ ChromaDB 分块元数据，不会重新解析文档、生成向量或递增内�
 `NIR_KNOWLEDGE_*` 变量配置；更换模型或维度时必须使用全新的向量索引。
 候选扩展倍数、每篇文档最多分块数、强/弱相似度阈值和跨文档最小领先幅度也可通过
 `NIR_KNOWLEDGE_RETRIEVAL_*` 配置；调整这些检索策略参数不需要重新上传文档或重建索引。
+本地重排通过 `NIR_KNOWLEDGE_RERANK_ENABLED=true` 启用，并用
+`NIR_KNOWLEDGE_RERANK_MODEL`、`_DEVICE`、`_BATCH_SIZE` 和 `_MAX_LENGTH` 配置模型与
+推理资源，`_MAX_CANDIDATES` 限制交叉编码候选数。当前 24 篇语料的校准值为最多
+12 个候选、512 token；候选池会先按文档限制重复分块，再进行重排，以保留跨文档证据。
+启用或更换重排模型同样不需要重新上传文档或重建向量索引。
 BGE-M3 在 CPU 上处理大型 PDF 可能需要数分钟，因此 Gateway 和 Nginx 的知识库
 上传链路使用 600 秒单文件超时。前端会把多文件选择拆成逐篇请求，避免多篇串行处理
 共享同一个总超时；浏览器收到最终结果前不要重复上传同一文件。

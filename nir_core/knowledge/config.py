@@ -92,6 +92,39 @@ class KnowledgeConfig:
         )
     )
 
+    # Optional second-stage cross-encoder reranking. Dense cosine scores remain
+    # authoritative for calibrated answerability; reranker scores control order.
+    rerank_enabled: bool = field(
+        default_factory=lambda: _env_bool("NIR_KNOWLEDGE_RERANK_ENABLED", False)
+    )
+    rerank_model: str = field(
+        default_factory=lambda: _env_path(
+            "NIR_KNOWLEDGE_RERANK_MODEL",
+            Path("BAAI/bge-reranker-v2-m3"),
+        )
+    )
+    rerank_device: str = field(
+        default_factory=lambda: os.environ.get(
+            "NIR_KNOWLEDGE_RERANK_DEVICE",
+            "auto",
+        )
+    )
+    rerank_batch_size: int = field(
+        default_factory=lambda: int(
+            os.environ.get("NIR_KNOWLEDGE_RERANK_BATCH_SIZE", "8")
+        )
+    )
+    rerank_max_length: int = field(
+        default_factory=lambda: int(
+            os.environ.get("NIR_KNOWLEDGE_RERANK_MAX_LENGTH", "512")
+        )
+    )
+    rerank_max_candidates: int = field(
+        default_factory=lambda: int(
+            os.environ.get("NIR_KNOWLEDGE_RERANK_MAX_CANDIDATES", "12")
+        )
+    )
+
     # Retrieval policy. Thresholds are calibrated against the versioned
     # BGE-M3 evaluation set and do not require rebuilding the vector index.
     retrieval_candidate_multiplier: int = field(
@@ -116,7 +149,7 @@ class KnowledgeConfig:
         default_factory=lambda: float(
             os.environ.get(
                 "NIR_KNOWLEDGE_RETRIEVAL_STRONG_SCORE_THRESHOLD",
-                "0.62",
+                "0.63",
             )
         )
     )
@@ -124,7 +157,7 @@ class KnowledgeConfig:
         default_factory=lambda: float(
             os.environ.get(
                 "NIR_KNOWLEDGE_RETRIEVAL_WEAK_SCORE_THRESHOLD",
-                "0.58",
+                "0.60",
             )
         )
     )
@@ -188,6 +221,18 @@ def get_retriever(config: KnowledgeConfig | None = None):
 
     from nir_core.knowledge.vectorstore import ChromaDBRetriever
     from nir_core.knowledge.retrieval_policy import RetrievalPolicy
+    from nir_core.knowledge.reranker import CrossEncoderReranker
+
+    reranker = (
+        CrossEncoderReranker(
+            cfg.rerank_model,
+            device=cfg.rerank_device,
+            batch_size=cfg.rerank_batch_size,
+            max_length=cfg.rerank_max_length,
+        )
+        if cfg.rerank_enabled
+        else None
+    )
 
     chroma = ChromaDBRetriever(
         db_path=cfg.chroma_path,
@@ -203,6 +248,8 @@ def get_retriever(config: KnowledgeConfig | None = None):
             answerability_enabled=cfg.retrieval_answerability_enabled,
             diversity_enabled=cfg.retrieval_diversity_enabled,
         ),
+        reranker=reranker,
+        rerank_max_candidates=cfg.rerank_max_candidates,
     )
 
     if cfg.graph_backend == "neo4j" and cfg.neo4j_uri:

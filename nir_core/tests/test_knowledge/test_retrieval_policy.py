@@ -85,7 +85,7 @@ def test_policy_accepts_mid_score_with_clear_document_margin() -> None:
 
 def test_policy_accepts_strong_score_without_margin() -> None:
     decision = apply_retrieval_policy(
-        [_result("a", 0.63, 0), _result("b", 0.629, 0)],
+        [_result("a", 0.65, 0), _result("b", 0.649, 0)],
         top_k=1,
         policy=RetrievalPolicy(),
     )
@@ -93,3 +93,71 @@ def test_policy_accepts_strong_score_without_margin() -> None:
     assert decision.abstained is False
     assert decision.reason == "strong_score"
     assert len(decision.results) == 1
+
+
+def test_policy_rejects_expanded_corpus_false_positive_boundary() -> None:
+    decision = apply_retrieval_policy(
+        [_result("a", 0.6218, 0), _result("b", 0.6182, 0)],
+        top_k=5,
+        policy=RetrievalPolicy(),
+    )
+
+    assert decision.results == ()
+    assert decision.abstained is True
+    assert decision.reason == "ambiguous_across_documents"
+
+
+def test_policy_accepts_expanded_corpus_positive_boundary() -> None:
+    decision = apply_retrieval_policy(
+        [_result("a", 0.6364, 0), _result("b", 0.6335, 0)],
+        top_k=5,
+        policy=RetrievalPolicy(),
+    )
+
+    assert decision.abstained is False
+    assert decision.reason == "strong_score"
+
+
+def test_policy_uses_rerank_order_but_dense_scores_for_answerability() -> None:
+    dense_best = _result("dense-best", 0.70, 0)
+    rerank_best = _result("rerank-best", 0.96, 0)
+    rerank_best.chunk.metadata["dense_score"] = 0.63
+    rerank_best.chunk.metadata["rerank_score"] = 0.96
+    dense_best.chunk.metadata["dense_score"] = 0.70
+    dense_best.chunk.metadata["rerank_score"] = 0.15
+    dense_best.score = 0.15
+
+    decision = apply_retrieval_policy(
+        [dense_best, rerank_best],
+        top_k=2,
+        policy=RetrievalPolicy(),
+        ranking_strategy="cross_encoder",
+    )
+
+    assert [result.chunk.metadata["doc_id"] for result in decision.results] == [
+        "rerank-best",
+        "dense-best",
+    ]
+    assert decision.top_score == pytest.approx(0.70)
+    assert decision.top_rerank_score == pytest.approx(0.96)
+    assert decision.ranking_strategy == "cross_encoder"
+    assert decision.abstained is False
+
+
+def test_reranker_cannot_override_dense_below_weak_score_gate() -> None:
+    first = _result("a", 0.99, 0)
+    second = _result("b", 0.98, 0)
+    first.chunk.metadata["dense_score"] = 0.55
+    second.chunk.metadata["dense_score"] = 0.54
+
+    decision = apply_retrieval_policy(
+        [first, second],
+        top_k=2,
+        policy=RetrievalPolicy(),
+        ranking_strategy="cross_encoder",
+    )
+
+    assert decision.results == ()
+    assert decision.abstained is True
+    assert decision.reason == "below_weak_score"
+    assert decision.top_rerank_score == pytest.approx(0.99)

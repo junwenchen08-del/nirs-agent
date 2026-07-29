@@ -91,6 +91,18 @@ score only when it clearly leads the next document, and otherwise returns no
 evidence. All policy values are configurable with
 `NIR_KNOWLEDGE_RETRIEVAL_*` variables and do not require re-embedding.
 
+`knowledge.reranker` optionally applies a local Hugging Face cross-encoder to
+the dense candidate pool. Enable it with `NIR_KNOWLEDGE_RERANK_ENABLED=true`
+and configure its model, device, batch size, and maximum sequence length with
+the matching `NIR_KNOWLEDGE_RERANK_*` variables. Cross-encoder scores determine
+result order, while dense cosine scores remain authoritative for the calibrated
+answerability gate. Results expose both scores and the active ranking strategy;
+reranker failures fail open to dense ordering. Reranking never requires
+re-embedding or re-uploading documents. The 24-document calibration caps the
+reranker at 12 document-diversified candidates and 512 tokens, with dense
+strong/weak thresholds of 0.63/0.60. Its measured report is
+`knowledge/retrieval_eval_baseline.bge-m3.rerank-v1.md`.
+
 `utils.scientific_validation` is the shared release contract for calibration
 data. It validates matrix/target alignment, finite values, target variation,
 strict wavelength ordering, conflicting exact duplicates, and exact

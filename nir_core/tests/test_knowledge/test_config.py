@@ -24,6 +24,13 @@ def test_knowledge_config_reads_local_embedding_index_overrides(
     monkeypatch.setenv("NIR_KNOWLEDGE_RETRIEVAL_MIN_DOCUMENT_MARGIN", "0.03")
     monkeypatch.setenv("NIR_KNOWLEDGE_RETRIEVAL_ANSWERABILITY_ENABLED", "true")
     monkeypatch.setenv("NIR_KNOWLEDGE_RETRIEVAL_DIVERSITY_ENABLED", "false")
+    reranker_path = tmp_path / "bge-reranker-v2-m3"
+    monkeypatch.setenv("NIR_KNOWLEDGE_RERANK_ENABLED", "true")
+    monkeypatch.setenv("NIR_KNOWLEDGE_RERANK_MODEL", str(reranker_path))
+    monkeypatch.setenv("NIR_KNOWLEDGE_RERANK_DEVICE", "cpu")
+    monkeypatch.setenv("NIR_KNOWLEDGE_RERANK_BATCH_SIZE", "7")
+    monkeypatch.setenv("NIR_KNOWLEDGE_RERANK_MAX_LENGTH", "768")
+    monkeypatch.setenv("NIR_KNOWLEDGE_RERANK_MAX_CANDIDATES", "11")
 
     config = KnowledgeConfig()
 
@@ -41,3 +48,9 @@ def test_knowledge_config_reads_local_embedding_index_overrides(
     assert config.retrieval_min_document_margin == 0.03
     assert config.retrieval_answerability_enabled is True
     assert config.retrieval_diversity_enabled is False
+    assert config.rerank_enabled is True
+    assert config.rerank_model == str(reranker_path)
+    assert config.rerank_device == "cpu"
+    assert config.rerank_batch_size == 7
+    assert config.rerank_max_length == 768
+    assert config.rerank_max_candidates == 11

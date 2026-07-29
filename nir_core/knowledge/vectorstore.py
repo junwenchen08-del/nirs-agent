@@ -27,8 +27,33 @@ from nir_core.knowledge.retrieval_policy import (
     RetrievalPolicy,
     apply_retrieval_policy,
 )
+from nir_core.knowledge.reranker import KnowledgeReranker
 
 logger = logging.getLogger(__name__)
+
+
+def _select_rerank_candidates(
+    candidates: list[SearchResult],
+    *,
+    limit: int,
+    max_chunks_per_document: int | None,
+) -> list[SearchResult]:
+    """Keep the dense order while exposing more documents to the reranker."""
+    selected: list[SearchResult] = []
+    document_counts: dict[str, int] = {}
+    for candidate in candidates:
+        metadata = candidate.chunk.metadata or {}
+        document_key = str(
+            metadata.get("doc_id") or candidate.chunk.source or candidate.chunk.id
+        )
+        count = document_counts.get(document_key, 0)
+        if max_chunks_per_document is not None and count >= max_chunks_per_document:
+            continue
+        selected.append(candidate)
+        document_counts[document_key] = count + 1
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 class ChromaDBRetriever:
@@ -40,7 +65,11 @@ class ChromaDBRetriever:
         embedding_model: str = "BAAI/bge-m3",
         collection_name: str = "nir_papers_bge_m3",
         retrieval_policy: RetrievalPolicy | None = None,
+        reranker: KnowledgeReranker | None = None,
+        rerank_max_candidates: int = 12,
     ) -> None:
+        if rerank_max_candidates < 1:
+            raise ValueError("rerank_max_candidates must be at least 1")
         # Local embedding directories must not trigger HuggingFace lookups.
         if os.path.isdir(embedding_model):
             os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -59,6 +88,8 @@ class ChromaDBRetriever:
             metadata={"hnsw:space": "cosine"},
         )
         self._retrieval_policy = retrieval_policy or RetrievalPolicy()
+        self._reranker = reranker
+        self._rerank_max_candidates = rerank_max_candidates
 
     # ------------------------------------------------------------------
     # search
@@ -144,10 +175,42 @@ class ChromaDBRetriever:
                     related_entities=[],
                 )
             )
+        ranked_candidates = out
+        ranking_strategy = "dense"
+        rerank_error = None
+        if self._reranker is not None and out:
+            try:
+                rerank_count = min(
+                    len(out),
+                    max(top_k, self._rerank_max_candidates),
+                )
+                rerank_pool = _select_rerank_candidates(
+                    out,
+                    limit=rerank_count,
+                    max_chunks_per_document=(
+                        self._retrieval_policy.max_chunks_per_document
+                        if self._retrieval_policy.diversity_enabled
+                        else None
+                    ),
+                )
+                ranked_candidates = self._reranker.rerank(
+                    query,
+                    rerank_pool,
+                )
+                ranking_strategy = "cross_encoder"
+            except Exception as exc:  # noqa: BLE001
+                rerank_error = type(exc).__name__
+                logger.exception(
+                    "Knowledge reranker %s failed; using dense order",
+                    self._reranker.model_name,
+                )
+
         return apply_retrieval_policy(
-            out,
+            ranked_candidates,
             top_k=top_k,
             policy=self._retrieval_policy,
+            ranking_strategy=ranking_strategy,
+            rerank_error=rerank_error,
         )
 
     # ------------------------------------------------------------------

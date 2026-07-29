@@ -156,6 +156,8 @@ class KnowledgeSearchResult(BaseModel):
     content: str
     source: str
     score: float
+    dense_score: float | None = None
+    rerank_score: float | None = None
     entities: dict
     related_entities: list[str]
     evidence_id: str = ""
@@ -183,6 +185,9 @@ class KnowledgeRetrievalDiagnostics(BaseModel):
     top_score: float | None = None
     runner_up_document_score: float | None = None
     document_margin: float | None = None
+    ranking_strategy: str = "dense"
+    top_rerank_score: float | None = None
+    rerank_error: str | None = None
 
 
 class KnowledgeSearchResponse(BaseModel):
