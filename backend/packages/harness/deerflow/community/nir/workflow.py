@@ -34,6 +34,53 @@ _PREREQUISITE_INPUTS = {
 }
 _DECISION_INPUTS = ("domain", "analyte", "unit", "validation_goal")
 _HIGH_ASSURANCE_INPUTS = ("instrument", "grouping_column", "reference_method")
+_VALIDATION_GOAL_ALIASES = {
+    "exploratory": "exploratory",
+    "exploration": "exploratory",
+    "exploratory_analysis": "exploratory",
+    "探索": "exploratory",
+    "探索分析": "exploratory",
+    "internal_holdout": "internal_holdout",
+    "internal": "internal_holdout",
+    "holdout": "internal_holdout",
+    "same_dataset_holdout": "internal_holdout",
+    "同一数据集独立留出": "internal_holdout",
+    "独立留出": "internal_holdout",
+    "external_validation": "external_validation",
+    "external": "external_validation",
+    "独立外部验证": "external_validation",
+    "外部验证": "external_validation",
+    "production": "production",
+    "deployment": "production",
+    "production_deployment": "production",
+    "生产部署": "production",
+    "部署": "production",
+}
+_AGENT_VIEW_FIELDS = (
+    "project_id",
+    "task_type",
+    "stage",
+    "revision",
+    "domain",
+    "analyte",
+    "unit",
+    "validation_goal",
+    "instrument",
+    "grouping_column",
+    "reference_method",
+    "data_path",
+    "model_path",
+    "metrics_path",
+    "knowledge_evidence",
+    "attempt",
+    "max_attempts",
+    "audit_status",
+    "missing_inputs",
+    "clarification_questions",
+    "approval_status",
+    "next_action",
+)
+_AGENT_OBSERVATION_FIELDS = ("name", "status", "code", "requested_method", "stage_after")
 _HIGH_ASSURANCE_GOAL_MARKERS = (
     "external",
     "production",
@@ -81,6 +128,17 @@ def _prerequisite_missing(state: NIRWorkflowState) -> list[str]:
 def _requires_high_assurance_context(validation_goal: str | None) -> bool:
     normalized = str(validation_goal or "").strip().lower()
     return any(marker in normalized for marker in _HIGH_ASSURANCE_GOAL_MARKERS)
+
+
+def _normalize_validation_goal(value: str) -> str:
+    normalized = re.sub(r"[\s-]+", "_", value.strip().lower())
+    canonical = _VALIDATION_GOAL_ALIASES.get(normalized)
+    if canonical is None:
+        raise NIRWorkflowError(
+            "Unsupported validation_goal "
+            f"{value!r}; expected exploratory, internal_holdout, external_validation, or production"
+        )
+    return canonical
 
 
 def _decision_missing(state: NIRWorkflowState) -> list[str]:
@@ -141,12 +199,28 @@ def _requirement_updates(
         "domain": domain,
         "analyte": analyte,
         "unit": unit,
-        "validation_goal": validation_goal,
         "instrument": instrument,
         "grouping_column": grouping_column,
         "reference_method": reference_method,
     }
-    return {key: value.strip() for key, value in values.items() if isinstance(value, str) and value.strip()}
+    updates = {key: value.strip() for key, value in values.items() if isinstance(value, str) and value.strip()}
+    if isinstance(validation_goal, str) and validation_goal.strip():
+        updates["validation_goal"] = _normalize_validation_goal(validation_goal)
+    return updates
+
+
+def workflow_agent_view(state: NIRWorkflowState | dict) -> dict[str, Any]:
+    """Return the compact decision state needed by the model, without audit traces."""
+    projected = {field: state.get(field) for field in _AGENT_VIEW_FIELDS if field in state}
+    observations = state.get("tool_observations")
+    projected["tool_observation_count"] = len(observations) if isinstance(observations, list) else 0
+    if isinstance(observations, list) and observations and isinstance(observations[-1], dict):
+        projected["last_tool_observation"] = {
+            field: observations[-1].get(field)
+            for field in _AGENT_OBSERVATION_FIELDS
+            if observations[-1].get(field) is not None
+        }
+    return projected
 
 
 def _merge_evidence(state: NIRWorkflowState, evidence_ids: list[str] | None) -> list[str]:
@@ -446,6 +520,15 @@ def transition_workflow(
     if action == "plan_ready":
         if state["stage"] != "planning":
             raise NIRWorkflowError("plan_ready is only allowed during planning")
+        if state.get("validation_goal") == "exploratory":
+            return _with_update(
+                state,
+                action=action,
+                stage="completed",
+                next_action="none",
+                approval_status="not_required",
+                event_details={"notes": notes, "outcome": "exploratory_findings_ready"},
+            )
         return _with_update(
             state,
             action=action,
@@ -573,7 +656,7 @@ def _tool_payload(state: NIRWorkflowState) -> str:
     return json.dumps(
         {
             "status": "ok",
-            "workflow": state,
+            "workflow": workflow_agent_view(state),
             "stage": state["stage"],
             "next_action": state["next_action"],
             "missing_inputs": state["missing_inputs"],

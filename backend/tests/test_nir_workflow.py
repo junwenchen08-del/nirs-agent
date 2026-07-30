@@ -17,6 +17,7 @@ from deerflow.community.nir.workflow import (
     nir_workflow_tool,
     start_workflow,
     transition_workflow,
+    workflow_agent_view,
 )
 
 
@@ -78,6 +79,54 @@ def test_external_validation_requests_high_impact_context_in_one_question():
         "grouping_column",
         "reference_method",
     ]
+
+
+@pytest.mark.parametrize(
+    ("provided", "expected"),
+    [
+        ("exploratory analysis", "exploratory"),
+        ("探索分析", "exploratory"),
+        ("same-dataset holdout", "internal_holdout"),
+        ("外部验证", "external_validation"),
+        ("生产部署", "production"),
+    ],
+)
+def test_validation_goal_aliases_are_persisted_canonically(provided, expected):
+    state = start_workflow(
+        task_type="calibration",
+        data_path="corn.npz",
+        validation_goal=provided,
+    )
+
+    assert state["validation_goal"] == expected
+
+
+def test_unsupported_validation_goal_is_rejected():
+    with pytest.raises(NIRWorkflowError, match="Unsupported validation_goal"):
+        start_workflow(
+            task_type="calibration",
+            data_path="corn.npz",
+            validation_goal="make it production-ish",
+        )
+
+
+def test_exploratory_plan_routes_to_findings_without_modeling():
+    state = start_workflow(
+        task_type="calibration",
+        data_path="corn.npz",
+        analyte="protein",
+        unit="%",
+        domain="food_protein",
+        validation_goal="exploratory",
+    )
+    state = transition_workflow(state, action="record_audit", audit_passed=True)
+
+    state = transition_workflow(state, action="plan_ready")
+
+    assert state["stage"] == "completed"
+    assert state["next_action"] == "none"
+    assert state["approval_status"] == "not_required"
+    assert state["history"][-1]["outcome"] == "exploratory_findings_ready"
 
 
 def test_requirements_after_passed_audit_advance_without_repeating_inspection():
@@ -369,6 +418,64 @@ def test_workflow_state_is_rendered_into_durable_context():
     assert '"stage": "clarification"' in rendered
     assert '"next_action": "ask_targeted_clarification"' in rendered
     assert '"fields": ["validation_goal"]' in rendered
+
+
+def test_agent_view_omits_history_and_trace_identifiers():
+    state = start_workflow(
+        task_type="calibration",
+        data_path="corn.npz",
+        validation_goal="exploratory",
+    )
+    state["run_ids"] = ["run-secret"]
+    state["trace_ids"] = ["trace-secret"]
+    state["tool_observations"] = [
+        {
+            "name": "nir_inspect",
+            "status": "success",
+            "call_id": "call-secret",
+            "run_id": "run-secret",
+            "trace_id": "trace-secret",
+        }
+    ]
+
+    projected = workflow_agent_view(state)
+
+    assert "history" not in projected
+    assert "run_ids" not in projected
+    assert "trace_ids" not in projected
+    assert "tool_observations" not in projected
+    assert projected["tool_observation_count"] == 1
+    assert projected["last_tool_observation"] == {
+        "name": "nir_inspect",
+        "status": "success",
+    }
+
+
+def test_workflow_tool_returns_compact_agent_view_but_persists_full_state():
+    state = start_workflow(
+        task_type="calibration",
+        data_path="corn.npz",
+        validation_goal="exploratory",
+    )
+    state["history"] = [{"action": "large-event", "notes": "x" * 10_000}]
+    state["tool_observations"] = [
+        {
+            "name": "nir_inspect",
+            "status": "success",
+            "call_id": "call-secret",
+            "run_id": "run-secret",
+        }
+    ]
+    runtime = SimpleNamespace(state={"nir_workflow": state}, tool_call_id="call-status")
+
+    command = nir_workflow_tool.func(runtime=runtime, action="status")
+
+    payload = json.loads(command.update["messages"][0].content)
+    assert len(command.update["messages"][0].content) < 2_000
+    assert "history" not in payload["workflow"]
+    assert "tool_observations" not in payload["workflow"]
+    assert payload["workflow"]["tool_observation_count"] == 1
+    assert "nir_workflow" not in command.update
 
 
 def _review_state():

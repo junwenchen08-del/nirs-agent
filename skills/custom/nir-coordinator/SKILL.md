@@ -61,6 +61,21 @@ nir_workflow(
 `production`。外部验证和生产部署还必须确认 `instrument`、`grouping_column` 和
 `reference_method`，因为这些信息决定域偏移和无泄漏验证边界。
 
+验证目标是运行时协议，不是报告标签：
+
+- `exploratory`：只报告数据审查得到的探索性发现、数据限制和下一步采样建议；不得调用任何
+  建模或注册工具。调用 `plan_ready` 会原子地完成探索工作流；随后直接用 `nir_inspect` 的
+  结构化摘要回答，不再调用 `complete`。除非用户明确要求可下载报告，否则不要调用
+  `read_file`、`write_file` 或 `present_files`，也不要读取原始 CSV/MAT/NPZ 来补统计。如果用户
+  仍要求拟合校准模型，先明确请求把目标改为 `internal_holdout`，不得静默划出测试集。
+- `internal_holdout`：允许使用同一数据集的独立留出协议，但必须明确声明不是外部验证。
+- `external_validation` / `production`：必须使用用户提供且独立于模型选择的数据边界；缺少时
+  不得把内部留出结果包装成外部验证或生产证据。
+
+探索报告只能引用当前线程中 `nir_inspect` 等结构化工具实际返回的证据。探索模式没有模型
+结果，禁止引用 R²、RMSE、RPD、模型方法或“此前建模结果”；不要把其他对话、文件名暗示或
+记忆当作当前数据证据。
+
 多成分/多组分/同时分析请求使用 `task_type="multi_modeling"`。数据审查后通过
 `nir_load_data(y_cols=..., output_path=...)` 生成二维 y 的 NPZ，再调用一次
 `nir_train_multi_model`；不要为每个成分分别调用 `nir_train_model`。
@@ -71,7 +86,7 @@ nir_workflow(
 波长选择、用 Tuning 选择模型、仅在最后一次使用外部测试集。此场景禁止改走
 `nir_analyze`、`nir_preprocess + nir_train_model` 或 `nir_reflect` 重试循环。
 
-单成分 CSV 如果没有官方命名划分，完成数据审查与计划记录后直接调用一次
+单成分 CSV 如果没有官方命名划分，且 `validation_goal="internal_holdout"`，完成数据审查与计划记录后直接调用一次
 `nir_train_auto_split_model(split_strategy="auto")`。不要传 `method` 或 `compare_cars`：前者让运行时自主比较合适的模型家族，后者让运行时自主判断是否比较 CARS。该工具先识别批次、季节、
 产地、仪器等合格分组字段；没有合格字段时，小样本使用 SPXY，大样本使用目标值分层，并生成
 约 70% 校准、15% 调优、15% 独立留出测试；此场景同样禁止改走 `nir_analyze` 或反思重试。
@@ -147,7 +162,7 @@ MATLAB `.mat` 文件如果 `nir_inspect` 返回两个或更多 `available_subset
 
 ## 核心原则
 
-1. **数据永不进入你的上下文**——你只看到摘要、指标和路径
+1. **数据永不进入你的上下文**——你只看到摘要、指标和路径；运行时会拒绝读取原始输入文件
 2. **强制三集分离**——校准集、调优集、测试集在建模时保持相互隔离
 3. **调优集只负责模型选择**——预处理和波长选择拟合不得读取调优集
 4. **测试集只在最终评估时使用一次**——不得参与任何参数选择

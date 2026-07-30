@@ -62,6 +62,7 @@ _MODEL_DEFAULTS = {
     "nir_compare": "pls",
 }
 _MODEL_SUBSTITUTION_CODE = "nir_model_substitution_requires_approval"
+_VALIDATION_GOAL_CONFLICT_CODE = "nir_validation_goal_conflict"
 _MODEL_ALIASES = {
     "cnn": ("cnn", "1dcnn", "一维卷积"),
     "mlp": ("mlp", "多层感知机"),
@@ -79,6 +80,7 @@ _MODEL_ALIASES = {
 }
 _TERMINAL_NIR_STAGES = frozenset({"completed", "blocked"})
 _SCRIPT_SUFFIX_RE = re.compile(r"\.(?:py|ipynb|r|jl|m)(?:$|[?#])", re.IGNORECASE)
+_RAW_NIR_DATA_SUFFIX_RE = re.compile(r"\.(?:csv|tsv|txt|mat|npz|npy|xlsx?|xls)(?:$|[?#])", re.IGNORECASE)
 # Interpreters that execute analysis scripts (Python, pip, pytest, R, Julia,
 # MATLAB). Matched only at a command-start position (after ^, a shell
 # separator ;&|( or newline, or a known prefix sudo/time/exec/env/nohup) to
@@ -261,12 +263,63 @@ def _deny_unapproved_model_substitution(
     )
 
 
+def _deny_validation_goal_conflict(
+    request: ToolCallRequest,
+    workflow: Mapping[str, Any],
+    policy: _ToolPolicy,
+) -> ToolMessage | None:
+    tool_name = str(request.tool_call.get("name", ""))
+    validation_goal = str(workflow.get("validation_goal") or "").strip().lower()
+    if validation_goal != "exploratory" or tool_name not in {*_MODELING_TOOLS, "nir_register_model"}:
+        return None
+    return _denied_message(
+        request,
+        code=_VALIDATION_GOAL_CONFLICT_CODE,
+        error=(
+            f"Tool {tool_name!r} creates or registers a validation model, but validation_goal='exploratory' "
+            "does not permit an independent holdout, external-validation, or deployable-model claim."
+        ),
+        workflow=workflow,
+        policy=policy,
+        details={
+            "validation_goal": validation_goal,
+            "action_required": "report_exploratory_findings_or_request_validation_goal_change",
+            "allowed_validation_goals_for_modeling": [
+                "internal_holdout",
+                "external_validation",
+                "production",
+            ],
+        },
+    )
+
+
 def _authorize(request: ToolCallRequest) -> ToolMessage | None:
     tool_name = str(request.tool_call.get("name", ""))
     workflow = _state_from_request(request).get("nir_workflow")
+    args = request.tool_call.get("args")
+    args = args if isinstance(args, Mapping) else {}
+    if isinstance(workflow, Mapping) and tool_name in {"read_file", "read_file_tool"}:
+        requested_path = str(args.get("path") or args.get("file_path") or "").replace("\\", "/")
+        workflow_path = str(workflow.get("data_path") or "").replace("\\", "/")
+        is_workflow_input = bool(requested_path and workflow_path and requested_path == workflow_path)
+        is_uploaded_raw_data = "/uploads/" in requested_path.lower() and bool(
+            _RAW_NIR_DATA_SUFFIX_RE.search(requested_path)
+        )
+        if is_workflow_input or is_uploaded_raw_data:
+            return _denied_message(
+                request,
+                code="nir_raw_data_read_forbidden",
+                error=(
+                    "Raw NIR input data must not be copied into the model context. "
+                    "Use nir_inspect or another structured NIR tool and rely on its bounded summary."
+                ),
+                workflow=workflow,
+                details={
+                    "path": requested_path,
+                    "action_required": "use_nir_inspect_summary",
+                },
+            )
     if isinstance(workflow, Mapping) and str(workflow.get("stage", "")) not in _TERMINAL_NIR_STAGES:
-        args = request.tool_call.get("args")
-        args = args if isinstance(args, Mapping) else {}
         violation = False
         if tool_name in {"write_file", "write_file_tool"}:
             path = str(args.get("path") or args.get("file_path") or "")
@@ -301,6 +354,8 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
             policy=policy,
         )
 
+    if validation_denial := _deny_validation_goal_conflict(request, workflow, policy):
+        return validation_denial
     stage = str(workflow.get("stage", ""))
     task_type = str(workflow.get("task_type", ""))
     if stage not in policy.stages:

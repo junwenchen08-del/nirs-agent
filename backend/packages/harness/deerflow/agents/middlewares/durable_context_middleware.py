@@ -24,6 +24,7 @@ from langgraph.runtime import Runtime
 from deerflow.agents.middlewares.delegation_ledger import extract_delegations, render_delegation_ledger
 from deerflow.agents.middlewares.skill_context import extract_skills, render_skill_context
 from deerflow.agents.thread_state import _DELEGATION_LEDGER_MAX_ENTRIES, TERMINAL_STATUSES
+from deerflow.community.nir.workflow import workflow_agent_view
 
 _DEFAULT_SKILLS_ROOT = "/mnt/skills"
 _DEFAULT_SKILL_READ_TOOL_NAMES = frozenset({"read_file", "read", "view", "cat"})
@@ -38,7 +39,6 @@ _AUTHORITY_CONTRACT = "\n".join(
     ]
 )
 _DELEGATION_STABLE_FIELDS = ("description", "subagent_type", "status", "result_brief", "result_sha256", "result_ref")
-_NIR_TRACE_FIELDS = frozenset({"run_ids", "trace_ids", "tool_observations"})
 
 
 def _normalize_skills_root(skills_container_path: str | None) -> str:
@@ -61,13 +61,7 @@ def _bound_text(text: str, cap: int) -> str:
 
 
 def _nir_workflow_prompt_projection(workflow: dict) -> dict:
-    projected = {key: value for key, value in workflow.items() if key not in _NIR_TRACE_FIELDS}
-    history = projected.get("history")
-    if isinstance(history, list):
-        projected["history"] = [event for event in history if not isinstance(event, dict) or event.get("action") != "tool_call"]
-    observations = workflow.get("tool_observations")
-    projected["tool_observation_count"] = len(observations) if isinstance(observations, list) else 0
-    return projected
+    return workflow_agent_view(workflow)
 
 
 def _insert_after_leading_system_messages(messages: list, injected: list) -> list:

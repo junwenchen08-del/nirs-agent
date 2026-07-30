@@ -517,6 +517,7 @@ class TestDurableContextInjection:
 
         assert '"stage": "review"' in rendered
         assert '"tool_observation_count": 1' in rendered
+        assert '"history"' not in rendered
         assert "secret-call-id" not in rendered
         assert "secret-run-id" not in rendered
         assert "secret-trace-id" not in rendered

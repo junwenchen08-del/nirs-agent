@@ -141,6 +141,60 @@ def test_tool_is_denied_for_incompatible_task_type() -> None:
     assert json.loads(result.update["messages"][0].content)["code"] == "nir_workflow_task_denied"
 
 
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "nir_train_auto_split_model",
+        "nir_train_model",
+        "nir_train_partitioned_model",
+        "nir_analyze",
+        "nir_analyze_collection",
+        "nir_compare",
+        "nir_register_model",
+    ],
+)
+def test_exploratory_goal_hard_blocks_modeling_and_registration(tool_name: str) -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state(task_type="analysis")
+    workflow["validation_goal"] = "exploratory"
+
+    result = middleware.wrap_tool_call(
+        _request(tool_name, {"nir_workflow": workflow}),
+        lambda _: _result(tool_name, {"status": "ok", "passed": True}),
+    )
+
+    assert isinstance(result, Command)
+    message = result.update["messages"][0]
+    assert message.status == "error"
+    payload = json.loads(message.content)
+    assert payload["code"] == "nir_validation_goal_conflict"
+    assert payload["details"]["validation_goal"] == "exploratory"
+    assert payload["details"]["action_required"] == (
+        "report_exploratory_findings_or_request_validation_goal_change"
+    )
+    assert result.update["nir_workflow"]["tool_observations"][-1]["code"] == (
+        "nir_validation_goal_conflict"
+    )
+
+
+def test_internal_holdout_goal_still_allows_auto_split_modeling() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state(task_type="analysis")
+    original = _result(
+        "nir_train_auto_split_model",
+        {"status": "ok", "passed": False, "grade": "D"},
+    )
+
+    result = middleware.wrap_tool_call(
+        _request("nir_train_auto_split_model", {"nir_workflow": workflow}),
+        lambda _: original,
+    )
+
+    assert isinstance(result, Command)
+    assert result.update["messages"] == [original]
+    assert result.update["nir_workflow"]["attempt"] == 1
+
+
 def test_unrelated_tool_passes_through_without_workflow() -> None:
     middleware = NIRWorkflowMiddleware()
     original = ToolMessage(content="ok", tool_call_id="call-1", name="read_file")
@@ -205,6 +259,89 @@ def test_active_nir_workflow_blocks_python_analysis_fallbacks(tool_name: str, ar
     payload = json.loads(result.content)
     assert payload["code"] == "nir_code_execution_forbidden"
     assert payload["next_action"] == "inspect_data"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/mnt/user-data/uploads/data.csv",
+        "/mnt/user-data/uploads/DATA.MAT",
+        "/mnt/user-data/uploads/spectra.npz",
+        "/mnt/user-data/uploads/export.xlsx",
+    ],
+)
+def test_active_nir_workflow_blocks_raw_data_from_model_context(path: str) -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="analysis",
+        data_path=path,
+        analyte="protein",
+        unit="%",
+        domain="food_protein",
+        validation_goal="exploratory",
+    )
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("read_file", {"status": "ok"})
+
+    result = middleware.wrap_tool_call(
+        _request("read_file", {"nir_workflow": workflow}, args={"path": path}),
+        handler,
+    )
+
+    assert called is False
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    payload = json.loads(result.content)
+    assert payload["code"] == "nir_raw_data_read_forbidden"
+    assert payload["details"]["action_required"] == "use_nir_inspect_summary"
+
+
+def test_completed_exploratory_workflow_still_blocks_raw_data_read() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="analysis",
+        data_path="/mnt/user-data/uploads/data.csv",
+        analyte="protein",
+        unit="%",
+        domain="food_protein",
+        validation_goal="exploratory",
+    )
+    workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    workflow = transition_workflow(workflow, action="plan_ready")
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "read_file",
+            {"nir_workflow": workflow},
+            args={"path": "/mnt/user-data/uploads/data.csv"},
+        ),
+        lambda _: _result("read_file", {"status": "ok"}),
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert json.loads(result.content)["code"] == "nir_raw_data_read_forbidden"
+    assert json.loads(result.content)["stage"] == "completed"
+
+
+def test_active_nir_workflow_still_allows_small_metrics_report_read() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state(task_type="analysis")
+    original = _result("read_file", {"status": "ok"})
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "read_file",
+            {"nir_workflow": workflow},
+            args={"path": "/mnt/user-data/outputs/metrics.json"},
+        ),
+        lambda _: original,
+    )
+
+    assert result is original
 
 
 @pytest.mark.parametrize(
