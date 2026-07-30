@@ -21,6 +21,7 @@ from deerflow.community.nir.workflow import (
     NIRWorkflowError,
     record_response_guard,
     record_tool_observation,
+    retry_execution_signature,
     transition_workflow,
 )
 from deerflow.tools.types import Runtime
@@ -52,7 +53,7 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_analyze_collection": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
     "nir_compare": _ToolPolicy(frozenset({"execution"}), _MODEL_TASKS),
     "nir_predict": _ToolPolicy(frozenset({"execution"}), frozenset({"prediction"})),
-    "nir_reflect": _ToolPolicy(frozenset({"knowledge", "review"}), _MODEL_TASKS),
+    "nir_reflect": _ToolPolicy(frozenset({"evaluation"}), _MODEL_TASKS),
     "nir_search_knowledge": _ToolPolicy(frozenset({"execution", "knowledge"}), frozenset({"knowledge", *_MODEL_TASKS})),
     "nir_register_model": _ToolPolicy(frozenset({"approved"}), _MODEL_TASKS),
 }
@@ -81,6 +82,7 @@ _MODEL_DEFAULTS = {
 }
 _MODEL_SUBSTITUTION_CODE = "nir_model_substitution_requires_approval"
 _VALIDATION_GOAL_CONFLICT_CODE = "nir_validation_goal_conflict"
+_RETRY_PLAN_MISMATCH_CODE = "nir_retry_plan_mismatch"
 _MODEL_ALIASES = {
     "cnn": ("cnn", "1dcnn", "一维卷积"),
     "mlp": ("mlp", "多层感知机"),
@@ -202,6 +204,81 @@ def _requested_model_method(request: ToolCallRequest) -> str | None:
     raw = args.get("method", _MODEL_DEFAULTS[tool_name])
     method = str(raw or _MODEL_DEFAULTS[tool_name]).strip().lower()
     return "cnn" if method in {"1d-cnn", "1d_cnn"} else method
+
+
+def _request_execution_signature(
+    request: ToolCallRequest,
+) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    args = request.tool_call.get("args")
+    args = args if isinstance(args, Mapping) else {}
+    pipeline_steps = args.get("pipeline_steps")
+    if pipeline_steps is None:
+        pipeline_steps = ["tool_default"]
+    ignored_keys = {
+        "method",
+        "pipeline_steps",
+        "input_path",
+        "file_path",
+        "data_path",
+        "output_path",
+        "output_dir",
+        "model_path",
+        "metrics_path",
+        "attempt",
+        "tool_call_id",
+    }
+    model_args = {str(key): value for key, value in args.items() if key not in ignored_keys}
+    return retry_execution_signature(
+        tool_name=str(request.tool_call.get("name") or ""),
+        method=_requested_model_method(request),
+        pipeline_steps=pipeline_steps,
+        model_args=model_args,
+    )
+
+
+def _deny_retry_plan_mismatch(
+    request: ToolCallRequest,
+    workflow: Mapping[str, Any],
+    policy: _ToolPolicy,
+) -> ToolMessage | None:
+    if str(request.tool_call.get("name") or "") not in _MODELING_TOOLS or int(workflow.get("attempt") or 0) < 1:
+        return None
+    plan = workflow.get("retry_plan")
+    if not isinstance(plan, Mapping) or plan.get("status") != "ready":
+        return _denied_message(
+            request,
+            code=_RETRY_PLAN_MISMATCH_CODE,
+            error="A ready retry plan bound to the latest failed attempt is required.",
+            workflow=workflow,
+            policy=policy,
+            details={"action_required": "record_retry_plan_then_plan_ready"},
+        )
+    try:
+        _steps, _model_args, signature = _request_execution_signature(request)
+    except NIRWorkflowError as exc:
+        return _denied_message(
+            request,
+            code=_RETRY_PLAN_MISMATCH_CODE,
+            error=str(exc),
+            workflow=workflow,
+            policy=policy,
+        )
+    if plan.get("source_attempt") == workflow.get("attempt") and plan.get("tool_name") == request.tool_call.get("name") and plan.get("execution_signature") == signature:
+        return None
+    return _denied_message(
+        request,
+        code=_RETRY_PLAN_MISMATCH_CODE,
+        error="The modeling call does not match the active retry plan.",
+        workflow=workflow,
+        policy=policy,
+        details={
+            "plan_id": plan.get("plan_id"),
+            "planned_tool": plan.get("tool_name"),
+            "planned_signature": plan.get("execution_signature"),
+            "actual_signature": signature,
+            "action_required": "execute_exactly_the_recorded_retry_plan",
+        },
+    )
 
 
 def _pending_failed_model(workflow: Mapping[str, Any]) -> str | None:
@@ -449,6 +526,8 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
             workflow=workflow,
             policy=policy,
         )
+    if retry_denial := _deny_retry_plan_mismatch(request, workflow, policy):
+        return retry_denial
     if registration_denial := _deny_registration_evidence_mismatch(request, workflow, policy):
         return registration_denial
     if substitution_denial := _deny_unapproved_model_substitution(request, workflow, policy):
@@ -478,6 +557,45 @@ def _success_payload(result: ToolMessage | Command) -> dict[str, Any] | None:
     if not isinstance(payload, dict) or payload.get("status") == "error":
         return None
     return payload
+
+
+def _bind_reflection_request(request: ToolCallRequest) -> ToolCallRequest:
+    """Bind reflection inputs to durable attempts instead of model-authored history."""
+
+    if str(request.tool_call.get("name") or "") != "nir_reflect":
+        return request
+    workflow = _state_from_request(request).get("nir_workflow")
+    if not isinstance(workflow, Mapping):
+        return request
+    attempts = workflow.get("attempts")
+    attempts = attempts if isinstance(attempts, list) else []
+    prior_attempts = attempts[:-1] if attempts else []
+    history = [
+        {
+            "pipeline": attempt.get("pipeline_steps") or [],
+            "metrics": attempt.get("metrics_summary") or {},
+        }
+        for attempt in prior_attempts
+        if isinstance(attempt, Mapping)
+    ]
+    args = request.tool_call.get("args")
+    args = dict(args) if isinstance(args, Mapping) else {}
+    args.update(
+        {
+            "metrics_path": workflow.get("metrics_path"),
+            "history": json.dumps(history, ensure_ascii=False),
+            "domain": workflow.get("domain") or "default",
+            "attempt": int(workflow.get("attempt") or 0),
+            "max_retries": int(workflow.get("max_attempts") or 1),
+        }
+    )
+    return replace(
+        request,
+        tool_call={
+            **request.tool_call,
+            "args": args,
+        },
+    )
 
 
 def _model_attempt_update(
@@ -511,6 +629,11 @@ def _model_attempt_update(
             {key: component.get(key) for key in ("name", "R2_val", "RPD", "RMSEP", "grade", "passed") if component.get(key) is not None} for component in result["per_component"][:20] if isinstance(component, Mapping)
         ]
         metrics_summary["component_count"] = len(result["per_component"])
+    try:
+        pipeline_steps, model_args, execution_signature = _request_execution_signature(request)
+    except NIRWorkflowError:
+        logger.exception("Could not canonicalize NIR modeling execution")
+        return None
     attempt_evidence = {
         "schema_version": 1,
         "tool_name": tool_name,
@@ -521,6 +644,10 @@ def _model_attempt_update(
         "validation_scope": validation_scope,
         "model_path": str(model_path) if model_path else None,
         "metrics_path": str(metrics_path) if metrics_path else None,
+        "method": _requested_model_method(request),
+        "pipeline_steps": pipeline_steps,
+        "model_args": model_args,
+        "execution_signature": execution_signature,
         **digest_fields,
         "metrics_summary": metrics_summary,
     }
@@ -544,6 +671,13 @@ def _next_workflow(
     tool_name = str(request.tool_call.get("name", ""))
     if tool_name in _MODELING_TOOLS:
         return _model_attempt_update(request, workflow, payload)
+    if tool_name == "nir_reflect":
+        return transition_workflow(
+            workflow,
+            action="record_reflection",
+            reflection_result=dict(payload),
+            notes="Reflection inputs were bound to the latest attempt evidence.",
+        )
     if tool_name == "nir_search_knowledge":
         return transition_workflow(
             workflow,
@@ -644,7 +778,8 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         denied = _authorize(request)
         if denied is not None:
             return _record_observation(request, denied)
-        return _record_observation(request, _advance(request, handler(request)))
+        bound_request = _bind_reflection_request(request)
+        return _record_observation(bound_request, _advance(bound_request, handler(bound_request)))
 
     @override
     async def awrap_tool_call(
@@ -655,7 +790,11 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         denied = _authorize(request)
         if denied is not None:
             return _record_observation(request, denied)
-        return _record_observation(request, _advance(request, await handler(request)))
+        bound_request = _bind_reflection_request(request)
+        return _record_observation(
+            bound_request,
+            _advance(bound_request, await handler(bound_request)),
+        )
 
     def _guard_final_response(self, state: AgentState) -> dict | None:
         messages = state.get("messages") or []

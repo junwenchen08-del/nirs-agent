@@ -65,6 +65,11 @@ class NIRWorkflowState(TypedDict):
     model_path: NotRequired[str | None]
     metrics_path: NotRequired[str | None]
     attempt_evidence: NotRequired[dict | None]
+    attempts: list[dict]
+    reflection: NotRequired[dict | None]
+    reflections: list[dict]
+    retry_plan: NotRequired[dict | None]
+    retry_plans: list[dict]
     knowledge_evidence: list[str]
     run_ids: list[str]
     trace_ids: list[str]
@@ -131,6 +136,7 @@ _NIR_STAGE_RANK = {
 _NIR_HISTORY_LIMIT = 50
 _NIR_TOOL_OBSERVATION_LIMIT = 100
 _NIR_RESPONSE_GUARD_LIMIT = 20
+_NIR_RETRY_RECORD_LIMIT = 10
 
 
 def _dedupe_ordered(values: list | None) -> list:
@@ -189,6 +195,9 @@ def _merge_nir_workflow_evidence(
     """Merge bounded audit evidence without overwriting preferred workflow fields."""
     merged: dict = dict(preferred)
     merged["knowledge_evidence"] = _dedupe_ordered([*(existing.get("knowledge_evidence") or []), *(new.get("knowledge_evidence") or [])])
+    merged["attempts"] = _dedupe_ordered([*(existing.get("attempts") or []), *(new.get("attempts") or [])])[-_NIR_RETRY_RECORD_LIMIT:]
+    merged["reflections"] = _dedupe_ordered([*(existing.get("reflections") or []), *(new.get("reflections") or [])])[-_NIR_RETRY_RECORD_LIMIT:]
+    merged["retry_plans"] = _dedupe_ordered([*(existing.get("retry_plans") or []), *(new.get("retry_plans") or [])])[-_NIR_RETRY_RECORD_LIMIT:]
     merged["run_ids"] = _dedupe_ordered([*(existing.get("run_ids") or []), *(new.get("run_ids") or [])])
     merged["trace_ids"] = _dedupe_ordered([*(existing.get("trace_ids") or []), *(new.get("trace_ids") or [])])
     merged["tool_observations"] = _dedupe_ordered([*(existing.get("tool_observations") or []), *(new.get("tool_observations") or [])])[-_NIR_TOOL_OBSERVATION_LIMIT:]

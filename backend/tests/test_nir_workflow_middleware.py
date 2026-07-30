@@ -608,6 +608,10 @@ def test_successful_auto_split_model_result_automatically_enters_review() -> Non
         "model_sha256": "a" * 64,
         "metrics_sha256": "b" * 64,
         "training_data_sha256": "c" * 64,
+        "method": "auto",
+        "pipeline_steps": [{"method": "tool_default", "params": {}}],
+        "model_args": {},
+        "execution_signature": updated["attempt_evidence"]["execution_signature"],
         "metrics_summary": {"grade": "B", "passed": True},
     }
 
@@ -746,7 +750,7 @@ def test_denied_tool_observation_is_checkpointed_for_agent_evaluation() -> None:
     assert observation["stage_after"] == "data_audit"
 
 
-def test_failed_model_result_enters_knowledge_and_search_returns_to_planning() -> None:
+def test_failed_model_requires_bound_reflection_then_search_returns_to_retry_planning() -> None:
     middleware = NIRWorkflowMiddleware()
     workflow = _execution_state()
     model_result = middleware.wrap_tool_call(
@@ -764,18 +768,151 @@ def test_failed_model_result_enters_knowledge_and_search_returns_to_planning() -
     )
     assert isinstance(model_result, Command)
     failed_state = model_result.update["nir_workflow"]
-    assert failed_state["stage"] == "knowledge"
+    assert failed_state["stage"] == "evaluation"
     assert failed_state["attempt"] == 1
 
+    captured_args: dict = {}
+
+    def reflect_handler(request: ToolCallRequest) -> ToolMessage:
+        captured_args.update(request.tool_call["args"])
+        return _result(
+            "nir_reflect",
+            {
+                "status": "ok",
+                "attempt": 1,
+                "should_retry": True,
+                "reason": "Residual curvature remains.",
+                "diagnostics": {"residual_trend": "curved"},
+                "knowledge_hint": {"query": "NIR curved residual derivative"},
+            },
+            call_id="call-reflect",
+        )
+
+    reflect_result = middleware.wrap_tool_call(
+        _request(
+            "nir_reflect",
+            {"nir_workflow": failed_state},
+            args={"metrics_path": "/wrong.json", "attempt": 99, "history": '[{"fake": true}]'},
+            call_id="call-reflect",
+        ),
+        reflect_handler,
+    )
+    assert isinstance(reflect_result, Command)
+    reflected_state = reflect_result.update["nir_workflow"]
+    assert reflected_state["stage"] == "knowledge"
+    assert captured_args["metrics_path"] == "/mnt/user-data/outputs/metrics.json"
+    assert captured_args["attempt"] == 1
+    assert captured_args["history"] == "[]"
+
     search_result = middleware.wrap_tool_call(
-        _request("nir_search_knowledge", {"nir_workflow": failed_state}, call_id="call-2"),
-        lambda _: _result("nir_search_knowledge", {"results": [], "count": 0}, call_id="call-2"),
+        _request("nir_search_knowledge", {"nir_workflow": reflected_state}, call_id="call-2"),
+        lambda _: _result(
+            "nir_search_knowledge",
+            {"results": [{"id": "paper-001"}], "count": 1},
+            call_id="call-2",
+        ),
     )
 
     assert isinstance(search_result, Command)
     retried_state = search_result.update["nir_workflow"]
     assert retried_state["stage"] == "planning"
     assert retried_state["next_action"] == "prepare_retry_plan"
+
+
+def test_retry_modeling_call_must_match_recorded_plan() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state()
+    first = middleware.wrap_tool_call(
+        _request(
+            "nir_analyze",
+            {"nir_workflow": workflow},
+            args={"method": "auto", "pipeline_steps": '["snv"]'},
+        ),
+        lambda _: _result(
+            "nir_analyze",
+            {
+                "status": "ok",
+                "passed": False,
+                "grade": "C",
+                "metrics": "/mnt/user-data/outputs/metrics.json",
+            },
+        ),
+    )
+    failed = first.update["nir_workflow"]
+    reflected = transition_workflow(
+        failed,
+        action="record_reflection",
+        reflection_result={
+            "attempt": 1,
+            "should_retry": True,
+            "diagnostics": {"residual_trend": "curved"},
+        },
+    )
+    planned = transition_workflow(
+        reflected,
+        action="record_retry_plan",
+        retry_tool="nir_analyze",
+        retry_method="auto",
+        retry_pipeline_steps='["snv", {"method": "derivative1", "params": {"window": 11}}]',
+        retry_rationale="Use a derivative to address residual curvature.",
+        expected_improvement="Lower RMSEP without increasing bias.",
+    )
+    execution = transition_workflow(planned, action="plan_ready")
+    called = False
+
+    def wrong_handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_analyze", {"status": "ok"})
+
+    denied = middleware.wrap_tool_call(
+        _request(
+            "nir_analyze",
+            {"nir_workflow": execution},
+            args={"method": "auto", "pipeline_steps": '["snv", "autoscale"]'},
+        ),
+        wrong_handler,
+    )
+    assert called is False
+    assert json.loads(denied.update["messages"][0].content)["code"] == "nir_retry_plan_mismatch"
+
+    changed_hyperparameter = middleware.wrap_tool_call(
+        _request(
+            "nir_analyze",
+            {"nir_workflow": execution},
+            args={
+                "method": "auto",
+                "pipeline_steps": '["snv", {"method": "derivative1", "params": {"window": 11}}]',
+                "max_components": 8,
+            },
+        ),
+        wrong_handler,
+    )
+    assert called is False
+    assert json.loads(changed_hyperparameter.update["messages"][0].content)["code"] == "nir_retry_plan_mismatch"
+
+    allowed = middleware.wrap_tool_call(
+        _request(
+            "nir_analyze",
+            {"nir_workflow": execution},
+            args={
+                "method": "auto",
+                "pipeline_steps": '["snv", {"method": "derivative1", "params": {"window": 11}}]',
+            },
+        ),
+        lambda _: _result(
+            "nir_analyze",
+            {
+                "status": "ok",
+                "passed": True,
+                "grade": "B",
+                "model": "/mnt/user-data/outputs/retry.pkl",
+                "metrics": "/mnt/user-data/outputs/retry.json",
+            },
+        ),
+    )
+    assert allowed.update["nir_workflow"]["stage"] == "review"
+    assert allowed.update["nir_workflow"]["retry_plan"]["status"] == "executed"
 
 
 def test_tool_error_does_not_advance_workflow() -> None:

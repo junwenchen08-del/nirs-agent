@@ -15,6 +15,7 @@ from deerflow.community.nir.modeling import nir_register_model_tool
 from deerflow.community.nir.workflow import (
     NIRWorkflowError,
     nir_workflow_tool,
+    retry_execution_signature,
     start_workflow,
     transition_workflow,
     workflow_agent_view,
@@ -204,7 +205,7 @@ def test_complete_calibration_requires_explicit_approval_before_registration():
     assert state["approval_status"] == "approved"
 
 
-def test_failed_attempt_uses_knowledge_stage_until_retry_budget_is_exhausted():
+def test_failed_attempt_requires_reflection_and_bound_retry_plan_until_budget_is_exhausted():
     state = start_workflow(
         task_type="analysis",
         data_path="data.npz",
@@ -216,18 +217,93 @@ def test_failed_attempt_uses_knowledge_stage_until_retry_budget_is_exhausted():
     )
     state = transition_workflow(state, action="record_audit", audit_passed=True)
     state = transition_workflow(state, action="plan_ready")
-    state = transition_workflow(state, action="record_attempt", attempt_passed=False, grade="C")
+    first_steps, _first_model_args, first_signature = retry_execution_signature(
+        tool_name="nir_analyze",
+        method="auto",
+        pipeline_steps=["snv"],
+    )
+    state = transition_workflow(
+        state,
+        action="record_attempt",
+        attempt_passed=False,
+        grade="C",
+        attempt_evidence={
+            "tool_name": "nir_analyze",
+            "method": "auto",
+            "pipeline_steps": first_steps,
+            "execution_signature": first_signature,
+        },
+    )
 
+    assert state["stage"] == "evaluation"
+    assert state["next_action"] == "reflect_on_attempt"
+    with pytest.raises(NIRWorkflowError, match="planning"):
+        transition_workflow(state, action="plan_ready")
+    with pytest.raises(NIRWorkflowError, match="execution stage"):
+        transition_workflow(state, action="record_attempt", attempt_passed=False)
+
+    state = transition_workflow(
+        state,
+        action="record_reflection",
+        reflection_result={
+            "attempt": 1,
+            "should_retry": True,
+            "diagnostics": {"residual_trend": "curved"},
+            "knowledge_hint": {"query": "curved NIR residual preprocessing"},
+        },
+    )
     assert state["stage"] == "knowledge"
-    assert state["next_action"] == "retrieve_evidence_for_retry"
-
-    state = transition_workflow(state, action="knowledge_retrieved")
+    state = transition_workflow(state, action="knowledge_retrieved", evidence_ids=["paper-001"])
+    with pytest.raises(NIRWorkflowError, match="materially change"):
+        transition_workflow(
+            state,
+            action="record_retry_plan",
+            retry_tool="nir_analyze",
+            retry_method="auto",
+            retry_pipeline_steps='["snv"]',
+            retry_rationale="Repeat the prior pipeline.",
+            expected_improvement="Improve R2.",
+        )
+    state = transition_workflow(
+        state,
+        action="record_retry_plan",
+        retry_tool="nir_analyze",
+        retry_method="auto",
+        retry_pipeline_steps='["snv", {"method": "derivative1", "params": {"window": 11}}]',
+        retry_rationale="Address curved residual structure with a first derivative.",
+        expected_improvement="Reduce RMSEP and remove residual curvature.",
+    )
+    planned_signature = state["retry_plan"]["execution_signature"]
+    assert state["retry_plan"]["evidence_ids"] == ["paper-001"]
+    assert state["retry_plan"]["reflection_id"] == state["reflection"]["reflection_id"]
     state = transition_workflow(state, action="plan_ready")
-    state = transition_workflow(state, action="record_attempt", attempt_passed=False, grade="D")
+    state = transition_workflow(
+        state,
+        action="record_attempt",
+        attempt_passed=False,
+        grade="D",
+        attempt_evidence={
+            "tool_name": "nir_analyze",
+            "method": "auto",
+            "pipeline_steps": state["retry_plan"]["pipeline_steps"],
+            "execution_signature": planned_signature,
+        },
+    )
+    assert state["stage"] == "evaluation"
+    state = transition_workflow(
+        state,
+        action="record_reflection",
+        reflection_result={
+            "attempt": 2,
+            "should_retry": True,
+            "diagnostics": {"residual_trend": "curved"},
+        },
+    )
 
     assert state["attempt"] == 2
     assert state["stage"] == "blocked"
     assert state["next_action"] == "report_best_effort"
+    assert state["reflection"]["stop_reason"] == "retry_budget_exhausted"
 
 
 def test_knowledge_evidence_accumulates_across_bounded_retries():
@@ -243,12 +319,79 @@ def test_knowledge_evidence_accumulates_across_bounded_retries():
     state = transition_workflow(state, action="record_audit", audit_passed=True)
     state = transition_workflow(state, action="plan_ready")
     state = transition_workflow(state, action="record_attempt", attempt_passed=False)
+    state = transition_workflow(
+        state,
+        action="record_reflection",
+        reflection_result={
+            "attempt": 1,
+            "should_retry": True,
+            "knowledge_hint": {"query": "first retry"},
+        },
+    )
     state = transition_workflow(state, action="knowledge_retrieved", evidence_ids=["paper-001", "paper-002"])
+    state = transition_workflow(
+        state,
+        action="record_retry_plan",
+        retry_tool="nir_train_model",
+        retry_method="pls",
+        retry_pipeline_steps='["snv"]',
+        retry_rationale="First evidence-backed retry.",
+        expected_improvement="Improve RPD.",
+    )
+    signature = state["retry_plan"]["execution_signature"]
     state = transition_workflow(state, action="plan_ready")
-    state = transition_workflow(state, action="record_attempt", attempt_passed=False)
+    state = transition_workflow(
+        state,
+        action="record_attempt",
+        attempt_passed=False,
+        attempt_evidence={
+            "tool_name": "nir_train_model",
+            "method": "pls",
+            "pipeline_steps": state["retry_plan"]["pipeline_steps"],
+            "execution_signature": signature,
+        },
+    )
+    state = transition_workflow(
+        state,
+        action="record_reflection",
+        reflection_result={
+            "attempt": 2,
+            "should_retry": True,
+            "knowledge_hint": {"query": "second retry"},
+        },
+    )
     state = transition_workflow(state, action="knowledge_retrieved", evidence_ids=["paper-002", "paper-003"])
 
     assert state["knowledge_evidence"] == ["paper-001", "paper-002", "paper-003"]
+
+
+def test_required_retry_knowledge_with_no_evidence_stops_instead_of_guessing() -> None:
+    state = start_workflow(
+        task_type="analysis",
+        data_path="data.npz",
+        analyte="moisture",
+        unit="%",
+        domain="food_moisture",
+        validation_goal="internal_holdout",
+    )
+    state = transition_workflow(state, action="record_audit", audit_passed=True)
+    state = transition_workflow(state, action="plan_ready")
+    state = transition_workflow(state, action="record_attempt", attempt_passed=False)
+    state = transition_workflow(
+        state,
+        action="record_reflection",
+        reflection_result={
+            "attempt": 1,
+            "should_retry": True,
+            "knowledge_hint": {"query": "NIR moisture retry evidence"},
+        },
+    )
+
+    state = transition_workflow(state, action="knowledge_retrieved", evidence_ids=[])
+
+    assert state["stage"] == "blocked"
+    assert state["next_action"] == "report_best_effort"
+    assert state["history"][-1]["outcome"] == "required_retry_evidence_unavailable"
 
 
 def test_nir_workflow_reducer_merges_same_revision_sibling_tool_observations():

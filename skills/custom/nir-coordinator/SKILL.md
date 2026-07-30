@@ -393,23 +393,36 @@ nir_analyze(
 
 ## 模式 B：分步模式（仅当快速模式结果不达标或用户明确要求优化时使用）
 
-### 反思闭环流程（V3.6: 诊断驱动自主决策）
+### 反思闭环流程（V3.8: 诊断驱动、计划绑定）
 
-每次 `nir_train_model` 完成后，**必须调用 `nir_reflect`** 获取残差诊断和重试预算。
+当建模结果 `passed == false` 时，**必须调用 `nir_reflect`** 获取残差诊断和重试预算。
 `nir_reflect` 返回 `diagnostics`（残差趋势/方差/异常点）和 `should_retry`（是否还能重试），
-你根据诊断信息**自主构造**下一步 `pipeline_steps`（含超参数），`nir_train_model` 内置 `validate_pipeline` 守护。
+其 `metrics_path`、`history`、`attempt`、`max_retries` 会由运行时绑定到当前工作流，不能自行改写。
+你根据诊断和已检索证据**自主构造**下一步计划，但必须先用
+`nir_workflow(action="record_retry_plan", ...)` 固化工具、模型、`pipeline_steps`、理由和预期改善，
+再调用 `nir_workflow(action="plan_ready")`。下一次建模必须与固化计划完全一致。
 
 ```
 步骤1: nir_load_data(file_path, output_path) → 生成 data.npz
 步骤2: nir_train_model(input_path, pipeline_steps, method, domain, ...) → 建模
-步骤3: nir_reflect(metrics_path, history, domain, attempt) → 获取诊断+重试决策
+步骤3: 若 passed=false，调用 nir_reflect(metrics_path) → 获取绑定当前尝试的诊断+重试决策
        ↓
        should_retry == true?
-       ├─ 是: <thought> 分析 diagnostics → 自主构造 pipeline_steps → 回到步骤2，attempt+1
-       │      仅当连续2次自构造效果不如 best_so_far 时，使用 fallback_suggestion 兜底
+       ├─ 是: 若 next_action=retrieve_evidence_for_retry，先按 knowledge_hint 检索
+       │      → 分析 diagnostics/证据，自主构造不同于上一轮的 pipeline_steps
+       │      → nir_workflow(action="record_retry_plan",
+       │           retry_tool="nir_train_model", retry_method=method,
+       │           retry_pipeline_steps=<JSON>, retry_rationale=<理由>,
+       │           retry_model_args=<其余建模参数JSON>,
+       │           expected_improvement=<预期指标/失效模式>)
+       │      → nir_workflow(action="plan_ready")
+       │      → 严格按计划回到步骤2，attempt+1
        └─ 否: 闭环结束，进入报告生成
 步骤4: 调用 present_files 展示所有输出文件
 ```
+
+不得跳过 `record_retry_plan` 直接重试，不得重复上一轮完全相同的执行签名，也不得在计划后
+临时更换工具、模型、预处理或其他决策参数；这些调用会被运行时拒绝并记为对话验收违规。
 
 ### 残差模式-解决方案映射（推理跳板）
 
@@ -478,6 +491,7 @@ nir_reflect(
 - 连续两次 R² 改善 < 0.02 时自动停止（plateau 检测）
 - 候选流水线耗尽时停止
 - `should_retry` 由确定性规则判断——你只需要决定**试什么**
+- 重试计划必须说明它响应了哪项诊断或知识证据，以及预期改善哪个指标或失效模式
 
 ## 质量门禁（按领域分级）
 

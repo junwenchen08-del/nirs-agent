@@ -7,9 +7,11 @@ inputs, retry budgets, or the approval gate encoded here. State is persisted in
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -72,6 +74,8 @@ _AGENT_VIEW_FIELDS = (
     "model_path",
     "metrics_path",
     "attempt_evidence",
+    "reflection",
+    "retry_plan",
     "knowledge_evidence",
     "attempt",
     "max_attempts",
@@ -95,6 +99,42 @@ _HIGH_ASSURANCE_GOAL_MARKERS = (
 _HISTORY_LIMIT = 50
 _TOOL_OBSERVATION_LIMIT = 100
 _RESPONSE_GUARD_LIMIT = 20
+_RETRY_RECORD_LIMIT = 10
+_RETRY_MODELING_TOOLS = frozenset(
+    {
+        "nir_train_auto_split_model",
+        "nir_train_model",
+        "nir_train_partitioned_model",
+        "nir_train_multi_model",
+        "nir_analyze",
+        "nir_analyze_collection",
+        "nir_compare",
+    }
+)
+_RETRY_TOOLS_BY_TASK = {
+    "analysis": frozenset(
+        {
+            "nir_train_auto_split_model",
+            "nir_train_model",
+            "nir_train_partitioned_model",
+            "nir_analyze",
+            "nir_analyze_collection",
+            "nir_compare",
+        }
+    ),
+    "calibration": frozenset(
+        {
+            "nir_train_auto_split_model",
+            "nir_train_model",
+            "nir_train_partitioned_model",
+            "nir_analyze",
+            "nir_analyze_collection",
+            "nir_compare",
+        }
+    ),
+    "multi_modeling": frozenset({"nir_train_multi_model", "nir_compare"}),
+    "compare": frozenset({"nir_compare"}),
+}
 _APPROVAL_PATTERNS = (
     r"批准",
     r"同意(?:采用|使用|注册)",
@@ -113,6 +153,76 @@ _APPROVAL_DENIAL_PATTERNS = (
 
 class NIRWorkflowError(ValueError):
     """Raised when an invalid workflow transition is requested."""
+
+
+def normalize_retry_pipeline_steps(value: Any) -> list[dict[str, Any]]:
+    """Canonicalize a retry pipeline for durable comparison and hashing."""
+
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError) as exc:
+            raise NIRWorkflowError("retry_pipeline_steps must be valid JSON") from exc
+    if not isinstance(value, list) or not value or len(value) > 20:
+        raise NIRWorkflowError("retry_pipeline_steps must be a non-empty list with at most 20 steps")
+
+    normalized: list[dict[str, Any]] = []
+    for raw_step in value:
+        if isinstance(raw_step, str):
+            method = raw_step.strip().lower()
+            params: Mapping[str, Any] = {}
+        elif isinstance(raw_step, Mapping):
+            method = str(raw_step.get("method") or "").strip().lower()
+            raw_params = raw_step.get("params") or {}
+            if not isinstance(raw_params, Mapping):
+                raise NIRWorkflowError("retry pipeline step params must be an object")
+            params = raw_params
+        else:
+            raise NIRWorkflowError("retry pipeline steps must be method strings or objects")
+        if not method:
+            raise NIRWorkflowError("retry pipeline step method cannot be empty")
+        try:
+            canonical_params = json.loads(json.dumps(dict(params), sort_keys=True, ensure_ascii=False))
+        except (TypeError, ValueError) as exc:
+            raise NIRWorkflowError("retry pipeline step params must be JSON serializable") from exc
+        normalized.append({"method": method, "params": canonical_params})
+    return normalized
+
+
+def retry_execution_signature(
+    *,
+    tool_name: str,
+    method: str | None,
+    pipeline_steps: Any,
+    model_args: Any = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    """Return the canonical pipeline and stable execution signature."""
+
+    normalized_tool = str(tool_name or "").strip()
+    if normalized_tool not in _RETRY_MODELING_TOOLS:
+        raise NIRWorkflowError(f"Unsupported retry modeling tool {normalized_tool!r}")
+    normalized_steps = normalize_retry_pipeline_steps(pipeline_steps)
+    if isinstance(model_args, str):
+        try:
+            model_args = json.loads(model_args)
+        except (TypeError, ValueError) as exc:
+            raise NIRWorkflowError("retry_model_args must be valid JSON") from exc
+    if model_args is None:
+        model_args = {}
+    if not isinstance(model_args, Mapping):
+        raise NIRWorkflowError("retry_model_args must be a JSON object")
+    try:
+        normalized_model_args = json.loads(json.dumps(dict(model_args), sort_keys=True, ensure_ascii=False))
+    except (TypeError, ValueError) as exc:
+        raise NIRWorkflowError("retry_model_args must be JSON serializable") from exc
+    payload = {
+        "tool_name": normalized_tool,
+        "method": str(method or "auto").strip().lower() or "auto",
+        "pipeline_steps": normalized_steps,
+        "model_args": normalized_model_args,
+    }
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+    return normalized_steps, normalized_model_args, hashlib.sha256(encoded).hexdigest()
 
 
 def _now() -> str:
@@ -409,6 +519,11 @@ def start_workflow(
         "model_path": normalized_requirements.get("model_path"),
         "metrics_path": None,
         "attempt_evidence": None,
+        "attempts": [],
+        "reflection": None,
+        "reflections": [],
+        "retry_plan": None,
+        "retry_plans": [],
         "knowledge_evidence": [],
         "run_ids": [],
         "trace_ids": [],
@@ -458,6 +573,13 @@ def transition_workflow(
     missing_inputs: list[str] | None = None,
     evidence_ids: list[str] | None = None,
     attempt_evidence: dict[str, Any] | None = None,
+    reflection_result: dict[str, Any] | None = None,
+    retry_tool: str | None = None,
+    retry_method: str | None = None,
+    retry_pipeline_steps: Any = None,
+    retry_model_args: Any = None,
+    retry_rationale: str | None = None,
+    expected_improvement: str | None = None,
     notes: str | None = None,
 ) -> NIRWorkflowState:
     """Apply one validated state transition to an existing workflow."""
@@ -562,6 +684,12 @@ def transition_workflow(
     if action == "plan_ready":
         if state["stage"] != "planning":
             raise NIRWorkflowError("plan_ready is only allowed during planning")
+        if state.get("attempt", 0) > 0:
+            plan = state.get("retry_plan")
+            if not isinstance(plan, Mapping) or plan.get("source_attempt") != state["attempt"]:
+                raise NIRWorkflowError("A retry plan bound to the latest failed attempt is required before plan_ready")
+            if plan.get("status") != "ready":
+                raise NIRWorkflowError("The current retry plan is not ready for execution")
         if state.get("validation_goal") == "exploratory":
             return _with_update(
                 state,
@@ -580,16 +708,46 @@ def transition_workflow(
         )
 
     if action == "record_attempt":
-        if state["stage"] not in {"execution", "evaluation"}:
-            raise NIRWorkflowError("record_attempt requires execution or evaluation stage")
+        if state["stage"] != "execution":
+            raise NIRWorkflowError("record_attempt requires execution stage")
         if attempt_passed is None:
             raise NIRWorkflowError("attempt_passed is required for record_attempt")
         attempt = state["attempt"] + 1
+        evidence = attempt_evidence if isinstance(attempt_evidence, Mapping) else {}
+        active_retry_plan = state.get("retry_plan") if state.get("attempt", 0) > 0 else None
+        if isinstance(active_retry_plan, Mapping):
+            if evidence.get("execution_signature") != active_retry_plan.get("execution_signature"):
+                raise NIRWorkflowError("The modeling attempt does not match the active retry plan")
+        attempt_record = {
+            "attempt": attempt,
+            "passed": attempt_passed,
+            "grade": grade,
+            "tool_name": evidence.get("tool_name"),
+            "method": evidence.get("method"),
+            "pipeline_steps": evidence.get("pipeline_steps") or [],
+            "model_args": evidence.get("model_args") or {},
+            "execution_signature": evidence.get("execution_signature"),
+            "metrics_summary": evidence.get("metrics_summary") or {},
+            "model_path": model_path,
+            "metrics_path": metrics_path,
+            "retry_plan_id": active_retry_plan.get("plan_id") if isinstance(active_retry_plan, Mapping) else None,
+        }
+        attempts = [*(state.get("attempts") or []), attempt_record][-_RETRY_RECORD_LIMIT:]
+        executed_plan = None
+        retry_plans = list(state.get("retry_plans") or [])
+        if isinstance(active_retry_plan, Mapping):
+            executed_plan = {**active_retry_plan, "status": "executed", "executed_attempt": attempt}
+            retry_plans = [
+                *[executed_plan if plan.get("plan_id") == executed_plan.get("plan_id") else plan for plan in retry_plans if isinstance(plan, Mapping)],
+            ][-_RETRY_RECORD_LIMIT:]
         common = {
             "attempt": attempt,
             "model_path": model_path,
             "metrics_path": metrics_path,
             "attempt_evidence": attempt_evidence,
+            "attempts": attempts,
+            "retry_plan": executed_plan,
+            "retry_plans": retry_plans,
             "event_details": {
                 "attempt": attempt,
                 "passed": attempt_passed,
@@ -597,6 +755,8 @@ def transition_workflow(
                 "model_path": model_path,
                 "metrics_path": metrics_path,
                 "attempt_evidence": attempt_evidence,
+                "execution_signature": evidence.get("execution_signature"),
+                "retry_plan_id": active_retry_plan.get("plan_id") if isinstance(active_retry_plan, Mapping) else None,
                 "notes": notes,
             },
         }
@@ -609,21 +769,79 @@ def transition_workflow(
                 approval_status="pending",
                 **common,
             )
-        if attempt < state["max_attempts"]:
+        return _with_update(
+            state,
+            action=action,
+            stage="evaluation",
+            next_action="reflect_on_attempt",
+            approval_status="not_required",
+            **common,
+        )
+
+    if action == "record_reflection":
+        if state["stage"] != "evaluation":
+            raise NIRWorkflowError("record_reflection requires evaluation stage")
+        if not isinstance(reflection_result, Mapping):
+            raise NIRWorkflowError("reflection_result is required for record_reflection")
+        if reflection_result.get("attempt") != state["attempt"]:
+            raise NIRWorkflowError("Reflection attempt must match the latest modeling attempt")
+        requested_retry = reflection_result.get("should_retry")
+        if not isinstance(requested_retry, bool):
+            raise NIRWorkflowError("Reflection should_retry must be boolean")
+        budget_available = state["attempt"] < state["max_attempts"]
+        should_retry = requested_retry and budget_available
+        knowledge_hint = reflection_result.get("knowledge_hint")
+        knowledge_required = isinstance(knowledge_hint, Mapping)
+        reflection = {
+            "reflection_id": f"reflection-{state['attempt']}-{int(state.get('revision', 0)) + 1}",
+            "source_attempt": state["attempt"],
+            "metrics_path": state.get("metrics_path"),
+            "should_retry": should_retry,
+            "stop_reason": None if should_retry else ("retry_budget_exhausted" if not budget_available else "reflection_stop"),
+            "reason": str(reflection_result.get("reason") or ""),
+            "diagnostics": dict(reflection_result.get("diagnostics") or {}) if isinstance(reflection_result.get("diagnostics"), Mapping) else {},
+            "fallback_suggestion_steps": list(reflection_result.get("fallback_suggestion_steps") or []),
+            "lv_adjustment": dict(reflection_result.get("lv_adjustment") or {}) if isinstance(reflection_result.get("lv_adjustment"), Mapping) else {},
+            "current_quality": dict(reflection_result.get("current_quality") or {}) if isinstance(reflection_result.get("current_quality"), Mapping) else {},
+            "best_so_far": dict(reflection_result.get("best_so_far") or {}) if isinstance(reflection_result.get("best_so_far"), Mapping) else {},
+            "knowledge_required": knowledge_required,
+            "knowledge_query": knowledge_hint.get("query") if isinstance(knowledge_hint, Mapping) else None,
+            "knowledge_evidence_count": len(state.get("knowledge_evidence") or []),
+        }
+        reflections = [*(state.get("reflections") or []), reflection][-_RETRY_RECORD_LIMIT:]
+        if not should_retry:
             return _with_update(
                 state,
                 action=action,
-                stage="knowledge",
-                next_action="retrieve_evidence_for_retry",
-                **common,
+                stage="blocked",
+                next_action="report_best_effort",
+                reflection=reflection,
+                reflections=reflections,
+                retry_plan={},
+                event_details={
+                    "attempt": state["attempt"],
+                    "reflection_id": reflection["reflection_id"],
+                    "should_retry": False,
+                    "stop_reason": reflection["stop_reason"],
+                    "metrics_path": reflection["metrics_path"],
+                },
             )
         return _with_update(
             state,
             action=action,
-            stage="blocked",
-            next_action="report_best_effort",
-            approval_status="not_required",
-            **common,
+            stage="knowledge" if knowledge_required else "planning",
+            next_action="retrieve_evidence_for_retry" if knowledge_required else "prepare_retry_plan",
+            reflection=reflection,
+            reflections=reflections,
+            retry_plan={},
+            event_details={
+                "attempt": state["attempt"],
+                "reflection_id": reflection["reflection_id"],
+                "should_retry": True,
+                "knowledge_required": knowledge_required,
+                "diagnostics": reflection["diagnostics"],
+                "metrics_path": reflection["metrics_path"],
+            },
         )
 
     if action == "knowledge_retrieved":
@@ -638,13 +856,112 @@ def transition_workflow(
             )
         if state["stage"] != "knowledge":
             raise NIRWorkflowError("knowledge_retrieved requires a knowledge task or the knowledge retry stage")
+        reflection = state.get("reflection")
+        if not isinstance(reflection, Mapping) or reflection.get("should_retry") is not True:
+            raise NIRWorkflowError("knowledge_retrieved requires a retryable reflection")
+        merged_evidence = _merge_evidence(state, evidence_ids)
+        if reflection.get("knowledge_required") and len(merged_evidence) <= int(reflection.get("knowledge_evidence_count") or 0):
+            return _with_update(
+                state,
+                action=action,
+                stage="blocked",
+                next_action="report_best_effort",
+                knowledge_evidence=merged_evidence,
+                event_details={
+                    "notes": notes,
+                    "evidence_ids": evidence_ids,
+                    "outcome": "required_retry_evidence_unavailable",
+                },
+            )
         return _with_update(
             state,
             action=action,
             stage="planning",
             next_action="prepare_retry_plan",
-            knowledge_evidence=_merge_evidence(state, evidence_ids),
+            knowledge_evidence=merged_evidence,
             event_details={"notes": notes, "evidence_ids": evidence_ids},
+        )
+
+    if action == "record_retry_plan":
+        if state["stage"] != "planning" or state.get("attempt", 0) < 1:
+            raise NIRWorkflowError("record_retry_plan requires retry planning after a failed attempt")
+        reflection = state.get("reflection")
+        if not isinstance(reflection, Mapping) or reflection.get("source_attempt") != state["attempt"]:
+            raise NIRWorkflowError("A reflection bound to the latest failed attempt is required")
+        if reflection.get("should_retry") is not True:
+            raise NIRWorkflowError("The latest reflection does not allow another retry")
+        if reflection.get("knowledge_required"):
+            prior_count = int(reflection.get("knowledge_evidence_count") or 0)
+            if len(state.get("knowledge_evidence") or []) <= prior_count:
+                raise NIRWorkflowError("The reflection requires new knowledge evidence before retry planning")
+        rationale = str(retry_rationale or "").strip()
+        improvement = str(expected_improvement or "").strip()
+        if not rationale or not improvement:
+            raise NIRWorkflowError("retry_rationale and expected_improvement are required")
+        normalized_retry_tool = str(retry_tool or "").strip()
+        if normalized_retry_tool not in _RETRY_TOOLS_BY_TASK.get(state["task_type"], frozenset()):
+            raise NIRWorkflowError(f"Retry tool {normalized_retry_tool!r} is not compatible with task type {state['task_type']!r}")
+        normalized_steps, normalized_model_args, signature = retry_execution_signature(
+            tool_name=normalized_retry_tool,
+            method=retry_method,
+            pipeline_steps=retry_pipeline_steps,
+            model_args=retry_model_args,
+        )
+        previous_signature = None
+        if isinstance(state.get("attempt_evidence"), Mapping):
+            previous_signature = state["attempt_evidence"].get("execution_signature")
+        if previous_signature and signature == previous_signature:
+            raise NIRWorkflowError("Retry plan must materially change the previous modeling execution")
+        evidence_start = int(reflection.get("knowledge_evidence_count") or 0)
+        plan = {
+            "plan_id": f"retry-{state['attempt'] + 1}-{signature[:12]}",
+            "source_attempt": state["attempt"],
+            "target_attempt": state["attempt"] + 1,
+            "reflection_id": reflection.get("reflection_id"),
+            "tool_name": normalized_retry_tool,
+            "method": str(retry_method or "auto").strip().lower() or "auto",
+            "pipeline_steps": normalized_steps,
+            "model_args": normalized_model_args,
+            "execution_signature": signature,
+            "previous_execution_signature": previous_signature,
+            "diagnostics": dict(reflection.get("diagnostics") or {}),
+            "evidence_ids": list(state.get("knowledge_evidence") or [])[evidence_start:],
+            "rationale": rationale,
+            "expected_improvement": improvement,
+            "status": "ready",
+        }
+        prior_plans = [
+            {
+                **prior_plan,
+                "status": "superseded",
+                "superseded_by": plan["plan_id"],
+            }
+            if isinstance(prior_plan, Mapping) and prior_plan.get("source_attempt") == state["attempt"] and prior_plan.get("status") == "ready"
+            else prior_plan
+            for prior_plan in (state.get("retry_plans") or [])
+        ]
+        retry_plans = [*prior_plans, plan][-_RETRY_RECORD_LIMIT:]
+        return _with_update(
+            state,
+            action=action,
+            retry_plan=plan,
+            retry_plans=retry_plans,
+            next_action="activate_retry_plan",
+            event_details={
+                "plan_id": plan["plan_id"],
+                "source_attempt": plan["source_attempt"],
+                "target_attempt": plan["target_attempt"],
+                "reflection_id": plan["reflection_id"],
+                "tool_name": plan["tool_name"],
+                "method": plan["method"],
+                "pipeline_steps": plan["pipeline_steps"],
+                "model_args": plan["model_args"],
+                "execution_signature": signature,
+                "previous_execution_signature": previous_signature,
+                "evidence_ids": plan["evidence_ids"],
+                "rationale": rationale,
+                "expected_improvement": improvement,
+            },
         )
 
     if action == "approve":
@@ -760,6 +1077,12 @@ def nir_workflow_tool(
     grade: str | None = None,
     missing_inputs: list[str] | None = None,
     evidence_ids: list[str] | None = None,
+    retry_tool: str | None = None,
+    retry_method: str | None = None,
+    retry_pipeline_steps: str | None = None,
+    retry_model_args: str | None = None,
+    retry_rationale: str | None = None,
+    expected_improvement: str | None = None,
     notes: str | None = None,
 ) -> Command:
     """Create or advance the durable state of a NIR agent workflow.
@@ -772,8 +1095,8 @@ def nir_workflow_tool(
 
     Args:
         action: Workflow action: start, status, set_requirements, record_audit,
-            plan_ready, record_attempt, knowledge_retrieved, approve, reject,
-            registered, or complete.
+            plan_ready, record_attempt, record_retry_plan, knowledge_retrieved,
+            approve, reject, registered, or complete.
         task_type: For start: analysis, calibration, multi_modeling, compare,
             prediction, inspection, or knowledge.
         project_id: Optional stable identifier for a new workflow.
@@ -794,6 +1117,12 @@ def nir_workflow_tool(
         grade: Optional quality grade for a manually recorded attempt.
         missing_inputs: Missing or invalid fields found by data audit.
         evidence_ids: Stable document or source identifiers used for a knowledge retry.
+        retry_tool: Modeling tool that the next retry will execute.
+        retry_method: Model family bound to the next retry.
+        retry_pipeline_steps: JSON preprocessing pipeline bound to the next retry.
+        retry_model_args: JSON object containing every additional decision parameter.
+        retry_rationale: Diagnostic/evidence-based reason for changing the execution.
+        expected_improvement: Metric or failure mode the retry is expected to improve.
         notes: Short evidence or decision note stored in workflow history.
     """
     current = (runtime.state or {}).get("nir_workflow")
@@ -851,6 +1180,12 @@ def nir_workflow_tool(
                 grade=grade,
                 missing_inputs=missing_inputs,
                 evidence_ids=evidence_ids,
+                retry_tool=retry_tool,
+                retry_method=retry_method,
+                retry_pipeline_steps=retry_pipeline_steps,
+                retry_model_args=retry_model_args,
+                retry_rationale=retry_rationale,
+                expected_improvement=expected_improvement,
                 notes=notes,
             )
         if updated is not current:

@@ -18,6 +18,7 @@ _POLICY_VIOLATION_CODES = frozenset(
         "nir_model_substitution_requires_approval",
         "nir_raw_data_read_forbidden",
         "nir_registration_evidence_mismatch",
+        "nir_retry_plan_mismatch",
         "nir_validation_goal_conflict",
         "nir_workflow_required",
         "nir_workflow_stage_denied",
@@ -522,18 +523,47 @@ def _traceability_check(scenario: NIREvalScenario, workflow: Mapping[str, Any]) 
 
 def _retry_check(outcome: str, events: Sequence[Mapping[str, Any]]) -> NIREvalCheck:
     failed_attempts = [index for index, event in enumerate(events) if event.get("action") == "record_attempt" and event.get("passed") is False]
+    retry_reflections = [index for index, event in enumerate(events) if event.get("action") == "record_reflection" and event.get("should_retry") is True]
+    stop_reflections = [index for index, event in enumerate(events) if event.get("action") == "record_reflection" and event.get("should_retry") is False]
     knowledge_events = [index for index, event in enumerate(events) if event.get("action") == "knowledge_retrieved" and event.get("evidence_ids")]
+    retry_plans = [index for index, event in enumerate(events) if event.get("action") == "record_retry_plan"]
     final_attempts = [index for index, event in enumerate(events) if event.get("action") == "record_attempt"]
-    sequence_ok = bool(failed_attempts and knowledge_events and final_attempts)
+    sequence_ok = bool(failed_attempts and retry_reflections and knowledge_events and retry_plans and final_attempts)
     if sequence_ok:
-        sequence_ok = failed_attempts[0] < knowledge_events[0] < final_attempts[-1]
+        sequence_ok = failed_attempts[0] < retry_reflections[0] < knowledge_events[0] < retry_plans[0] < final_attempts[-1]
+    plan_bound = False
+    materially_changed = False
+    reflection_bound = False
+    if retry_plans and final_attempts:
+        plan_event = events[retry_plans[-1]]
+        execution_event = events[final_attempts[-1]]
+        reflection_event = events[retry_reflections[-1]] if retry_reflections else {}
+        planned_signature = plan_event.get("execution_signature")
+        plan_bound = bool(planned_signature and planned_signature == execution_event.get("execution_signature") and plan_event.get("plan_id") == execution_event.get("retry_plan_id"))
+        previous_signature = plan_event.get("previous_execution_signature")
+        materially_changed = bool(planned_signature and previous_signature and planned_signature != previous_signature)
+        reflection_bound = bool(plan_event.get("reflection_id") and plan_event.get("reflection_id") == reflection_event.get("reflection_id") and plan_event.get("source_attempt") == reflection_event.get("attempt"))
     final_passed = bool(final_attempts and events[final_attempts[-1]].get("passed") is True)
-    outcome_ok = final_passed if outcome == "recover" else bool(final_attempts and events[final_attempts[-1]].get("passed") is False)
+    if outcome == "recover":
+        outcome_ok = final_passed
+    else:
+        outcome_ok = bool(
+            final_attempts
+            and events[final_attempts[-1]].get("passed") is False
+            and stop_reflections
+            and stop_reflections[-1] > final_attempts[-1]
+            and events[stop_reflections[-1]].get("stop_reason") in {"retry_budget_exhausted", "reflection_stop"}
+        )
     return _binary_check(
         "retry_evidence",
-        sequence_ok and outcome_ok,
+        sequence_ok and reflection_bound and plan_bound and materially_changed and outcome_ok,
         10,
-        f"outcome={outcome!r}, evidence_sequence={sequence_ok}, final_attempt_passed={final_passed}",
+        (
+            f"outcome={outcome!r}, evidence_sequence={sequence_ok}, "
+            f"reflection_bound={reflection_bound}, plan_bound={plan_bound}, "
+            f"materially_changed={materially_changed}, final_attempt_passed={final_passed}, "
+            f"stop_reflection={bool(stop_reflections)}"
+        ),
     )
 
 

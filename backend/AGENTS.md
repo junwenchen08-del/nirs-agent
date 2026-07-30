@@ -209,6 +209,16 @@ from deerflow.config import get_app_config
   rejects NIR tools outside their task/stage policy and converts successful
   modeling, knowledge-search, and registration results into atomic checkpoint
   updates without discarding existing `ToolMessage` or `Command` fields.
+  Failed modeling attempts enter `evaluation` and must call `nir_reflect`;
+  middleware replaces model-authored reflection history, attempt, budget,
+  domain, and metrics path with values derived from durable attempt evidence.
+  A retryable reflection moves through required knowledge retrieval and then
+  requires `record_retry_plan`, which persists diagnostics, evidence ids,
+  rationale, expected improvement, canonical pipeline parameters, and a stable
+  execution signature. `plan_ready` and the next modeling call both fail closed
+  unless that call exactly matches the ready plan; repeating the prior
+  execution signature is rejected. Attempts, reflections, and retry plans are
+  bounded audit records used by deterministic trajectory evaluation.
   `merge_nir_workflow` preserves bounded audit evidence across parallel updates
   for the same project, including updates that reach different revisions;
   same-revision project-id

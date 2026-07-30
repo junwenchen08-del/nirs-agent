@@ -213,6 +213,21 @@ def test_failed_attempt_with_evidence_then_recovery_passes_retry_scenario() -> N
         observations,
         tool_name="nir_train_model",
         payload={"status": "ok", "passed": False, "grade": "C"},
+        args={"method": "pls", "pipeline_steps": '["snv"]'},
+    )
+    workflow = _run_tool(
+        middleware,
+        workflow,
+        observations,
+        tool_name="nir_reflect",
+        payload={
+            "status": "ok",
+            "attempt": 1,
+            "should_retry": True,
+            "reason": "Residual curvature remains.",
+            "diagnostics": {"residual_trend": "curved"},
+            "knowledge_hint": {"query": "NIR curved residual derivative"},
+        },
     )
     workflow = _run_tool(
         middleware,
@@ -220,6 +235,15 @@ def test_failed_attempt_with_evidence_then_recovery_passes_retry_scenario() -> N
         observations,
         tool_name="nir_search_knowledge",
         payload={"status": "ok", "results": [{"id": "paper-001"}], "count": 1},
+    )
+    workflow = transition_workflow(
+        workflow,
+        action="record_retry_plan",
+        retry_tool="nir_train_model",
+        retry_method="pls",
+        retry_pipeline_steps='["snv", {"method": "derivative1", "params": {"window": 11}}]',
+        retry_rationale="Use derivative preprocessing to address curved residuals.",
+        expected_improvement="Reduce RMSEP and improve RPD.",
     )
     workflow = transition_workflow(workflow, action="plan_ready", notes="Retry with evidence")
     workflow = _run_tool(
@@ -234,6 +258,10 @@ def test_failed_attempt_with_evidence_then_recovery_passes_retry_scenario() -> N
             "model_path": "retry-model.pkl",
             "metrics_path": "retry-metrics.json",
         },
+        args={
+            "method": "pls",
+            "pipeline_steps": '["snv", {"method": "derivative1", "params": {"window": 11}}]',
+        },
     )
     trace = NIREvalTrace(
         scenario_id="calibration-retry-recover",
@@ -247,6 +275,104 @@ def test_failed_attempt_with_evidence_then_recovery_passes_retry_scenario() -> N
     assert result.passed is True
     assert workflow["knowledge_evidence"] == ["paper-001"]
     assert any(event["action"] == "knowledge_retrieved" and event["evidence_ids"] == ["paper-001"] for event in workflow["history"])
+
+
+def test_retry_budget_exhaustion_requires_final_stop_reflection() -> None:
+    middleware = NIRWorkflowMiddleware()
+    observations: list[NIRToolObservation] = []
+    workflow = start_workflow(
+        task_type="analysis",
+        data_path="corn.npz",
+        analyte="protein",
+        unit="%",
+        domain="food_protein",
+        validation_goal="internal_holdout",
+        max_attempts=2,
+    )
+    workflow = _run_tool(
+        middleware,
+        workflow,
+        observations,
+        tool_name="nir_inspect",
+        payload={"status": "ok"},
+    )
+    workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    workflow = transition_workflow(workflow, action="plan_ready")
+    workflow = _run_tool(
+        middleware,
+        workflow,
+        observations,
+        tool_name="nir_train_model",
+        payload={"status": "ok", "passed": False, "grade": "D"},
+        args={"method": "pls", "pipeline_steps": '["snv"]'},
+    )
+    workflow = _run_tool(
+        middleware,
+        workflow,
+        observations,
+        tool_name="nir_reflect",
+        payload={
+            "status": "ok",
+            "attempt": 1,
+            "should_retry": True,
+            "diagnostics": {"residual_variance": "high"},
+            "knowledge_hint": {"query": "NIR residual variance smoothing"},
+        },
+    )
+    workflow = _run_tool(
+        middleware,
+        workflow,
+        observations,
+        tool_name="nir_search_knowledge",
+        payload={"status": "ok", "results": [{"id": "paper-002"}], "count": 1},
+    )
+    workflow = transition_workflow(
+        workflow,
+        action="record_retry_plan",
+        retry_tool="nir_train_model",
+        retry_method="pls",
+        retry_pipeline_steps='["snv", {"method": "sg_smooth", "params": {"window": 11}}]',
+        retry_rationale="Smooth high-variance residual noise.",
+        expected_improvement="Reduce RMSEP variance.",
+    )
+    workflow = transition_workflow(workflow, action="plan_ready")
+    workflow = _run_tool(
+        middleware,
+        workflow,
+        observations,
+        tool_name="nir_train_model",
+        payload={"status": "ok", "passed": False, "grade": "D"},
+        args={
+            "method": "pls",
+            "pipeline_steps": '["snv", {"method": "sg_smooth", "params": {"window": 11}}]',
+        },
+    )
+    workflow = _run_tool(
+        middleware,
+        workflow,
+        observations,
+        tool_name="nir_reflect",
+        payload={
+            "status": "ok",
+            "attempt": 2,
+            "should_retry": False,
+            "reason": "Retry budget exhausted without sufficient improvement.",
+            "diagnostics": {"residual_variance": "high"},
+        },
+    )
+    trace = NIREvalTrace(
+        scenario_id="retry-budget-exhausted",
+        routed_skill="nir-coordinator",
+        workflow=workflow,
+        tool_calls=tuple(observations),
+    )
+
+    result = evaluate_trace(_scenario(trace.scenario_id), trace)
+
+    assert result.passed is True
+    assert workflow["stage"] == "blocked"
+    assert workflow["reflection"]["stop_reason"] == "retry_budget_exhausted"
+    assert next(check for check in result.checks if check.name == "retry_evidence").passed is True
 
 
 def test_unapproved_registration_attempt_is_reported_as_agent_policy_violation() -> None:
