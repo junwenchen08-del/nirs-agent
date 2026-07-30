@@ -34,6 +34,8 @@ class NIREvalScenario:
     expected_approval_status: str | None = None
     retry_outcome: str | None = None
     required_trace_fields: tuple[str, ...] = ()
+    expected_next_actions: tuple[str, ...] = ()
+    expected_missing_inputs: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
 
     @classmethod
@@ -55,6 +57,8 @@ class NIREvalScenario:
             expected_approval_status=_optional_string(value.get("expected_approval_status")),
             retry_outcome=retry_outcome,
             required_trace_fields=_string_tuple(value.get("required_trace_fields"), "required_trace_fields"),
+            expected_next_actions=_string_tuple(value.get("expected_next_actions"), "expected_next_actions"),
+            expected_missing_inputs=_string_tuple(value.get("expected_missing_inputs"), "expected_missing_inputs"),
             tags=_string_tuple(value.get("tags"), "tags"),
         )
 
@@ -288,6 +292,26 @@ def evaluate_trace(scenario: NIREvalScenario, trace: NIREvalTrace) -> NIREvalRes
     ]
     if scenario.retry_outcome is not None:
         checks.append(_retry_check(scenario.retry_outcome, events))
+    if scenario.expected_next_actions:
+        checks.append(
+            _binary_check(
+                "next_action",
+                workflow.get("next_action") in scenario.expected_next_actions,
+                10,
+                f"expected one of {scenario.expected_next_actions!r}, actual={workflow.get('next_action')!r}",
+            )
+        )
+    if scenario.expected_missing_inputs:
+        raw_missing_inputs = workflow.get("missing_inputs")
+        missing_inputs = tuple(str(value) for value in raw_missing_inputs) if isinstance(raw_missing_inputs, list) else ()
+        checks.append(
+            _binary_check(
+                "missing_inputs",
+                missing_inputs == scenario.expected_missing_inputs,
+                10,
+                f"expected={scenario.expected_missing_inputs!r}, actual={missing_inputs!r}",
+            )
+        )
 
     total_weight = sum(check.weight for check in checks)
     score = round(100 * sum(check.value * check.weight for check in checks) / total_weight, 2) if total_weight else 0.0

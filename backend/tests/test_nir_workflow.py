@@ -20,12 +20,90 @@ from deerflow.community.nir.workflow import (
 )
 
 
-def test_start_collects_missing_professional_requirements():
+def test_start_audits_data_before_asking_inferable_professional_requirements():
     state = start_workflow(task_type="calibration", data_path="/mnt/user-data/uploads/corn.npz")
 
-    assert state["stage"] == "intake"
-    assert state["missing_inputs"] == ["analyte", "unit", "domain"]
-    assert state["next_action"] == "collect_requirements"
+    assert state["stage"] == "data_audit"
+    assert state["missing_inputs"] == []
+    assert state["clarification_questions"] == []
+    assert state["next_action"] == "inspect_data"
+
+
+def test_passed_audit_requests_only_missing_decision_context():
+    state = start_workflow(task_type="calibration", data_path="/mnt/user-data/uploads/corn.npz")
+
+    state = transition_workflow(
+        state,
+        action="record_audit",
+        audit_passed=True,
+        domain="food_protein",
+        analyte="protein",
+        unit="%",
+    )
+
+    assert state["stage"] == "clarification"
+    assert state["audit_status"] == "passed"
+    assert state["missing_inputs"] == ["validation_goal"]
+    assert state["next_action"] == "ask_targeted_clarification"
+    assert state["clarification_questions"] == [
+        {
+            "fields": ["validation_goal"],
+            "question": ("这次任务的验证目标是什么：探索分析、同一数据集独立留出、独立外部验证，还是生产部署？"),
+            "reason": "验证目标决定数据划分、质量声明和是否需要额外域信息。",
+        }
+    ]
+
+
+def test_external_validation_requests_high_impact_context_in_one_question():
+    state = start_workflow(
+        task_type="calibration",
+        data_path="corn.npz",
+        analyte="protein",
+        unit="%",
+        domain="food_protein",
+        validation_goal="external_validation",
+    )
+
+    state = transition_workflow(state, action="record_audit", audit_passed=True)
+
+    assert state["stage"] == "clarification"
+    assert state["missing_inputs"] == [
+        "instrument",
+        "grouping_column",
+        "reference_method",
+    ]
+    assert len(state["clarification_questions"]) == 1
+    assert state["clarification_questions"][0]["fields"] == [
+        "instrument",
+        "grouping_column",
+        "reference_method",
+    ]
+
+
+def test_requirements_after_passed_audit_advance_without_repeating_inspection():
+    state = start_workflow(
+        task_type="calibration",
+        data_path="corn.npz",
+        analyte="protein",
+        unit="%",
+        domain="food_protein",
+        validation_goal="production",
+    )
+    state = transition_workflow(state, action="record_audit", audit_passed=True)
+
+    state = transition_workflow(
+        state,
+        action="set_requirements",
+        instrument="unknown",
+        grouping_column="none",
+        reference_method="unknown",
+    )
+
+    assert state["stage"] == "planning"
+    assert state["audit_status"] == "passed"
+    assert state["missing_inputs"] == []
+    assert state["clarification_questions"] == []
+    assert state["next_action"] == "prepare_analysis_plan"
 
 
 def test_start_multi_modeling_enters_data_audit_with_complete_requirements():
@@ -35,6 +113,7 @@ def test_start_multi_modeling_enters_data_audit_with_complete_requirements():
         analyte="protein, moisture, oil",
         unit="percent",
         domain="feed",
+        validation_goal="internal_holdout",
     )
 
     assert state["stage"] == "data_audit"
@@ -48,6 +127,7 @@ def test_complete_calibration_requires_explicit_approval_before_registration():
         analyte="protein",
         unit="%",
         domain="food_protein",
+        validation_goal="internal_holdout",
     )
     assert state["stage"] == "data_audit"
 
@@ -82,6 +162,7 @@ def test_failed_attempt_uses_knowledge_stage_until_retry_budget_is_exhausted():
         analyte="moisture",
         unit="%",
         domain="food_moisture",
+        validation_goal="internal_holdout",
         max_attempts=2,
     )
     state = transition_workflow(state, action="record_audit", audit_passed=True)
@@ -107,6 +188,7 @@ def test_knowledge_evidence_accumulates_across_bounded_retries():
         analyte="protein",
         unit="%",
         domain="food_protein",
+        validation_goal="internal_holdout",
         max_attempts=3,
     )
     state = transition_workflow(state, action="record_audit", audit_passed=True)
@@ -174,6 +256,7 @@ def test_nir_workflow_reducer_prefers_progressed_same_revision_state():
         analyte="protein",
         unit="%",
         domain="food_protein",
+        validation_goal="internal_holdout",
     )
     denied_tool_update = {
         **existing,
@@ -270,13 +353,22 @@ def test_tool_reports_invalid_transition_without_mutating_state():
 
 
 def test_workflow_state_is_rendered_into_durable_context():
-    state = start_workflow(task_type="inspection", data_path="data.npz")
+    state = start_workflow(task_type="calibration", data_path="data.npz")
+    state = transition_workflow(
+        state,
+        action="record_audit",
+        audit_passed=True,
+        domain="food_protein",
+        analyte="protein",
+        unit="%",
+    )
 
     rendered = _render_durable_context_data(None, [], [], state)
 
     assert "Active NIR workflow state" in rendered
-    assert '"stage": "data_audit"' in rendered
-    assert '"next_action": "inspect_data"' in rendered
+    assert '"stage": "clarification"' in rendered
+    assert '"next_action": "ask_targeted_clarification"' in rendered
+    assert '"fields": ["validation_goal"]' in rendered
 
 
 def _review_state():
@@ -286,6 +378,7 @@ def _review_state():
         analyte="protein",
         unit="%",
         domain="food_protein",
+        validation_goal="internal_holdout",
     )
     state = transition_workflow(state, action="record_audit", audit_passed=True)
     state = transition_workflow(state, action="plan_ready")
@@ -358,6 +451,7 @@ def test_nir_workflow_reducer_preserves_evidence_from_lower_revision():
         analyte="protein",
         unit="%",
         domain="food_protein",
+        validation_goal="internal_holdout",
     )
     observed = {
         **existing,

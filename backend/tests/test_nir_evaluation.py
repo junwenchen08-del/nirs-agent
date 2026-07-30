@@ -107,6 +107,10 @@ def test_default_scenario_catalog_covers_core_nir_agent_paths() -> None:
         "multi-component-shared-preprocess",
         "multi-component-predict",
     }.issubset(scenarios)
+    clarification = scenarios["intake-missing-requirements"]
+    assert clarification.expected_final_stages == ("clarification",)
+    assert clarification.expected_next_actions == ("ask_targeted_clarification",)
+    assert clarification.expected_missing_inputs == ("validation_goal",)
 
 
 def test_complete_calibration_trace_passes_every_evaluation_check() -> None:
@@ -118,6 +122,7 @@ def test_complete_calibration_trace_passes_every_evaluation_check() -> None:
         analyte="protein",
         unit="%",
         domain="food_protein",
+        validation_goal="internal_holdout",
     )
     workflow = _run_tool(
         middleware,
@@ -177,6 +182,7 @@ def test_failed_attempt_with_evidence_then_recovery_passes_retry_scenario() -> N
         analyte="protein",
         unit="%",
         domain="food_protein",
+        validation_goal="internal_holdout",
     )
     workflow = _run_tool(
         middleware,
@@ -236,6 +242,7 @@ def test_unapproved_registration_attempt_is_reported_as_agent_policy_violation()
         analyte="protein",
         unit="%",
         domain="food_protein",
+        validation_goal="internal_holdout",
     )
     workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
     workflow = transition_workflow(workflow, action="plan_ready")
@@ -292,11 +299,26 @@ def test_suite_report_is_machine_readable_and_human_readable(tmp_path: Path) -> 
 
 def test_cli_evaluates_trace_file_and_enforces_score_threshold(tmp_path: Path) -> None:
     workflow = start_workflow(task_type="calibration", data_path="corn.npz")
+    workflow = transition_workflow(
+        workflow,
+        action="record_audit",
+        audit_passed=True,
+        domain="food_protein",
+        analyte="protein",
+        unit="%",
+    )
     trace = NIREvalTrace(
         scenario_id="intake-missing-requirements",
         routed_skill="nir-coordinator",
         workflow=workflow,
-        tool_calls=(),
+        tool_calls=(
+            NIRToolObservation(
+                name="nir_inspect",
+                status="success",
+                stage_before="data_audit",
+                stage_after="data_audit",
+            ),
+        ),
     )
     traces_path = tmp_path / "traces.json"
     traces_path.write_text(json.dumps({"version": 1, "traces": [trace.to_dict()]}), encoding="utf-8")

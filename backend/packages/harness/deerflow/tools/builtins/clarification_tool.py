@@ -37,8 +37,9 @@ def ask_clarification_tool(
     - You have a recommendation but need user approval
 
     Best practices:
-    - Ask ONE clarification at a time for clarity
+    - Use one clarification turn; tightly related fields may be grouped in one compact question
     - Be specific and clear in your question
+    - Do not ask for facts already available in the request, durable context, or allowed inspection results
     - Don't make assumptions when clarification is needed
     - For risky operations, ALWAYS ask for confirmation
     - After calling this tool, execution will be interrupted automatically

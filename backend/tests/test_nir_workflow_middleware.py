@@ -46,6 +46,7 @@ def _execution_state(*, max_attempts: int = 3, task_type: str = "calibration") -
         analyte="protein",
         unit="%",
         domain="food_protein",
+        validation_goal="internal_holdout",
         max_attempts=max_attempts,
     )
     state = transition_workflow(state, action="record_audit", audit_passed=True)
@@ -100,6 +101,31 @@ def test_domain_tool_is_denied_outside_authorized_stage() -> None:
     assert payload["stage"] == "data_audit"
     assert payload["allowed_stages"] == ["execution"]
     assert payload["next_action"] == "inspect_data"
+
+
+def test_domain_tool_denial_preserves_targeted_clarification_for_the_agent() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(task_type="calibration", data_path="data.npz")
+    workflow = transition_workflow(
+        workflow,
+        action="record_audit",
+        audit_passed=True,
+        domain="food_protein",
+        analyte="protein",
+        unit="%",
+    )
+
+    result = middleware.wrap_tool_call(
+        _request("nir_train_model", {"nir_workflow": workflow}),
+        lambda _: _result("nir_train_model", {"status": "ok"}),
+    )
+
+    assert isinstance(result, Command)
+    payload = json.loads(result.update["messages"][0].content)
+    assert payload["stage"] == "clarification"
+    assert payload["next_action"] == "ask_targeted_clarification"
+    assert payload["missing_inputs"] == ["validation_goal"]
+    assert payload["clarification_questions"][0]["fields"] == ["validation_goal"]
 
 
 def test_tool_is_denied_for_incompatible_task_type() -> None:

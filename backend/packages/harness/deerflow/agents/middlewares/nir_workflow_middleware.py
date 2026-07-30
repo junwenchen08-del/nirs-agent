@@ -160,6 +160,8 @@ def _denied_message(
         "task_type": workflow.get("task_type") if workflow else None,
         "allowed_stages": sorted(policy.stages) if policy else [],
         "next_action": workflow.get("next_action") if workflow else "start_workflow",
+        "missing_inputs": list(workflow.get("missing_inputs") or []) if workflow else [],
+        "clarification_questions": list(workflow.get("clarification_questions") or []) if workflow else [],
     }
     if details:
         payload["details"] = dict(details)

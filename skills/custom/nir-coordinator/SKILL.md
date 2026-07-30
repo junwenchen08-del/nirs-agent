@@ -8,6 +8,7 @@ allowed-tools:
   - read_file
   - ls
   - task
+  - ask_clarification
   - present_files
   - nir_workflow
   - nir_load_data
@@ -31,18 +32,34 @@ allowed-tools:
 ## 工作流状态（强制）
 
 运行时会自动将明确的近红外请求路由到本 Skill，用户无需输入
-`/nir-coordinator`。开始任何新的 NIR 分析前，先调用：
+`/nir-coordinator`。开始任何新的 NIR 分析前，先调用工作流。只要用户已提供数据路径，
+不要为了 `domain`、`analyte`、`unit` 等可能从数据中推断的信息而延迟检查：
 
 ```text
 nir_workflow(
   action="start",
   task_type="analysis",
-  data_path="...",
-  domain="...",
-  analyte="...",
-  unit="..."
+  data_path="..."
 )
 ```
+
+启动后严格执行 `next_action="inspect_data"`，先调用 `nir_inspect`。结合检查结果和用户原始
+请求提取能够可靠确定的领域、目标成分、单位和数据划分线索，然后调用
+`record_audit(audit_passed=true, domain=..., analyte=..., unit=..., ...)` 写回持久工作流。
+不确定的信息不要猜测。
+
+审查通过后若进入 `stage="clarification"`：
+
+- 将返回的 `clarification_questions` 合并成一条简短消息，一次性询问，不逐字段盘问；
+- 每组问题用返回的 `reason` 简要说明它会影响哪个分析决策；
+- 调用一次 `ask_clarification(clarification_type="missing_info")` 提问并等待用户回答；
+- 用户回答后调用一次 `set_requirements` 写回，已通过的数据审查不会重复执行；
+- 用户明确表示“不知道”或“没有”时，分别写入 `unknown` 或 `none`，不要反复追问；
+- 只有工作流进入 `planning` 后才能制定计划，进入 `execution` 后才能调用建模工具。
+
+`validation_goal` 使用 `exploratory`、`internal_holdout`、`external_validation` 或
+`production`。外部验证和生产部署还必须确认 `instrument`、`grouping_column` 和
+`reference_method`，因为这些信息决定域偏移和无泄漏验证边界。
 
 多成分/多组分/同时分析请求使用 `task_type="multi_modeling"`。数据审查后通过
 `nir_load_data(y_cols=..., output_path=...)` 生成二维 y 的 NPZ，再调用一次
@@ -78,9 +95,11 @@ MATLAB `.mat` 文件如果 `nir_inspect` 返回两个或更多 `available_subset
 - `nir_search_knowledge`：自动 `knowledge_retrieved`
 - `nir_register_model`：自动 `registered`
 
-如果返回 `missing_inputs`，必须先向用户收集缺失信息。模型通过质量门槛后只会
-进入 `review`，未记录用户 `approve` 前禁止调用 `nir_register_model`。任何越阶段或
-与任务类型不匹配的 `nir_*` 调用都会被运行时拒绝，并返回当前 `next_action`。
+如果返回 `missing_inputs`，按 `next_action` 处理：`collect_prerequisites` 只收集缺失的文件
+路径；`ask_targeted_clarification` 使用结构化问题收集真正会改变分析决策的信息。模型通过
+质量门槛后只会进入 `review`，未记录用户 `approve` 前禁止调用
+`nir_register_model`。任何越阶段或与任务类型不匹配的 `nir_*` 调用都会被运行时拒绝，
+并返回当前 `next_action` 和尚未解决的澄清问题。
 
 ## ⛔ 绝对禁止（违反会得到错误结果，必须严格执行）
 

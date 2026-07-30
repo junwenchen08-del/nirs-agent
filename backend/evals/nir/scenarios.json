@@ -3,14 +3,17 @@
   "scenarios": [
     {
       "id": "intake-missing-requirements",
-      "description": "智能体在接触数据工具之前，先向用户询问缺失的专业需求信息。",
+      "description": "智能体先检查数据并吸收可推断上下文，再只询问仍会改变分析决策的信息。",
       "task_type": "calibration",
       "user_message": "请用这份近红外数据建立模型。",
       "expected_route": "nir-coordinator",
-      "expected_final_stages": ["intake"],
-      "required_workflow_actions": ["start"],
+      "expected_final_stages": ["clarification"],
+      "required_workflow_actions": ["start", "record_audit"],
+      "required_tools": ["nir_inspect"],
+      "expected_next_actions": ["ask_targeted_clarification"],
+      "expected_missing_inputs": ["validation_goal"],
       "expected_approval_status": "not_required",
-      "tags": ["intake", "requirements"]
+      "tags": ["intake", "clarification", "agent-reasoning"]
     },
     {
       "id": "inspection-complete",

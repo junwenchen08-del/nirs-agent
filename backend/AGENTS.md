@@ -198,7 +198,12 @@ from deerflow.config import get_app_config
 - NIR domain runs use the checkpointed `nir_workflow` channel. The
   `deerflow.community.nir.workflow:nir_workflow_tool` applies validated stage
   transitions, retry budgets, required-input checks, and the user approval gate
-  before model registration. NIR requests are deterministically routed to the
+  before model registration. Modeling tasks inspect available data before asking
+  for inferable professional context; after a passed audit, the workflow enters
+  a durable `clarification` stage only for unresolved decision inputs. Its
+  structured `clarification_questions` group related fields, while external
+  validation and production goals additionally require instrument, grouping,
+  and reference-method context. NIR requests are deterministically routed to the
   `nir-coordinator` skill by `SkillActivationMiddleware` auto-routes; explicit
   slash activation continues to take precedence. `NIRWorkflowMiddleware`
   rejects NIR tools outside their task/stage policy and converts successful

@@ -17,20 +17,33 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.types import Command
 
-from deerflow.agents.thread_state import NIRWorkflowState
+from deerflow.agents.thread_state import NIRClarificationQuestion, NIRWorkflowState
 from deerflow.tools.types import Runtime
 from deerflow.utils.messages import get_original_user_content_text
 
 _SUPPORTED_TASK_TYPES = frozenset({"analysis", "calibration", "multi_modeling", "compare", "prediction", "inspection", "knowledge"})
-_REQUIRED_INPUTS = {
-    "analysis": ("data_path", "analyte", "unit", "domain"),
-    "calibration": ("data_path", "analyte", "unit", "domain"),
-    "multi_modeling": ("data_path", "analyte", "unit", "domain"),
-    "compare": ("data_path", "analyte", "unit", "domain"),
+_MODELING_TASK_TYPES = frozenset({"analysis", "calibration", "multi_modeling", "compare"})
+_PREREQUISITE_INPUTS = {
+    "analysis": ("data_path",),
+    "calibration": ("data_path",),
+    "multi_modeling": ("data_path",),
+    "compare": ("data_path",),
     "prediction": ("data_path", "model_path"),
     "inspection": ("data_path",),
     "knowledge": (),
 }
+_DECISION_INPUTS = ("domain", "analyte", "unit", "validation_goal")
+_HIGH_ASSURANCE_INPUTS = ("instrument", "grouping_column", "reference_method")
+_HIGH_ASSURANCE_GOAL_MARKERS = (
+    "external",
+    "production",
+    "deployment",
+    "transfer",
+    "外部",
+    "生产",
+    "部署",
+    "迁移",
+)
 _HISTORY_LIMIT = 50
 _TOOL_OBSERVATION_LIMIT = 100
 _APPROVAL_PATTERNS = (
@@ -57,9 +70,83 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _missing_inputs(state: NIRWorkflowState) -> list[str]:
-    required = _REQUIRED_INPUTS.get(state["task_type"], ())
+def _missing_inputs(state: NIRWorkflowState, required: tuple[str, ...]) -> list[str]:
     return [field for field in required if not state.get(field)]
+
+
+def _prerequisite_missing(state: NIRWorkflowState) -> list[str]:
+    return _missing_inputs(state, _PREREQUISITE_INPUTS.get(state["task_type"], ()))
+
+
+def _requires_high_assurance_context(validation_goal: str | None) -> bool:
+    normalized = str(validation_goal or "").strip().lower()
+    return any(marker in normalized for marker in _HIGH_ASSURANCE_GOAL_MARKERS)
+
+
+def _decision_missing(state: NIRWorkflowState) -> list[str]:
+    if state["task_type"] not in _MODELING_TASK_TYPES:
+        return []
+    required = list(_DECISION_INPUTS)
+    if _requires_high_assurance_context(state.get("validation_goal")):
+        required.extend(_HIGH_ASSURANCE_INPUTS)
+    return _missing_inputs(state, tuple(required))
+
+
+def _clarification_questions(missing: list[str]) -> list[NIRClarificationQuestion]:
+    questions: list[NIRClarificationQuestion] = []
+    target_fields = [field for field in ("domain", "analyte", "unit") if field in missing]
+    if target_fields:
+        questions.append(
+            {
+                "fields": target_fields,
+                "question": "请确认样品/应用领域、目标成分，以及参考值或预测值的单位。",
+                "reason": "这些信息决定质量阈值、目标列解释和最终报告口径。",
+            }
+        )
+    if "validation_goal" in missing:
+        questions.append(
+            {
+                "fields": ["validation_goal"],
+                "question": "这次任务的验证目标是什么：探索分析、同一数据集独立留出、独立外部验证，还是生产部署？",
+                "reason": "验证目标决定数据划分、质量声明和是否需要额外域信息。",
+            }
+        )
+    assurance_fields = [field for field in _HIGH_ASSURANCE_INPUTS if field in missing]
+    if assurance_fields:
+        questions.append(
+            {
+                "fields": assurance_fields,
+                "question": "请补充仪器型号、可用于隔离批次/季节/产地的分组列，以及参考实验方法；没有或未知时请明确说明。",
+                "reason": "外部验证或生产部署必须控制仪器、批次和参考方法带来的域偏移。",
+            }
+        )
+    return questions
+
+
+def _requirement_updates(
+    *,
+    data_path: str | None = None,
+    model_path: str | None = None,
+    domain: str | None = None,
+    analyte: str | None = None,
+    unit: str | None = None,
+    validation_goal: str | None = None,
+    instrument: str | None = None,
+    grouping_column: str | None = None,
+    reference_method: str | None = None,
+) -> dict[str, str]:
+    values = {
+        "data_path": data_path,
+        "model_path": model_path,
+        "domain": domain,
+        "analyte": analyte,
+        "unit": unit,
+        "validation_goal": validation_goal,
+        "instrument": instrument,
+        "grouping_column": grouping_column,
+        "reference_method": reference_method,
+    }
+    return {key: value.strip() for key, value in values.items() if isinstance(value, str) and value.strip()}
 
 
 def _merge_evidence(state: NIRWorkflowState, evidence_ids: list[str] | None) -> list[str]:
@@ -169,6 +256,10 @@ def start_workflow(
     domain: str | None = None,
     analyte: str | None = None,
     unit: str | None = None,
+    validation_goal: str | None = None,
+    instrument: str | None = None,
+    grouping_column: str | None = None,
+    reference_method: str | None = None,
     max_attempts: int = 3,
 ) -> NIRWorkflowState:
     """Create a new NIR workflow and determine its first executable stage."""
@@ -178,16 +269,31 @@ def start_workflow(
     if not 1 <= max_attempts <= 10:
         raise NIRWorkflowError("max_attempts must be between 1 and 10")
 
+    normalized_requirements = _requirement_updates(
+        data_path=data_path,
+        model_path=model_path,
+        domain=domain,
+        analyte=analyte,
+        unit=unit,
+        validation_goal=validation_goal,
+        instrument=instrument,
+        grouping_column=grouping_column,
+        reference_method=reference_method,
+    )
     state: NIRWorkflowState = {
         "project_id": project_id or f"nir-{uuid.uuid4().hex[:12]}",
         "task_type": normalized_task,
         "stage": "intake",
         "revision": 1,
-        "domain": domain,
-        "analyte": analyte,
-        "unit": unit,
-        "data_path": data_path,
-        "model_path": model_path,
+        "domain": normalized_requirements.get("domain"),
+        "analyte": normalized_requirements.get("analyte"),
+        "unit": normalized_requirements.get("unit"),
+        "validation_goal": normalized_requirements.get("validation_goal"),
+        "instrument": normalized_requirements.get("instrument"),
+        "grouping_column": normalized_requirements.get("grouping_column"),
+        "reference_method": normalized_requirements.get("reference_method"),
+        "data_path": normalized_requirements.get("data_path"),
+        "model_path": normalized_requirements.get("model_path"),
         "metrics_path": None,
         "knowledge_evidence": [],
         "run_ids": [],
@@ -195,16 +301,18 @@ def start_workflow(
         "tool_observations": [],
         "attempt": 0,
         "max_attempts": max_attempts,
+        "audit_status": "pending",
         "missing_inputs": [],
+        "clarification_questions": [],
         "approval_status": "not_required",
-        "next_action": "collect_requirements",
+        "next_action": "collect_prerequisites",
         "history": [],
         "updated_at": _now(),
     }
-    missing = _missing_inputs(state)
+    missing = _prerequisite_missing(state)
     state["missing_inputs"] = missing
     if missing:
-        state["next_action"] = "collect_requirements"
+        state["next_action"] = "collect_prerequisites"
     elif normalized_task == "knowledge":
         state["stage"] = "execution"
         state["next_action"] = "search_knowledge"
@@ -225,6 +333,10 @@ def transition_workflow(
     domain: str | None = None,
     analyte: str | None = None,
     unit: str | None = None,
+    validation_goal: str | None = None,
+    instrument: str | None = None,
+    grouping_column: str | None = None,
+    reference_method: str | None = None,
     audit_passed: bool | None = None,
     attempt_passed: bool | None = None,
     grade: str | None = None,
@@ -236,19 +348,40 @@ def transition_workflow(
     action = action.strip().lower()
 
     if action == "set_requirements":
-        updated = _with_update(
-            state,
-            action=action,
+        requirement_updates = _requirement_updates(
             data_path=data_path,
             model_path=model_path,
             domain=domain,
             analyte=analyte,
             unit=unit,
+            validation_goal=validation_goal,
+            instrument=instrument,
+            grouping_column=grouping_column,
+            reference_method=reference_method,
         )
-        missing = _missing_inputs(updated)
-        updated["missing_inputs"] = missing
-        updated["stage"] = "intake" if missing else "data_audit"
-        updated["next_action"] = "collect_requirements" if missing else "inspect_data"
+        updated = _with_update(
+            state,
+            action=action,
+            **requirement_updates,
+        )
+        prerequisites = _prerequisite_missing(updated)
+        if prerequisites:
+            updated["missing_inputs"] = prerequisites
+            updated["clarification_questions"] = []
+            updated["stage"] = "intake"
+            updated["next_action"] = "collect_prerequisites"
+            return updated
+        if updated.get("audit_status") != "passed":
+            updated["missing_inputs"] = []
+            updated["clarification_questions"] = []
+            updated["stage"] = "data_audit"
+            updated["next_action"] = "inspect_data"
+            return updated
+        decision_missing = _decision_missing(updated)
+        updated["missing_inputs"] = decision_missing
+        updated["clarification_questions"] = _clarification_questions(decision_missing)
+        updated["stage"] = "clarification" if decision_missing else "planning"
+        updated["next_action"] = "ask_targeted_clarification" if decision_missing else "prepare_analysis_plan"
         return updated
 
     if action == "record_audit":
@@ -256,6 +389,17 @@ def transition_workflow(
             raise NIRWorkflowError("record_audit is only allowed during data_audit")
         if audit_passed is None:
             raise NIRWorkflowError("audit_passed is required for record_audit")
+        requirement_updates = _requirement_updates(
+            data_path=data_path,
+            model_path=model_path,
+            domain=domain,
+            analyte=analyte,
+            unit=unit,
+            validation_goal=validation_goal,
+            instrument=instrument,
+            grouping_column=grouping_column,
+            reference_method=reference_method,
+        )
         if not audit_passed:
             reasons = missing_inputs or ["data_quality_issue"]
             return _with_update(
@@ -263,16 +407,40 @@ def transition_workflow(
                 action=action,
                 stage="blocked",
                 next_action="resolve_data_issues",
+                audit_status="failed",
                 missing_inputs=reasons,
+                clarification_questions=[],
                 event_details={"passed": False, "notes": notes},
+                **requirement_updates,
+            )
+        preview: NIRWorkflowState = {
+            **state,
+            **requirement_updates,
+            "audit_status": "passed",
+        }
+        decision_missing = _decision_missing(preview)
+        if decision_missing:
+            return _with_update(
+                state,
+                action=action,
+                stage="clarification",
+                next_action="ask_targeted_clarification",
+                audit_status="passed",
+                missing_inputs=decision_missing,
+                clarification_questions=_clarification_questions(decision_missing),
+                event_details={"passed": True, "notes": notes},
+                **requirement_updates,
             )
         return _with_update(
             state,
             action=action,
             stage="planning",
             next_action="prepare_analysis_plan",
+            audit_status="passed",
             missing_inputs=[],
+            clarification_questions=[],
             event_details={"passed": True, "notes": notes},
+            **requirement_updates,
         )
 
     if action == "plan_ready":
@@ -409,6 +577,7 @@ def _tool_payload(state: NIRWorkflowState) -> str:
             "stage": state["stage"],
             "next_action": state["next_action"],
             "missing_inputs": state["missing_inputs"],
+            "clarification_questions": state.get("clarification_questions", []),
         },
         ensure_ascii=False,
     )
@@ -454,6 +623,10 @@ def nir_workflow_tool(
     domain: str | None = None,
     analyte: str | None = None,
     unit: str | None = None,
+    validation_goal: str | None = None,
+    instrument: str | None = None,
+    grouping_column: str | None = None,
+    reference_method: str | None = None,
     max_attempts: int = 3,
     audit_passed: bool | None = None,
     attempt_passed: bool | None = None,
@@ -483,6 +656,11 @@ def nir_workflow_tool(
         domain: NIR application domain.
         analyte: Property being predicted or analysed.
         unit: Reference/prediction unit.
+        validation_goal: Exploratory, internal_holdout, external_validation, or
+            production. This controls the validation claim and extra context.
+        instrument: Instrument model or an explicit ``unknown``.
+        grouping_column: Batch/season/origin grouping column, or ``none``.
+        reference_method: Laboratory reference method or an explicit ``unknown``.
         max_attempts: Retry budget for a new workflow (1-10).
         audit_passed: Required by record_audit.
         attempt_passed: Required by record_attempt when used outside middleware.
@@ -515,6 +693,10 @@ def nir_workflow_tool(
                 domain=domain,
                 analyte=analyte,
                 unit=unit,
+                validation_goal=validation_goal,
+                instrument=instrument,
+                grouping_column=grouping_column,
+                reference_method=reference_method,
                 max_attempts=max_attempts,
             )
             if current:
@@ -533,6 +715,10 @@ def nir_workflow_tool(
                 domain=domain,
                 analyte=analyte,
                 unit=unit,
+                validation_goal=validation_goal,
+                instrument=instrument,
+                grouping_column=grouping_column,
+                reference_method=reference_method,
                 audit_passed=audit_passed,
                 attempt_passed=attempt_passed,
                 grade=grade,

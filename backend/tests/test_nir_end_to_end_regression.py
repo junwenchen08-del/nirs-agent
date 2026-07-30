@@ -30,6 +30,7 @@ def _approved_workflow(model_path: str, metrics_path: str) -> dict:
         analyte="synthetic_reference",
         unit="a.u.",
         domain="default",
+        validation_goal="internal_holdout",
     )
     state = transition_workflow(state, action="record_audit", audit_passed=True)
     state = transition_workflow(state, action="plan_ready")

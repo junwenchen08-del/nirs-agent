@@ -26,6 +26,7 @@ class ViewedImageData(TypedDict):
 NIRWorkflowStage = Literal[
     "intake",
     "data_audit",
+    "clarification",
     "planning",
     "execution",
     "evaluation",
@@ -38,6 +39,14 @@ NIRWorkflowStage = Literal[
 ]
 
 
+class NIRClarificationQuestion(TypedDict):
+    """One compact user question covering decision-changing NIR context."""
+
+    fields: list[str]
+    question: str
+    reason: str
+
+
 class NIRWorkflowState(TypedDict):
     """Checkpointed state for one NIR analysis workflow in a thread."""
 
@@ -48,6 +57,10 @@ class NIRWorkflowState(TypedDict):
     domain: NotRequired[str | None]
     analyte: NotRequired[str | None]
     unit: NotRequired[str | None]
+    validation_goal: NotRequired[str | None]
+    instrument: NotRequired[str | None]
+    grouping_column: NotRequired[str | None]
+    reference_method: NotRequired[str | None]
     data_path: NotRequired[str | None]
     model_path: NotRequired[str | None]
     metrics_path: NotRequired[str | None]
@@ -57,7 +70,9 @@ class NIRWorkflowState(TypedDict):
     tool_observations: list[dict]
     attempt: int
     max_attempts: int
+    audit_status: Literal["pending", "passed", "failed"]
     missing_inputs: list[str]
+    clarification_questions: list[NIRClarificationQuestion]
     approval_status: Literal["not_required", "pending", "approved", "rejected"]
     next_action: str
     history: list[dict]
@@ -100,15 +115,16 @@ def merge_nir_workflow(
 _NIR_STAGE_RANK = {
     "intake": 0,
     "data_audit": 1,
-    "planning": 2,
-    "execution": 3,
-    "knowledge": 4,
-    "evaluation": 5,
-    "review": 6,
-    "approved": 7,
-    "registered": 8,
-    "completed": 9,
-    "blocked": 9,
+    "clarification": 2,
+    "planning": 3,
+    "execution": 4,
+    "knowledge": 5,
+    "evaluation": 6,
+    "review": 7,
+    "approved": 8,
+    "registered": 9,
+    "completed": 10,
+    "blocked": 10,
 }
 _NIR_HISTORY_LIMIT = 50
 _NIR_TOOL_OBSERVATION_LIMIT = 100

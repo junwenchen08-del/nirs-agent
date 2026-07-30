@@ -51,6 +51,7 @@ def test_gateway_exports_checkpointed_workflow_as_cli_compatible_trace() -> None
             analyte="protein",
             unit="%",
             domain="food_protein",
+            validation_goal="internal_holdout",
         )
         workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
         workflow = transition_workflow(workflow, action="plan_ready")
