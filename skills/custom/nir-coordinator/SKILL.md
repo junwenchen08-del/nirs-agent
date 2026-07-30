@@ -27,6 +27,20 @@ allowed-tools:
   - nir_search_knowledge
 ---
 
+## Runtime validation evidence (mandatory)
+
+- Treat `validation_goal` as an executable protocol constraint. Use internal
+  holdout tools only for `internal_holdout`; use
+  `nir_train_partitioned_model` only for `external_validation` or `production`.
+- Report model metrics only from the current workflow's `attempt_evidence`
+  and its `metrics_summary`. Never reuse metrics from an earlier conversation,
+  a filename, memory, or an unbound report.
+- Register only the `model_path` and `metrics_path` recorded in the approved
+  `attempt_evidence`. Do not substitute another artifact after approval.
+- Preserve the returned `protocol`, `validation_scope`, and SHA-256 evidence in
+  any audit explanation. Internal holdout evidence must never be described as
+  external or production validation.
+
 # NIR 光谱分析协调器
 
 ## 工作流状态（强制）

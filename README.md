@@ -6,6 +6,14 @@
 [![nir-core](https://img.shields.io/badge/nir--core-0.1.0-blue)](./nir_core/pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
+## 验证协议与当前运行证据
+
+智能体会在运行时强制执行验证目标：`internal_holdout` 只能使用同一数据集的独立留出
+工具；`external_validation` 和 `production` 必须使用具名分区的外部验证路径。建模成功后，
+工作流会记录工具与运行标识、验证协议、验证范围、产物路径、精简指标摘要，以及模型、
+指标文件和训练数据的 SHA-256 证据。注册时只接受本次已批准尝试中的原始产物，并再次
+核对指标协议、验证范围、路径和模型清单中的哈希。
+
 NIR-Agent 是一个基于 [DeerFlow v2.0](https://github.com/bytedance/deer-flow) 框架构建的**近红外光谱（NIR）专用智能体**，实现了完整的化学计量学分析工作流：数据加载 → 预处理优化 → 建模评估 → 反思闭环 → 报告生成。
 
 明确的近红外请求会被自动路由到 `nir-coordinator`，无需命令前缀。任务阶段、

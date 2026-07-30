@@ -197,6 +197,26 @@ def _bind_model_metrics(
     os.replace(temporary, manifest_path)
 
 
+def _model_evidence(
+    real_model_path: str,
+    real_metrics_path: str,
+    *,
+    training_data_hash: str,
+    protocol: str,
+    validation_scope: str,
+) -> dict[str, object]:
+    """Return bounded cryptographic evidence for the just-created model run."""
+
+    return {
+        "schema_version": 1,
+        "protocol": protocol,
+        "validation_scope": validation_scope,
+        "model_sha256": _artifact_digest(Path(real_model_path)),
+        "metrics_sha256": _artifact_digest(Path(real_metrics_path)),
+        "training_data_sha256": str(training_data_hash).lower(),
+    }
+
+
 def _load_trusted_model_artifact(real_model_path: str, virtual_model_path: str):
     """Verify model provenance/integrity before invoking joblib.load.
 

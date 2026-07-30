@@ -8,9 +8,17 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 
-def _approved_workflow(model_path: str, metrics_path: str) -> dict:
+def _approved_workflow(
+    model_path: str,
+    metrics_path: str,
+    *,
+    model_sha256: str = "0" * 64,
+    metrics_sha256: str = "0" * 64,
+    training_data_sha256: str = "0" * 64,
+) -> dict:
     from deerflow.community.nir.workflow import start_workflow, transition_workflow
 
     state = start_workflow(
@@ -30,8 +38,41 @@ def _approved_workflow(model_path: str, metrics_path: str) -> dict:
         grade="A",
         model_path=model_path,
         metrics_path=metrics_path,
+        attempt_evidence={
+            "schema_version": 1,
+            "tool_name": "nir_train_model",
+            "protocol": "random_three_way_holdout",
+            "validation_scope": "independent_holdout_not_external",
+            "model_path": model_path,
+            "metrics_path": metrics_path,
+            "model_sha256": model_sha256,
+            "metrics_sha256": metrics_sha256,
+            "training_data_sha256": training_data_sha256,
+        },
     )
     return transition_workflow(state, action="approve", notes="test approval")
+
+
+@pytest.mark.parametrize("validation_goal", ["external_validation", "production"])
+def test_high_assurance_registration_rejects_internal_holdout_metrics(validation_goal: str) -> None:
+    from deerflow.community.nir.registration import _validation_goal_gate
+
+    approved, reason = _validation_goal_gate(
+        {
+            "protocol": "random_three_way_holdout",
+            "validation_scope": "independent_holdout_not_external",
+        },
+        {
+            "validation_goal": validation_goal,
+            "attempt_evidence": {
+                "protocol": "random_three_way_holdout",
+                "validation_scope": "independent_holdout_not_external",
+            },
+        },
+    )
+
+    assert approved is False
+    assert "independent_external_validation" in reason
 
 
 def test_training_rejects_conflicting_duplicate_spectra(tmp_path: Path) -> None:
@@ -73,6 +114,8 @@ def test_registration_rejects_metrics_without_science_evidence(
         json.dumps(
             {
                 "training_data_hash": "a" * 64,
+                "protocol": "random_three_way_holdout",
+                "validation_scope": "independent_holdout_not_external",
                 "quality": {"passed": True},
             }
         ),
@@ -128,6 +171,8 @@ def test_registration_rejects_metrics_modified_after_model_binding(
     training_hash = "b" * 64
     valid_metrics = {
         "training_data_hash": training_hash,
+        "protocol": "random_three_way_holdout",
+        "validation_scope": "independent_holdout_not_external",
         "scientific_validation": {
             "passed": True,
             "dataset": {"passed": True},
@@ -137,7 +182,7 @@ def test_registration_rejects_metrics_modified_after_model_binding(
             "schema_version": 1,
             "random_state": 42,
             "input_sha256": training_hash,
-            "protocol": "test",
+            "protocol": "random_three_way_holdout",
         },
         "quality": {"passed": True},
         "method": "pls",

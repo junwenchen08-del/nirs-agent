@@ -39,14 +39,22 @@ def _request(
     )
 
 
-def _execution_state(*, max_attempts: int = 3, task_type: str = "calibration") -> dict:
+def _execution_state(
+    *,
+    max_attempts: int = 3,
+    task_type: str = "calibration",
+    validation_goal: str = "internal_holdout",
+) -> dict:
     state = start_workflow(
         task_type=task_type,
         data_path="/mnt/user-data/uploads/data.npz",
         analyte="protein",
         unit="%",
         domain="food_protein",
-        validation_goal="internal_holdout",
+        validation_goal=validation_goal,
+        instrument="nir-instrument-1" if validation_goal in {"external_validation", "production"} else None,
+        grouping_column="batch" if validation_goal in {"external_validation", "production"} else None,
+        reference_method="laboratory reference" if validation_goal in {"external_validation", "production"} else None,
         max_attempts=max_attempts,
     )
     state = transition_workflow(state, action="record_audit", audit_passed=True)
@@ -169,12 +177,8 @@ def test_exploratory_goal_hard_blocks_modeling_and_registration(tool_name: str) 
     payload = json.loads(message.content)
     assert payload["code"] == "nir_validation_goal_conflict"
     assert payload["details"]["validation_goal"] == "exploratory"
-    assert payload["details"]["action_required"] == (
-        "report_exploratory_findings_or_request_validation_goal_change"
-    )
-    assert result.update["nir_workflow"]["tool_observations"][-1]["code"] == (
-        "nir_validation_goal_conflict"
-    )
+    assert payload["details"]["action_required"] == ("report_exploratory_findings_or_request_validation_goal_change")
+    assert result.update["nir_workflow"]["tool_observations"][-1]["code"] == ("nir_validation_goal_conflict")
 
 
 def test_internal_holdout_goal_still_allows_auto_split_modeling() -> None:
@@ -193,6 +197,52 @@ def test_internal_holdout_goal_still_allows_auto_split_modeling() -> None:
     assert isinstance(result, Command)
     assert result.update["messages"] == [original]
     assert result.update["nir_workflow"]["attempt"] == 1
+
+
+def test_internal_holdout_goal_rejects_external_partition_protocol() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state(task_type="analysis")
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_train_partitioned_model", {"status": "ok", "passed": True})
+
+    result = middleware.wrap_tool_call(
+        _request("nir_train_partitioned_model", {"nir_workflow": workflow}),
+        handler,
+    )
+
+    assert called is False
+    assert isinstance(result, Command)
+    payload = json.loads(result.update["messages"][0].content)
+    assert payload["code"] == "nir_validation_goal_conflict"
+    assert payload["details"]["required_validation_scope"] == "independent_holdout_not_external"
+
+
+@pytest.mark.parametrize("validation_goal", ["external_validation", "production"])
+def test_high_assurance_goals_require_external_partition_protocol(validation_goal: str) -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state(task_type="analysis", validation_goal=validation_goal)
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_train_auto_split_model", {"status": "ok", "passed": True})
+
+    result = middleware.wrap_tool_call(
+        _request("nir_train_auto_split_model", {"nir_workflow": workflow}),
+        handler,
+    )
+
+    assert called is False
+    assert isinstance(result, Command)
+    payload = json.loads(result.update["messages"][0].content)
+    assert payload["code"] == "nir_validation_goal_conflict"
+    assert payload["details"]["allowed_modeling_tools"] == ["nir_train_partitioned_model"]
+    assert payload["details"]["required_validation_scope"] == "independent_external_validation"
 
 
 def test_unrelated_tool_passes_through_without_workflow() -> None:
@@ -519,11 +569,24 @@ def test_successful_auto_split_model_result_automatically_enters_review() -> Non
             "grade": "B",
             "model_path": "/mnt/user-data/outputs/auto-split.pkl",
             "metrics_path": "/mnt/user-data/outputs/auto-split.json",
+            "evidence": {
+                "schema_version": 1,
+                "protocol": "deterministic_auto_split_holdout",
+                "validation_scope": "independent_holdout_not_external",
+                "model_sha256": "a" * 64,
+                "metrics_sha256": "b" * 64,
+                "training_data_sha256": "c" * 64,
+            },
         },
     )
 
     result = middleware.wrap_tool_call(
-        _request("nir_train_auto_split_model", {"nir_workflow": workflow}),
+        _request(
+            "nir_train_auto_split_model",
+            {"nir_workflow": workflow},
+            call_id="model-call-7",
+            context={"run_id": "run-7", "deerflow_trace_id": "trace-7"},
+        ),
         lambda _: message,
     )
 
@@ -532,6 +595,21 @@ def test_successful_auto_split_model_result_automatically_enters_review() -> Non
     assert updated["stage"] == "review"
     assert updated["attempt"] == 1
     assert updated["model_path"].endswith("auto-split.pkl")
+    assert updated["attempt_evidence"] == {
+        "schema_version": 1,
+        "tool_name": "nir_train_auto_split_model",
+        "tool_call_id": "model-call-7",
+        "run_id": "run-7",
+        "trace_id": "trace-7",
+        "protocol": "deterministic_auto_split_holdout",
+        "validation_scope": "independent_holdout_not_external",
+        "model_path": "/mnt/user-data/outputs/auto-split.pkl",
+        "metrics_path": "/mnt/user-data/outputs/auto-split.json",
+        "model_sha256": "a" * 64,
+        "metrics_sha256": "b" * 64,
+        "training_data_sha256": "c" * 64,
+        "metrics_summary": {"grade": "B", "passed": True},
+    }
 
 
 def test_successful_mat_collection_result_automatically_enters_review() -> None:
@@ -901,11 +979,32 @@ def test_knowledge_evidence_prefers_stable_evidence_id() -> None:
 def test_successful_registration_automatically_enters_registered_stage() -> None:
     middleware = NIRWorkflowMiddleware()
     workflow = _execution_state()
-    workflow = transition_workflow(workflow, action="record_attempt", attempt_passed=True)
+    workflow = transition_workflow(
+        workflow,
+        action="record_attempt",
+        attempt_passed=True,
+        model_path="/mnt/user-data/outputs/model.pkl",
+        metrics_path="/mnt/user-data/outputs/metrics.json",
+        attempt_evidence={
+            "schema_version": 1,
+            "tool_name": "nir_train_model",
+            "protocol": "random_three_way_holdout",
+            "validation_scope": "independent_holdout_not_external",
+            "model_path": "/mnt/user-data/outputs/model.pkl",
+            "metrics_path": "/mnt/user-data/outputs/metrics.json",
+        },
+    )
     workflow = transition_workflow(workflow, action="approve")
 
     result = middleware.wrap_tool_call(
-        _request("nir_register_model", {"nir_workflow": workflow}),
+        _request(
+            "nir_register_model",
+            {"nir_workflow": workflow},
+            args={
+                "model_path": "/mnt/user-data/outputs/model.pkl",
+                "metrics_path": "/mnt/user-data/outputs/metrics.json",
+            },
+        ),
         lambda _: _result(
             "nir_register_model",
             {"status": "registered", "model_id": "corn-protein", "version": 1},
@@ -915,6 +1014,50 @@ def test_successful_registration_automatically_enters_registered_stage() -> None
     assert isinstance(result, Command)
     assert result.update["nir_workflow"]["stage"] == "registered"
     assert result.update["nir_workflow"]["next_action"] == "complete_workflow"
+
+
+def test_registration_rejects_artifacts_not_bound_to_approved_attempt() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state()
+    workflow = transition_workflow(
+        workflow,
+        action="record_attempt",
+        attempt_passed=True,
+        model_path="/mnt/user-data/outputs/approved.pkl",
+        metrics_path="/mnt/user-data/outputs/approved.json",
+        attempt_evidence={
+            "schema_version": 1,
+            "tool_name": "nir_train_model",
+            "protocol": "random_three_way_holdout",
+            "validation_scope": "independent_holdout_not_external",
+            "model_path": "/mnt/user-data/outputs/approved.pkl",
+            "metrics_path": "/mnt/user-data/outputs/approved.json",
+        },
+    )
+    workflow = transition_workflow(workflow, action="approve")
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_register_model", {"status": "registered"})
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "nir_register_model",
+            {"nir_workflow": workflow},
+            args={
+                "model_path": "/mnt/user-data/outputs/different.pkl",
+                "metrics_path": "/mnt/user-data/outputs/approved.json",
+            },
+        ),
+        handler,
+    )
+
+    assert called is False
+    assert isinstance(result, Command)
+    payload = json.loads(result.update["messages"][0].content)
+    assert payload["code"] == "nir_registration_evidence_mismatch"
 
 
 @pytest.mark.anyio

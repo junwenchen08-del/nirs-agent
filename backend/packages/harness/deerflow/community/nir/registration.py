@@ -50,6 +50,35 @@ def _registration_gate(metrics: dict) -> tuple[bool, str]:
     return True, "all registration gates passed"
 
 
+def _validation_goal_gate(metrics: dict, workflow: dict) -> tuple[bool, str]:
+    """Require persisted metrics to implement the workflow's declared goal."""
+
+    goal = str(workflow.get("validation_goal") or "").strip().lower()
+    required_scope = {
+        "internal_holdout": "independent_holdout_not_external",
+        "external_validation": "independent_external_validation",
+        "production": "independent_external_validation",
+    }.get(goal)
+    if required_scope is None:
+        return False, f"validation_goal {goal!r} does not permit registration"
+    actual_scope = str(metrics.get("validation_scope") or "").strip()
+    if actual_scope != required_scope:
+        return False, f"validation_scope {actual_scope!r} does not satisfy {goal!r}; expected {required_scope!r}"
+    protocol = str(metrics.get("protocol") or "").strip()
+    if not protocol:
+        return False, "validation protocol is missing from metrics"
+    evidence = workflow.get("attempt_evidence")
+    if not isinstance(evidence, dict):
+        return False, "approved attempt evidence is missing"
+    if evidence.get("schema_version") != 1:
+        return False, "approved attempt evidence schema is unsupported"
+    if str(evidence.get("validation_scope") or "") != actual_scope:
+        return False, "workflow attempt evidence and metrics have different validation scopes"
+    if str(evidence.get("protocol") or "") != protocol:
+        return False, "workflow attempt evidence and metrics have different validation protocols"
+    return True, "validation goal and protocol match"
+
+
 def _resolve_registration_path(runtime: Runtime, path: str, *, read_only: bool) -> str:
     """Honor the historical modeling-facade resolver for compatible callers."""
     facade = sys.modules.get("deerflow.community.nir.modeling")
@@ -90,9 +119,11 @@ def nir_register_model_tool(
     workflow_state = (runtime.state or {}).get("nir_workflow")
     if not registration_is_approved(workflow_state):
         return _err("Model registration requires an approved NIR workflow. Ask the user for explicit approval, then call nir_workflow(action='approve') before registering.")
+    evidence = workflow_state["attempt_evidence"]
+    if model_path != evidence.get("model_path") or metrics_path != evidence.get("metrics_path"):
+        return _err("Model registration rejected: model_path and metrics_path must exactly match the approved modeling attempt.")
 
     try:
-        import hashlib
         import json as _json
 
         try:
@@ -112,23 +143,36 @@ def nir_register_model_tool(
         approved, gate_reason = _registration_gate(metrics)
         if not approved:
             return _err(f"Model registration rejected by mandatory scientific gate: {gate_reason}.")
+        validation_approved, validation_reason = _validation_goal_gate(metrics, workflow_state)
+        if not validation_approved:
+            return _err(f"Model registration rejected by validation protocol gate: {validation_reason}.")
         manifest_path = real_model + ".manifest.json"
         try:
             with open(manifest_path, encoding="utf-8") as handle:
                 model_manifest = _json.load(handle)
         except (OSError, _json.JSONDecodeError) as exc:
             return _err(f"Model registration rejected: the model integrity manifest is missing or invalid ({type(exc).__name__}).")
+        artifact_hash = _sha256_file(real_model)
+        if str(model_manifest.get("sha256", "")).lower() != artifact_hash:
+            return _err("Model registration rejected: the model artifact does not match its integrity manifest.")
         if model_manifest.get("metrics_sha256") != _sha256_file(real_metrics):
             return _err("Model registration rejected: metrics are not the exact provenance record bound to this model artifact.")
         if str(model_manifest.get("training_data_sha256", "")).lower() != str(metrics["training_data_hash"]).lower():
             return _err("Model registration rejected: model and metrics reference different training data.")
+        evidence_hashes = {
+            "model_sha256": str(model_manifest.get("sha256") or "").lower(),
+            "metrics_sha256": str(model_manifest.get("metrics_sha256") or "").lower(),
+            "training_data_sha256": str(model_manifest.get("training_data_sha256") or "").lower(),
+        }
+        for key, actual in evidence_hashes.items():
+            expected = str(evidence.get(key) or "").lower()
+            if len(expected) != 64 or any(character not in "0123456789abcdef" for character in expected):
+                return _err(f"Model registration rejected: approved attempt {key} is missing or invalid.")
+            if expected != actual:
+                return _err(f"Model registration rejected: approved attempt {key} does not match the current artifact evidence.")
 
         # Compute a cryptographic artifact fingerprint. Training-data lineage
         # remains a separate field and is populated when metrics provide it.
-        with open(real_model, "rb") as f:
-            model_bytes = f.read()
-        artifact_hash = hashlib.sha256(model_bytes).hexdigest()
-
         # Extract preprocessing steps from metrics if available.
         pp_steps = []
         if isinstance(metrics.get("preprocessing_steps"), list):

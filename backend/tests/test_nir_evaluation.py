@@ -25,7 +25,7 @@ from deerflow.community.nir.workflow import start_workflow, transition_workflow
 SCENARIOS_PATH = Path(__file__).parents[1] / "evals" / "nir" / "scenarios.json"
 
 
-def _request(tool_name: str, workflow: dict, call_id: str) -> ToolCallRequest:
+def _request(tool_name: str, workflow: dict, call_id: str, args: dict | None = None) -> ToolCallRequest:
     state = {"nir_workflow": workflow}
     runtime = ToolRuntime(
         state=state,
@@ -37,7 +37,7 @@ def _request(tool_name: str, workflow: dict, call_id: str) -> ToolCallRequest:
         store=None,
     )
     return ToolCallRequest(
-        tool_call={"id": call_id, "name": tool_name, "args": {}},
+        tool_call={"id": call_id, "name": tool_name, "args": args or {}},
         tool=None,
         state=state,
         runtime=runtime,
@@ -51,6 +51,7 @@ def _run_tool(
     *,
     tool_name: str,
     payload: dict,
+    args: dict | None = None,
 ) -> dict:
     call_id = f"call-{len(observations) + 1}"
     stage_before = workflow["stage"]
@@ -61,7 +62,7 @@ def _run_tool(
         status="error" if payload.get("status") == "error" else "success",
     )
     result = middleware.wrap_tool_call(
-        _request(tool_name, workflow, call_id),
+        _request(tool_name, workflow, call_id, args),
         lambda _: message,
     )
     updated = result.update.get("nir_workflow", workflow) if isinstance(result, Command) else workflow
@@ -153,6 +154,7 @@ def test_complete_calibration_trace_passes_every_evaluation_check() -> None:
         observations,
         tool_name="nir_register_model",
         payload={"status": "registered", "model_id": "corn-protein", "version": 1},
+        args={"model_path": "model.pkl", "metrics_path": "metrics.json"},
     )
     workflow = transition_workflow(workflow, action="complete")
     trace = NIREvalTrace(

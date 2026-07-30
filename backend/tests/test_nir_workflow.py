@@ -451,6 +451,26 @@ def test_agent_view_omits_history_and_trace_identifiers():
     }
 
 
+def test_agent_view_bounds_multi_target_attempt_evidence():
+    state = start_workflow(
+        task_type="multi_modeling",
+        data_path="multi.npz",
+        validation_goal="internal_holdout",
+    )
+    state["attempt_evidence"] = {
+        "schema_version": 1,
+        "metrics_summary": {
+            "component_count": 12,
+            "per_component": [{"name": f"target-{index}", "R2_val": 0.9} for index in range(12)],
+        },
+    }
+
+    projected = workflow_agent_view(state)
+
+    assert projected["attempt_evidence"]["metrics_summary"]["component_count"] == 12
+    assert len(projected["attempt_evidence"]["metrics_summary"]["per_component"]) == 5
+
+
 def test_workflow_tool_returns_compact_agent_view_but_persists_full_state():
     state = start_workflow(
         task_type="calibration",

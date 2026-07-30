@@ -71,6 +71,7 @@ _AGENT_VIEW_FIELDS = (
     "data_path",
     "model_path",
     "metrics_path",
+    "attempt_evidence",
     "knowledge_evidence",
     "attempt",
     "max_attempts",
@@ -134,10 +135,7 @@ def _normalize_validation_goal(value: str) -> str:
     normalized = re.sub(r"[\s-]+", "_", value.strip().lower())
     canonical = _VALIDATION_GOAL_ALIASES.get(normalized)
     if canonical is None:
-        raise NIRWorkflowError(
-            "Unsupported validation_goal "
-            f"{value!r}; expected exploratory, internal_holdout, external_validation, or production"
-        )
+        raise NIRWorkflowError(f"Unsupported validation_goal {value!r}; expected exploratory, internal_holdout, external_validation, or production")
     return canonical
 
 
@@ -212,14 +210,20 @@ def _requirement_updates(
 def workflow_agent_view(state: NIRWorkflowState | dict) -> dict[str, Any]:
     """Return the compact decision state needed by the model, without audit traces."""
     projected = {field: state.get(field) for field in _AGENT_VIEW_FIELDS if field in state}
+    evidence = projected.get("attempt_evidence")
+    if isinstance(evidence, dict):
+        compact_evidence = dict(evidence)
+        metrics_summary = compact_evidence.get("metrics_summary")
+        if isinstance(metrics_summary, dict) and isinstance(metrics_summary.get("per_component"), list):
+            compact_evidence["metrics_summary"] = {
+                **metrics_summary,
+                "per_component": metrics_summary["per_component"][:5],
+            }
+        projected["attempt_evidence"] = compact_evidence
     observations = state.get("tool_observations")
     projected["tool_observation_count"] = len(observations) if isinstance(observations, list) else 0
     if isinstance(observations, list) and observations and isinstance(observations[-1], dict):
-        projected["last_tool_observation"] = {
-            field: observations[-1].get(field)
-            for field in _AGENT_OBSERVATION_FIELDS
-            if observations[-1].get(field) is not None
-        }
+        projected["last_tool_observation"] = {field: observations[-1].get(field) for field in _AGENT_OBSERVATION_FIELDS if observations[-1].get(field) is not None}
     return projected
 
 
@@ -369,6 +373,7 @@ def start_workflow(
         "data_path": normalized_requirements.get("data_path"),
         "model_path": normalized_requirements.get("model_path"),
         "metrics_path": None,
+        "attempt_evidence": None,
         "knowledge_evidence": [],
         "run_ids": [],
         "trace_ids": [],
@@ -416,6 +421,7 @@ def transition_workflow(
     grade: str | None = None,
     missing_inputs: list[str] | None = None,
     evidence_ids: list[str] | None = None,
+    attempt_evidence: dict[str, Any] | None = None,
     notes: str | None = None,
 ) -> NIRWorkflowState:
     """Apply one validated state transition to an existing workflow."""
@@ -547,12 +553,14 @@ def transition_workflow(
             "attempt": attempt,
             "model_path": model_path,
             "metrics_path": metrics_path,
+            "attempt_evidence": attempt_evidence,
             "event_details": {
                 "attempt": attempt,
                 "passed": attempt_passed,
                 "grade": grade,
                 "model_path": model_path,
                 "metrics_path": metrics_path,
+                "attempt_evidence": attempt_evidence,
                 "notes": notes,
             },
         }
@@ -668,7 +676,7 @@ def _tool_payload(state: NIRWorkflowState) -> str:
 
 def registration_is_approved(state: dict | None) -> bool:
     """Return whether workflow state permits model registration."""
-    return bool(state and state.get("approval_status") == "approved" and state.get("stage") in {"approved", "registered"})
+    return bool(state and state.get("approval_status") == "approved" and state.get("stage") in {"approved", "registered"} and isinstance(state.get("attempt_evidence"), dict))
 
 
 def _latest_user_explicitly_approved(runtime: Runtime) -> bool:

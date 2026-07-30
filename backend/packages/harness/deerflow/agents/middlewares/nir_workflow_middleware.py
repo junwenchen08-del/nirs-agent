@@ -52,6 +52,17 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
 _OBSERVED_NIR_TOOLS = frozenset({*_TOOL_POLICIES, "nir_workflow"})
 
 _MODELING_TOOLS = frozenset({"nir_train_auto_split_model", "nir_train_model", "nir_train_partitioned_model", "nir_train_multi_model", "nir_analyze", "nir_analyze_collection", "nir_compare"})
+_INTERNAL_HOLDOUT_TOOLS = _MODELING_TOOLS - {"nir_train_partitioned_model"}
+_EXTERNAL_VALIDATION_TOOLS = frozenset({"nir_train_partitioned_model"})
+_TOOL_VALIDATION_PROTOCOL = {
+    "nir_train_auto_split_model": ("deterministic_auto_split_holdout", "independent_holdout_not_external"),
+    "nir_train_model": ("random_three_way_holdout", "independent_holdout_not_external"),
+    "nir_train_partitioned_model": ("named_partition_external_validation", "independent_external_validation"),
+    "nir_train_multi_model": ("multi_target_random_three_way_holdout", "independent_holdout_not_external"),
+    "nir_analyze": ("automated_analysis_three_way_holdout", "independent_holdout_not_external"),
+    "nir_analyze_collection": ("mat_collection_sequential_compact", "independent_holdout_not_external"),
+    "nir_compare": ("preprocessing_comparison_three_way_holdout", "independent_holdout_not_external"),
+}
 _MODEL_DEFAULTS = {
     "nir_train_auto_split_model": "auto",
     "nir_train_model": "pls",
@@ -270,25 +281,87 @@ def _deny_validation_goal_conflict(
 ) -> ToolMessage | None:
     tool_name = str(request.tool_call.get("name", ""))
     validation_goal = str(workflow.get("validation_goal") or "").strip().lower()
-    if validation_goal != "exploratory" or tool_name not in {*_MODELING_TOOLS, "nir_register_model"}:
+    if tool_name not in {*_MODELING_TOOLS, "nir_register_model"}:
         return None
+    if not validation_goal:
+        return None
+    if validation_goal == "exploratory":
+        return _denied_message(
+            request,
+            code=_VALIDATION_GOAL_CONFLICT_CODE,
+            error=(f"Tool {tool_name!r} creates or registers a validation model, but validation_goal='exploratory' does not permit an independent holdout, external-validation, or deployable-model claim."),
+            workflow=workflow,
+            policy=policy,
+            details={
+                "validation_goal": validation_goal,
+                "action_required": "report_exploratory_findings_or_request_validation_goal_change",
+                "allowed_validation_goals_for_modeling": [
+                    "internal_holdout",
+                    "external_validation",
+                    "production",
+                ],
+            },
+        )
+    if tool_name == "nir_register_model":
+        return None
+    if validation_goal == "internal_holdout" and tool_name in _INTERNAL_HOLDOUT_TOOLS:
+        return None
+    if validation_goal in {"external_validation", "production"} and tool_name in _EXTERNAL_VALIDATION_TOOLS:
+        return None
+    required_scope = "independent_external_validation" if validation_goal in {"external_validation", "production"} else "independent_holdout_not_external"
+    allowed_tools = sorted(_EXTERNAL_VALIDATION_TOOLS) if validation_goal in {"external_validation", "production"} else sorted(_INTERNAL_HOLDOUT_TOOLS)
     return _denied_message(
         request,
         code=_VALIDATION_GOAL_CONFLICT_CODE,
-        error=(
-            f"Tool {tool_name!r} creates or registers a validation model, but validation_goal='exploratory' "
-            "does not permit an independent holdout, external-validation, or deployable-model claim."
-        ),
+        error=(f"Tool {tool_name!r} does not implement the validation protocol required by validation_goal={validation_goal!r}."),
         workflow=workflow,
         policy=policy,
         details={
             "validation_goal": validation_goal,
-            "action_required": "report_exploratory_findings_or_request_validation_goal_change",
-            "allowed_validation_goals_for_modeling": [
-                "internal_holdout",
-                "external_validation",
-                "production",
-            ],
+            "required_validation_scope": required_scope,
+            "allowed_modeling_tools": allowed_tools,
+            "action_required": "use_goal_compatible_validation_protocol_or_change_validation_goal",
+        },
+    )
+
+
+def _deny_registration_evidence_mismatch(
+    request: ToolCallRequest,
+    workflow: Mapping[str, Any],
+    policy: _ToolPolicy,
+) -> ToolMessage | None:
+    if str(request.tool_call.get("name", "")) != "nir_register_model":
+        return None
+    args = request.tool_call.get("args")
+    args = args if isinstance(args, Mapping) else {}
+    evidence = workflow.get("attempt_evidence")
+    if not isinstance(evidence, Mapping):
+        return _denied_message(
+            request,
+            code="nir_registration_evidence_mismatch",
+            error="Registration requires evidence from the approved modeling attempt in this workflow.",
+            workflow=workflow,
+            policy=policy,
+            details={"action_required": "rerun_modeling_and_approve_the_recorded_attempt"},
+        )
+    requested_model = str(args.get("model_path") or "").replace("\\", "/")
+    requested_metrics = str(args.get("metrics_path") or "").replace("\\", "/")
+    approved_model = str(evidence.get("model_path") or workflow.get("model_path") or "").replace("\\", "/")
+    approved_metrics = str(evidence.get("metrics_path") or workflow.get("metrics_path") or "").replace("\\", "/")
+    if requested_model == approved_model and requested_metrics == approved_metrics and requested_model and requested_metrics:
+        return None
+    return _denied_message(
+        request,
+        code="nir_registration_evidence_mismatch",
+        error="The requested model and metrics are not the artifacts from the approved modeling attempt.",
+        workflow=workflow,
+        policy=policy,
+        details={
+            "requested_model_path": requested_model,
+            "requested_metrics_path": requested_metrics,
+            "approved_model_path": approved_model,
+            "approved_metrics_path": approved_metrics,
+            "action_required": "register_exactly_the_approved_attempt_artifacts",
         },
     )
 
@@ -302,17 +375,12 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
         requested_path = str(args.get("path") or args.get("file_path") or "").replace("\\", "/")
         workflow_path = str(workflow.get("data_path") or "").replace("\\", "/")
         is_workflow_input = bool(requested_path and workflow_path and requested_path == workflow_path)
-        is_uploaded_raw_data = "/uploads/" in requested_path.lower() and bool(
-            _RAW_NIR_DATA_SUFFIX_RE.search(requested_path)
-        )
+        is_uploaded_raw_data = "/uploads/" in requested_path.lower() and bool(_RAW_NIR_DATA_SUFFIX_RE.search(requested_path))
         if is_workflow_input or is_uploaded_raw_data:
             return _denied_message(
                 request,
                 code="nir_raw_data_read_forbidden",
-                error=(
-                    "Raw NIR input data must not be copied into the model context. "
-                    "Use nir_inspect or another structured NIR tool and rely on its bounded summary."
-                ),
+                error=("Raw NIR input data must not be copied into the model context. Use nir_inspect or another structured NIR tool and rely on its bounded summary."),
                 workflow=workflow,
                 details={
                     "path": requested_path,
@@ -374,6 +442,8 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
             workflow=workflow,
             policy=policy,
         )
+    if registration_denial := _deny_registration_evidence_mismatch(request, workflow, policy):
+        return registration_denial
     if substitution_denial := _deny_unapproved_model_substitution(request, workflow, policy):
         return substitution_denial
     return None
@@ -404,10 +474,11 @@ def _success_payload(result: ToolMessage | Command) -> dict[str, Any] | None:
 
 
 def _model_attempt_update(
-    tool_name: str,
+    request: ToolCallRequest,
     workflow: NIRWorkflowState,
     payload: Mapping[str, Any],
 ) -> NIRWorkflowState | None:
+    tool_name = str(request.tool_call.get("name", ""))
     result = payload.get("best") if tool_name == "nir_compare" else payload
     if not isinstance(result, Mapping) or not isinstance(result.get("passed"), bool):
         return None
@@ -416,6 +487,36 @@ def _model_attempt_update(
     metrics_path = payload.get("metrics_path") or payload.get("metrics")
     if tool_name == "nir_compare":
         metrics_path = payload.get("all_metrics")
+    protocol, validation_scope = _TOOL_VALIDATION_PROTOCOL[tool_name]
+    emitted_evidence = payload.get("evidence")
+    emitted_evidence = emitted_evidence if isinstance(emitted_evidence, Mapping) else {}
+    digest_fields = {}
+    for key in ("model_sha256", "metrics_sha256", "training_data_sha256"):
+        value = str(emitted_evidence.get(key) or "").lower()
+        if len(value) == 64 and all(character in "0123456789abcdef" for character in value):
+            digest_fields[key] = value
+    metric_keys = ("R2_val", "RPD", "RMSEC", "RMSECV", "RMSEP", "holdout", "external", "grade", "passed")
+    metrics_summary = {key: result.get(key) for key in metric_keys if result.get(key) is not None}
+    if isinstance(result.get("overall"), Mapping):
+        metrics_summary["overall"] = {key: result["overall"].get(key) for key in ("passed", "n_passed", "n_targets") if result["overall"].get(key) is not None}
+    if isinstance(result.get("per_component"), list):
+        metrics_summary["per_component"] = [
+            {key: component.get(key) for key in ("name", "R2_val", "RPD", "RMSEP", "grade", "passed") if component.get(key) is not None} for component in result["per_component"][:20] if isinstance(component, Mapping)
+        ]
+        metrics_summary["component_count"] = len(result["per_component"])
+    attempt_evidence = {
+        "schema_version": 1,
+        "tool_name": tool_name,
+        "tool_call_id": str(request.tool_call.get("id")) if request.tool_call.get("id") else None,
+        "run_id": _runtime_context_value(request, "run_id"),
+        "trace_id": _runtime_context_value(request, DEERFLOW_TRACE_METADATA_KEY),
+        "protocol": protocol,
+        "validation_scope": validation_scope,
+        "model_path": str(model_path) if model_path else None,
+        "metrics_path": str(metrics_path) if metrics_path else None,
+        **digest_fields,
+        "metrics_summary": metrics_summary,
+    }
     return transition_workflow(
         workflow,
         action="record_attempt",
@@ -423,17 +524,19 @@ def _model_attempt_update(
         grade=str(result.get("grade")) if result.get("grade") is not None else None,
         model_path=str(model_path) if model_path else None,
         metrics_path=str(metrics_path) if metrics_path else None,
+        attempt_evidence=attempt_evidence,
         notes=f"Automatically recorded successful {tool_name} result.",
     )
 
 
 def _next_workflow(
-    tool_name: str,
+    request: ToolCallRequest,
     workflow: NIRWorkflowState,
     payload: Mapping[str, Any],
 ) -> NIRWorkflowState | None:
+    tool_name = str(request.tool_call.get("name", ""))
     if tool_name in _MODELING_TOOLS:
-        return _model_attempt_update(tool_name, workflow, payload)
+        return _model_attempt_update(request, workflow, payload)
     if tool_name == "nir_search_knowledge":
         return transition_workflow(
             workflow,
@@ -515,7 +618,7 @@ def _advance(request: ToolCallRequest, result: ToolMessage | Command) -> ToolMes
     if not isinstance(workflow, dict):
         return result
     try:
-        updated = _next_workflow(str(request.tool_call.get("name", "")), workflow, payload)
+        updated = _next_workflow(request, workflow, payload)
     except NIRWorkflowError:
         logger.exception("Automatic NIR workflow transition failed")
         return result

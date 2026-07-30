@@ -64,6 +64,7 @@ class NIRWorkflowState(TypedDict):
     data_path: NotRequired[str | None]
     model_path: NotRequired[str | None]
     metrics_path: NotRequired[str | None]
+    attempt_evidence: NotRequired[dict | None]
     knowledge_evidence: list[str]
     run_ids: list[str]
     trace_ids: list[str]

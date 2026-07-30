@@ -21,7 +21,7 @@ def _write_calibration_csv(path: Path, X: np.ndarray, y: np.ndarray, wv: np.ndar
             writer.writerow([float(reference), *(float(value) for value in spectrum)])
 
 
-def _approved_workflow(model_path: str, metrics_path: str) -> dict:
+def _approved_workflow(model_path: str, metrics_path: str, evidence: dict) -> dict:
     from deerflow.community.nir.workflow import start_workflow, transition_workflow
 
     state = start_workflow(
@@ -41,6 +41,17 @@ def _approved_workflow(model_path: str, metrics_path: str) -> dict:
         grade="A",
         model_path=model_path,
         metrics_path=metrics_path,
+        attempt_evidence={
+            "schema_version": 1,
+            "tool_name": "nir_train_model",
+            "protocol": "random_three_way_holdout",
+            "validation_scope": "independent_holdout_not_external",
+            "model_path": model_path,
+            "metrics_path": metrics_path,
+            "model_sha256": evidence["model_sha256"],
+            "metrics_sha256": evidence["metrics_sha256"],
+            "training_data_sha256": evidence["training_data_sha256"],
+        },
     )
     return transition_workflow(state, action="approve", notes="Approved by the regression fixture")
 
@@ -144,7 +155,7 @@ def test_nir_lifecycle_from_csv_to_registered_prediction_and_tamper_rejection(tm
         assert model_file.is_file()
         assert Path(str(model_file) + ".manifest.json").is_file()
 
-        approved_state = _approved_workflow(virtual["model"], virtual["metrics"])
+        approved_state = _approved_workflow(virtual["model"], virtual["metrics"], train_payload["evidence"])
         registration_payload = json.loads(
             nir_register_model_tool.func(
                 runtime=SimpleNamespace(state={"nir_workflow": approved_state}),

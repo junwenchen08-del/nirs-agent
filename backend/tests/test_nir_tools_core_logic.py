@@ -211,9 +211,16 @@ def test_partitioned_model_uses_named_external_split(tmp_path: Path):
 
     payload = json.loads(result)
     metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
+    manifest = json.loads(Path(str(model_file) + ".manifest.json").read_text(encoding="utf-8"))
     artifact = joblib.load(model_file)
     assert payload["status"] == "ok"
     assert payload["protocol"] == "named_partition_external_validation"
+    assert payload["validation_scope"] == "independent_external_validation"
+    assert metrics["protocol"] == payload["protocol"]
+    assert metrics["validation_scope"] == payload["validation_scope"]
+    assert payload["evidence"]["model_sha256"] == manifest["sha256"]
+    assert payload["evidence"]["metrics_sha256"] == manifest["metrics_sha256"]
+    assert payload["evidence"]["training_data_sha256"] == metrics["training_data_hash"]
     assert isinstance(payload["passed"], bool)
     assert metrics["partitions"]["train"]["n_samples"] == 18
     assert metrics["partitions"]["tuning"]["n_samples"] == 9
@@ -264,6 +271,7 @@ def test_auto_split_model_persists_deterministic_holdout_protocol(tmp_path: Path
 
     payload = json.loads(result)
     metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
+    manifest = json.loads(Path(str(model_file) + ".manifest.json").read_text(encoding="utf-8"))
     artifact = joblib.load(model_file)
     partitions = metrics["partitions"]
     split_indices = [set(partitions[name]["sample_indices"]) for name in ("calibration", "tuning", "holdout_test")]
@@ -272,6 +280,9 @@ def test_auto_split_model_persists_deterministic_holdout_protocol(tmp_path: Path
     assert payload["protocol"] == "deterministic_auto_split_holdout"
     assert payload["target"] == "Protein"
     assert payload["validation_scope"] == "independent_holdout_not_external"
+    assert payload["evidence"]["model_sha256"] == manifest["sha256"]
+    assert payload["evidence"]["metrics_sha256"] == manifest["metrics_sha256"]
+    assert payload["evidence"]["training_data_sha256"] == metrics["training_data_hash"]
     assert [partitions[name]["n_samples"] for name in ("calibration", "tuning", "holdout_test")] == [56, 12, 12]
     assert not (split_indices[0] & split_indices[1] or split_indices[0] & split_indices[2] or split_indices[1] & split_indices[2])
     assert set.union(*split_indices) == set(range(n_samples))

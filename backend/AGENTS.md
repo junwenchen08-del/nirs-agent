@@ -275,6 +275,15 @@ from deerflow.config import get_app_config
   variables and the full-versus-CARS candidate on Tuning only, then reports
   Val Ext (or another named external partition) once. It persists a standard
   prediction artifact plus metrics JSON and a compact Markdown report.
+  Validation goals are runtime protocol constraints, not report labels:
+  `internal_holdout` permits only same-dataset holdout tools, while
+  `external_validation` and `production` permit only the named-partition
+  external-validation tool. Every successful model attempt stores bounded
+  `attempt_evidence` with tool/run attribution, protocol, validation scope,
+  artifact paths, metric summary, and emitted SHA-256 digests. Registration
+  accepts only the exact approved paths, requires the metrics protocol/scope
+  to match the workflow goal, and rechecks emitted hashes against the bound
+  model manifest.
   `nir_train_auto_split_model` is the autonomous CSV path for single-target
   datasets without official partitions. Its default `auto` strategy first
   detects eligible batch/domain metadata (instrument, batch, season/year,
