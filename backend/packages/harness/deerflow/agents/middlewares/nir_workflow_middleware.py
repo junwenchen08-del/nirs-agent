@@ -11,13 +11,14 @@ from typing import Any, override
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
 from deerflow.agents.thread_state import NIRWorkflowState
 from deerflow.community.nir.workflow import NIRWorkflowError, record_tool_observation, transition_workflow
 from deerflow.trace_context import DEERFLOW_TRACE_METADATA_KEY
+from deerflow.utils.messages import get_original_user_content_text
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,31 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
 _OBSERVED_NIR_TOOLS = frozenset({*_TOOL_POLICIES, "nir_workflow"})
 
 _MODELING_TOOLS = frozenset({"nir_train_auto_split_model", "nir_train_model", "nir_train_partitioned_model", "nir_train_multi_model", "nir_analyze", "nir_analyze_collection", "nir_compare"})
+_MODEL_DEFAULTS = {
+    "nir_train_auto_split_model": "auto",
+    "nir_train_model": "pls",
+    "nir_train_partitioned_model": "auto",
+    "nir_train_multi_model": "pls",
+    "nir_analyze": "auto",
+    "nir_analyze_collection": "auto",
+    "nir_compare": "pls",
+}
+_MODEL_SUBSTITUTION_CODE = "nir_model_substitution_requires_approval"
+_MODEL_ALIASES = {
+    "cnn": ("cnn", "1dcnn", "一维卷积"),
+    "mlp": ("mlp", "多层感知机"),
+    "pls": ("pls", "偏最小二乘"),
+    "pcr": ("pcr", "主成分回归"),
+    "svr": ("svr", "支持向量回归"),
+    "rf": ("rf", "随机森林"),
+    "et": ("extratrees", "极端随机树"),
+    "gbm": ("gbm", "梯度提升"),
+    "ridge": ("ridge", "岭回归"),
+    "lasso": ("lasso",),
+    "elasticnet": ("elasticnet", "弹性网络"),
+    "knn": ("knn",),
+    "auto": ("auto", "自动选择"),
+}
 _TERMINAL_NIR_STAGES = frozenset({"completed", "blocked"})
 _SCRIPT_SUFFIX_RE = re.compile(r"\.(?:py|ipynb|r|jl|m)(?:$|[?#])", re.IGNORECASE)
 # Interpreters that execute analysis scripts (Python, pip, pytest, R, Julia,
@@ -122,6 +148,7 @@ def _denied_message(
     error: str,
     workflow: Mapping[str, Any] | None,
     policy: _ToolPolicy | None = None,
+    details: Mapping[str, Any] | None = None,
 ) -> ToolMessage:
     tool_name = str(request.tool_call.get("name", "unknown_tool"))
     payload = {
@@ -134,11 +161,101 @@ def _denied_message(
         "allowed_stages": sorted(policy.stages) if policy else [],
         "next_action": workflow.get("next_action") if workflow else "start_workflow",
     }
+    if details:
+        payload["details"] = dict(details)
     return ToolMessage(
         content=json.dumps(payload, ensure_ascii=False),
         tool_call_id=str(request.tool_call.get("id", "missing_id")),
         name=tool_name,
         status="error",
+    )
+
+
+def _requested_model_method(request: ToolCallRequest) -> str | None:
+    tool_name = str(request.tool_call.get("name", ""))
+    if tool_name not in _MODELING_TOOLS:
+        return None
+    args = request.tool_call.get("args")
+    args = args if isinstance(args, Mapping) else {}
+    raw = args.get("method", _MODEL_DEFAULTS[tool_name])
+    method = str(raw or _MODEL_DEFAULTS[tool_name]).strip().lower()
+    return "cnn" if method in {"1d-cnn", "1d_cnn"} else method
+
+
+def _pending_failed_model(workflow: Mapping[str, Any]) -> str | None:
+    observations = workflow.get("tool_observations")
+    if not isinstance(observations, list):
+        return None
+    for observation in reversed(observations):
+        if not isinstance(observation, Mapping) or observation.get("name") not in _MODELING_TOOLS:
+            continue
+        if observation.get("code") == _MODEL_SUBSTITUTION_CODE:
+            continue
+        method = str(observation.get("requested_method") or "").strip().lower()
+        if not method or method == "auto":
+            continue
+        return method if observation.get("status") == "error" else None
+    return None
+
+
+def _latest_user_text(request: ToolCallRequest) -> str:
+    messages = _state_from_request(request).get("messages")
+    if not isinstance(messages, list):
+        return ""
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            return get_original_user_content_text(message.content, message.additional_kwargs)
+        if isinstance(message, Mapping) and str(message.get("type") or message.get("role") or "").lower() in {"human", "user"}:
+            kwargs = message.get("additional_kwargs")
+            return get_original_user_content_text(
+                message.get("content"),
+                kwargs if isinstance(kwargs, Mapping) else None,
+            )
+    return ""
+
+
+def _latest_user_approved_substitution(request: ToolCallRequest, attempted_method: str) -> bool:
+    text = _latest_user_text(request).lower()
+    compact = re.sub(r"[\s_-]+", "", text)
+    aliases = _MODEL_ALIASES.get(attempted_method, (attempted_method,))
+    compact_aliases = tuple(re.sub(r"[\s_-]+", "", alias.lower()) for alias in aliases)
+    target_mentioned = any(alias in compact for alias in compact_aliases)
+    denial_prefix = r"(?:不要|不能|不准|禁止|别|拒绝|不想|donot|dont|never|decline|reject)"
+    if any(re.search(rf"{denial_prefix}.{{0,16}}{re.escape(alias)}", compact) for alias in compact_aliases):
+        return False
+    approval_action = bool(
+        re.search(
+            r"(?:改用|换成|替换为|采用|使用|用|同意|可以)|"
+            r"\b(?:use|switch(?:\s+to)?|replace(?:\s+with)?|fall\s*back\s+to|approve)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+    return target_mentioned and approval_action
+
+
+def _deny_unapproved_model_substitution(
+    request: ToolCallRequest,
+    workflow: Mapping[str, Any],
+    policy: _ToolPolicy,
+) -> ToolMessage | None:
+    failed_method = _pending_failed_model(workflow)
+    attempted_method = _requested_model_method(request)
+    if not failed_method or not attempted_method or attempted_method == failed_method:
+        return None
+    if _latest_user_approved_substitution(request, attempted_method):
+        return None
+    return _denied_message(
+        request,
+        code=_MODEL_SUBSTITUTION_CODE,
+        error=(f"The explicitly requested model {failed_method!r} failed. Do not replace it with {attempted_method!r} until the user explicitly approves that model."),
+        workflow=workflow,
+        policy=policy,
+        details={
+            "failed_method": failed_method,
+            "attempted_method": attempted_method,
+            "action_required": "request_user_approval_for_model_substitution",
+        },
     )
 
 
@@ -200,6 +317,8 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
             workflow=workflow,
             policy=policy,
         )
+    if substitution_denial := _deny_unapproved_model_substitution(request, workflow, policy):
+        return substitution_denial
     return None
 
 
@@ -323,6 +442,7 @@ def _record_observation(request: ToolCallRequest, result: ToolMessage | Command)
         stage_before=str(current.get("stage")) if current.get("stage") else None,
         stage_after=str(workflow.get("stage")) if workflow.get("stage") else None,
         code=str(payload["code"]) if payload.get("code") else None,
+        requested_method=_requested_model_method(request),
         call_id=str(request.tool_call.get("id")) if request.tool_call.get("id") else None,
         run_id=_runtime_context_value(request, "run_id"),
         trace_id=_runtime_context_value(request, DEERFLOW_TRACE_METADATA_KEY),

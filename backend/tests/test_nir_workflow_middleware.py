@@ -6,7 +6,7 @@ import json
 
 import pytest
 from langchain.tools import ToolRuntime
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
@@ -456,6 +456,7 @@ def test_successful_tool_observation_is_checkpointed_with_run_context() -> None:
         "stage_before": "execution",
         "stage_after": "review",
         "code": None,
+        "requested_method": "pls",
         "call_id": "call-1",
         "run_id": "run-001",
         "trace_id": "trace-001",
@@ -557,6 +558,125 @@ def test_tool_error_does_not_advance_workflow() -> None:
     assert updated["stage"] == "execution"
     assert updated["attempt"] == 0
     assert updated["tool_observations"][-1]["status"] == "error"
+
+
+def test_failed_explicit_model_cannot_be_silently_replaced() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state()
+    failed = ToolMessage(
+        content=json.dumps(
+            {
+                "status": "error",
+                "code": "nir_model_runtime_unavailable",
+                "error": "PyTorch is unavailable",
+            }
+        ),
+        tool_call_id="call-cnn",
+        name="nir_analyze",
+        status="error",
+    )
+    first_result = middleware.wrap_tool_call(
+        _request(
+            "nir_analyze",
+            {"nir_workflow": workflow, "messages": [HumanMessage("使用 1D-CNN 建模")]},
+            args={"method": "cnn"},
+            call_id="call-cnn",
+        ),
+        lambda _: failed,
+    )
+    assert isinstance(first_result, Command)
+
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_analyze", {"status": "ok"}, call_id="call-mlp")
+
+    denied = middleware.wrap_tool_call(
+        _request(
+            "nir_analyze",
+            {
+                "nir_workflow": first_result.update["nir_workflow"],
+                "messages": [HumanMessage("使用 1D-CNN 建模")],
+            },
+            args={"method": "mlp"},
+            call_id="call-mlp",
+        ),
+        handler,
+    )
+
+    assert called is False
+    assert isinstance(denied, Command)
+    payload = json.loads(denied.update["messages"][0].content)
+    assert payload["code"] == "nir_model_substitution_requires_approval"
+    assert payload["details"]["failed_method"] == "cnn"
+    assert payload["details"]["attempted_method"] == "mlp"
+
+
+def test_latest_user_can_explicitly_approve_model_substitution() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state()
+    failed = ToolMessage(
+        content=json.dumps({"status": "error", "error": "training failed"}),
+        tool_call_id="call-cnn",
+        name="nir_analyze",
+        status="error",
+    )
+    first_result = middleware.wrap_tool_call(
+        _request(
+            "nir_analyze",
+            {"nir_workflow": workflow, "messages": [HumanMessage("使用 CNN")]},
+            args={"method": "cnn"},
+            call_id="call-cnn",
+        ),
+        lambda _: failed,
+    )
+    assert isinstance(first_result, Command)
+    replacement = _result(
+        "nir_analyze",
+        {"status": "ok", "passed": True, "grade": "A"},
+        call_id="call-mlp",
+    )
+
+    allowed = middleware.wrap_tool_call(
+        _request(
+            "nir_analyze",
+            {
+                "nir_workflow": first_result.update["nir_workflow"],
+                "messages": [HumanMessage("CNN 失败的话，改用 MLP 吧")],
+            },
+            args={"method": "mlp"},
+            call_id="call-mlp",
+        ),
+        lambda _: replacement,
+    )
+
+    assert isinstance(allowed, Command)
+    assert allowed.update["messages"] == [replacement]
+    assert allowed.update["nir_workflow"]["tool_observations"][-1]["requested_method"] == "mlp"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "不要改用 MLP",
+        "我不想使用 MLP",
+        "Do not use MLP",
+    ],
+)
+def test_model_substitution_denial_is_not_mistaken_for_approval(message: str) -> None:
+    from deerflow.agents.middlewares.nir_workflow_middleware import (
+        _latest_user_approved_substitution,
+    )
+
+    request = _request(
+        "nir_analyze",
+        {"messages": [HumanMessage(message)]},
+        args={"method": "mlp"},
+    )
+
+    assert _latest_user_approved_substitution(request, "mlp") is False
 
 
 def test_compare_uses_best_result_and_preserves_existing_command_fields() -> None:

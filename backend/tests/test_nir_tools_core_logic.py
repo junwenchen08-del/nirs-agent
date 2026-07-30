@@ -7,6 +7,7 @@ Covers:
 """
 
 import json
+import tomllib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +15,56 @@ import numpy as np
 from nir_core.models import PreprocessingStep
 
 from deerflow.community.nir.tools import _build_knowledge_hint, _parse_pipeline_step
+
+
+def test_backend_default_nir_dependency_includes_deep_runtime():
+    """Every model advertised by the default Gateway must be runnable there."""
+    backend_pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    config = tomllib.loads(backend_pyproject.read_text(encoding="utf-8"))
+    dependencies = config["project"]["dependencies"]
+
+    assert "nir-core[deep,mat73]" in dependencies
+    assert config["tool"]["uv"]["sources"]["torch"] == {"index": "pytorch-cpu"}
+    assert {
+        "name": "pytorch-cpu",
+        "url": "https://download.pytorch.org/whl/cpu",
+        "explicit": True,
+    } in config["tool"]["uv"]["index"]
+    nir_core_pyproject = backend_pyproject.parents[1] / "nir_core" / "pyproject.toml"
+    nir_core_config = tomllib.loads(nir_core_pyproject.read_text(encoding="utf-8"))
+    assert nir_core_config["tool"]["uv"]["sources"]["torch"] == {"index": "pytorch-cpu"}
+    assert config["tool"]["uv"]["index"] == nir_core_config["tool"]["uv"]["index"]
+
+
+def test_cnn_analyze_checks_runtime_before_resolving_or_loading_data():
+    """A missing CNN runtime must fail before file IO and preprocessing."""
+    from deerflow.community.nir.tools import nir_analyze_tool
+
+    with (
+        patch(
+            "nir_core.model.cnn.require_cnn_runtime",
+            side_effect=ImportError("torch unavailable"),
+        ),
+        patch(
+            "deerflow.community.nir.modeling._resolve",
+            side_effect=AssertionError("data path must not be resolved"),
+        ),
+    ):
+        result = nir_analyze_tool.func(
+            runtime=MagicMock(),
+            data_path="/mnt/user-data/uploads/data.mat",
+            method="cnn",
+        )
+
+    payload = json.loads(result)
+    assert payload["status"] == "error"
+    assert payload["code"] == "nir_model_runtime_unavailable"
+    assert payload["details"] == {
+        "requested_method": "cnn",
+        "required_dependency": "torch",
+        "action_required": "rebuild_gateway_with_deep_runtime",
+        "substitution_requires_user_approval": True,
+    }
 
 
 def test_pls_training_exposes_raw_space_intercept(tmp_path: Path):

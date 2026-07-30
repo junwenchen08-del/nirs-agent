@@ -30,12 +30,15 @@ def _check_torch():
     try:
         import torch
         import torch.nn as nn
+
         return torch, nn
     except ImportError as exc:
-        raise ImportError(
-            "PyTorch is required for 1D-CNN models. "
-            "Install with: pip install torch"
-        ) from exc
+        raise ImportError("PyTorch is required for 1D-CNN models. Install the nir-core 'deep' extra and rebuild the Gateway runtime.") from exc
+
+
+def require_cnn_runtime() -> None:
+    """Fail immediately when the optional PyTorch runtime is unavailable."""
+    _check_torch()
 
 
 class _CNNModel:
@@ -136,7 +139,7 @@ class CNNWrapper:
             # Shuffle indices each epoch.
             perm = torch.randperm(n_samples)
             for i in range(0, n_samples, self.batch_size):
-                idx = perm[i:i + self.batch_size]
+                idx = perm[i : i + self.batch_size]
                 xb, yb = X_t[idx], y_t[idx]
                 optimizer.zero_grad()
                 pred = self._model(xb)
@@ -202,15 +205,11 @@ def train_cnn(
     X_train = np.asarray(X_train, dtype=float)
     y_train = np.asarray(y_train, dtype=float).ravel()
     if X_train.shape[0] != y_train.shape[0]:
-        raise ValueError(
-            f"X_train rows ({X_train.shape[0]}) != y_train length ({y_train.shape[0]})"
-        )
+        raise ValueError(f"X_train rows ({X_train.shape[0]}) != y_train length ({y_train.shape[0]})")
     n_samples, n_wavelengths = X_train.shape
 
     # K-fold CV to estimate RMSECV.
-    splitter, strategy_label = _resolve_cv_splitter(
-        cv_strategy, cv_folds, n_samples, random_state
-    )
+    splitter, strategy_label = _resolve_cv_splitter(cv_strategy, cv_folds, n_samples, random_state)
 
     fold_rmse: list[float] = []
     for train_idx, val_idx in splitter.split(X_train):
@@ -272,6 +271,7 @@ __all__ = [
     "CNNWrapper",
     "train_cnn",
     "predict_cnn",
+    "require_cnn_runtime",
     "DEFAULT_EPOCHS",
     "DEFAULT_BATCH_SIZE",
     "DEFAULT_LEARNING_RATE",

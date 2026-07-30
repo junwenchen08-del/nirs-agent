@@ -156,6 +156,13 @@ selection: PLS is the baseline, while Ridge, SVR, and Extra Trees are added only
 when dimensionality, tuning quality, sample count, and runtime caps justify
 them. An alternative must materially improve tuning RMSE; the final holdout is
 never used to choose the model family.
+The default backend dependency is `nir-core[deep,mat73]`, with `torch` pinned
+to PyTorch's explicit CPU wheel index so a CPU Gateway does not pull CUDA
+packages. Every advertised 1D-CNN path therefore has PyTorch in the Gateway
+runtime. Explicit CNN requests run a dependency preflight before file IO or
+preprocessing. After any explicitly selected model fails,
+`NIRWorkflowMiddleware` blocks a different model family until the latest user
+message explicitly approves that replacement.
 
 The NIR retrieval knowledge base keeps vectors in ChromaDB and document
 governance in a lightweight SQLite catalog. Governed ingestion derives stable
@@ -194,6 +201,10 @@ same versioned cases. The current 24-document calibration uses 12
 document-diversified rerank candidates, a 512-token cross-encoder limit, and
 0.63/0.60 dense strong/weak thresholds; its report is
 `nir_core/knowledge/retrieval_eval_baseline.bge-m3.rerank-v1.md`.
+The agent-side HTTP fallback uses
+`NIR_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS` (60 seconds by default); keep it aligned
+with or above measured CPU reranker latency so a failed modeling attempt can
+advance through the knowledge-retry stage.
 `nir_core.utils.scientific_validation` is mandatory in every primary training
 entry point: it blocks invalid wavelength axes, conflicting duplicate spectra,
 and exact cross-partition leakage, then records a replay manifest. Model

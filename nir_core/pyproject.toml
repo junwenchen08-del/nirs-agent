@@ -34,6 +34,14 @@ knowledge = [
 ]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.14.11"]
 
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [tool.setuptools.packages.find]
 where = [".."]
 include = ["nir_core*"]

@@ -22,7 +22,7 @@ dependencies = [
     "pyjwt>=2.13.0",
     "email-validator>=2.0.0",
     "e2b-code-interpreter>=2.8.1",
-    "nir-core[mat73]",
+    "nir-core[deep,mat73]",
 ]
 
 [project.optional-dependencies]
@@ -57,3 +57,9 @@ members = ["packages/harness", "../nir_core"]
 [tool.uv.sources]
 deerflow-harness = { workspace = true }
 nir-core = { workspace = true }
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

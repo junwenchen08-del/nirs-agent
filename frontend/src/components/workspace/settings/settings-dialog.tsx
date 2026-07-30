@@ -149,7 +149,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
               })}
             </ul>
           </nav>
-          <ScrollArea className="h-full min-h-0 rounded-lg border">
+          <ScrollArea className="h-full min-h-0 min-w-0 rounded-lg border">
             <div className="space-y-8 p-6">
               {activeSection === "account" && <AccountSettingsPage />}
               {activeSection === "appearance" && <AppearanceSettingsPage />}

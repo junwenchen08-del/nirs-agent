@@ -2,6 +2,10 @@
 docker/.cache/
 # oh-my-claudecode state
 .omc/
+# Temporary directories
+.tmp/
+frontend/.tmp/
+
 # OS generated files
 .DS_Store
 *.local
@@ -17,6 +21,7 @@ __pycache__/
 *.pyo
 
 # Build artifacts
+artifacts/
 nir_core.egg-info/
 *.egg-info/
 dist/
@@ -29,6 +34,10 @@ nir_core/knowledge/.knowledge_catalog.bge-m3.sqlite3
 # Temporary probe scripts
 probe_*.py
 container_loaders.py
+
+# Generated analysis / review reports
+CODE_REVIEW_REPORT.md
+SYSTEM.md
 
 # Virtual environments
 .venv

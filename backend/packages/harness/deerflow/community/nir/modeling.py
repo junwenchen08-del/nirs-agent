@@ -29,6 +29,7 @@ from ._common import (
     _err,
     _json_default,
     _load_npz_safely,
+    _model_runtime_preflight_error,
     _ok,
     _parse_pipeline_step,
     _resolve,
@@ -163,6 +164,9 @@ def nir_train_auto_split_model_tool(
     """
     try:
         import json
+
+        if runtime_error := _model_runtime_preflight_error(method):
+            return runtime_error
 
         import pandas as pd
         from nir_core.io.loaders import load_csv
@@ -556,6 +560,9 @@ def nir_train_partitioned_model_tool(
     try:
         import json
 
+        if runtime_error := _model_runtime_preflight_error(method):
+            return runtime_error
+
         import pandas as pd
         from nir_core.io.loaders import load_csv
         from nir_core.model.evaluation import compute_metrics
@@ -922,6 +929,9 @@ def nir_analyze_tool(
         (nir_train_model + nir_reflect) for a reflection loop.
     """
     try:
+        if runtime_error := _model_runtime_preflight_error(method):
+            return runtime_error
+
         from nir_core.io.loaders import auto_detect_and_load, load_mat
         from nir_core.io.sniffers import detect_format
         from nir_core.model.evaluation import (
@@ -1389,6 +1399,9 @@ def nir_analyze_collection_tool(
         paths, and the collection summary path.
     """
     try:
+        if runtime_error := _model_runtime_preflight_error(method):
+            return runtime_error
+
         real_input = _resolve(runtime, data_path, read_only=True)
         subset_names = _collection_subset_names(real_input, subsets)
         real_output_dir = _resolve_writable_dir(runtime, output_dir)
@@ -1502,6 +1515,9 @@ def nir_compare_tool(
     """
     try:
         import json as _json
+
+        if runtime_error := _model_runtime_preflight_error(method):
+            return runtime_error
 
         from nir_core.io.loaders import auto_detect_and_load
         from nir_core.model.evaluation import compute_metrics, split_dataset

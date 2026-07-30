@@ -18,6 +18,7 @@ from ._common import (
     _err,
     _json_default,
     _load_npz_safely,
+    _model_runtime_preflight_error,
     _ok,
     _parse_pipeline_step,
     _resolve,
@@ -814,6 +815,9 @@ def nir_train_model_tool(
     """
     try:
         import json
+
+        if runtime_error := _model_runtime_preflight_error(method):
+            return runtime_error
 
         from nir_core.model.evaluation import compute_metrics, split_dataset
         from nir_core.utils.metrics import evaluate_quality

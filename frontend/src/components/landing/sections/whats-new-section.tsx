@@ -1,62 +1,58 @@
 "use client";
 
 import MagicBento, { type BentoCardProps } from "@/components/ui/magic-bento";
-import { cn } from "@/lib/utils";
 
 import { Section } from "../section";
 
 const COLOR = "#0a0a0a";
-const features: BentoCardProps[] = [
+const FEATURES: BentoCardProps[] = [
   {
     color: COLOR,
-    label: "Context Engineering",
-    title: "Long/Short-term Memory",
-    description: "Now the agent can better understand you",
+    label: "Data Intelligence",
+    title: "多格式智能识别",
+    description: "CSV、TXT、MATLAB 数据结构与字段角色自动审计",
   },
   {
     color: COLOR,
-    label: "Long Task Running",
-    title: "Planning and Sub-tasking",
-    description:
-      "Plans ahead, reasons through complexity, then executes sequentially or in parallel",
+    label: "Leakage Safe",
+    title: "科学划分与评估",
+    description: "官方分区优先，自动划分与调优严格隔离最终测试集",
   },
   {
     color: COLOR,
-    label: "Extensible",
-    title: "Skills and Tools",
-    description:
-      "Plug, play, or even swap built-in tools. Build the agent you want.",
-  },
-
-  {
-    color: COLOR,
-    label: "Persistent",
-    title: "Sandbox with File System",
-    description: "Read, write, run — like a real computer",
+    label: "Auto Modeling",
+    title: "模型与波长自主选择",
+    description: "依据调优证据比较模型家族和关键波长方案",
   },
   {
     color: COLOR,
-    label: "Flexible",
-    title: "Multi-Model Support",
-    description: "Doubao, DeepSeek, OpenAI, Gemini, etc.",
+    label: "Knowledge Grounded",
+    title: "近红外专业知识库",
+    description: "BGE-M3 检索与重排，为复杂决策提供文献证据",
   },
   {
     color: COLOR,
-    label: "Free",
-    title: "Open Source",
-    description: "MIT License, self-hosted, full control",
+    label: "Governed",
+    title: "模型注册与质量门禁",
+    description: "审批、指标绑定、复现清单和完整性验证缺一不可",
+  },
+  {
+    color: COLOR,
+    label: "Production Aware",
+    title: "预测审计与漂移告警",
+    description: "持续记录推理行为，识别超出训练适用域的新批次",
   },
 ];
 
 export function WhatsNewSection({ className }: { className?: string }) {
   return (
     <Section
-      className={cn("", className)}
-      title="Whats New in DeerFlow 2.0"
-      subtitle="DeerFlow is now evolving from a Deep Research agent into a full-stack Super Agent"
+      className={className}
+      title="面向真实业务的核心能力"
+      subtitle="把近红外专家经验、确定性算法与智能体协作整合为一个可部署平台"
     >
       <div className="flex w-full items-center justify-center">
-        <MagicBento data={features} />
+        <MagicBento data={FEATURES} />
       </div>
     </Section>
   );

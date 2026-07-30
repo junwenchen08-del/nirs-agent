@@ -251,3 +251,64 @@ def test_knowledge_decision_returns_citations_and_readiness(
     assert assessment["independent_document_count"] == 2
     assert assessment["citations"][0]["citation_marker"] == "[KB:ev-1]"
     assert assessment["usage_contract"]["must_report_conflicting_findings"] is True
+
+
+def test_knowledge_http_timeout_is_configurable_and_defaults_safely(
+    monkeypatch,
+) -> None:
+    from deerflow.community.nir import knowledge
+
+    monkeypatch.delenv("NIR_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS", raising=False)
+    assert knowledge._knowledge_http_timeout_seconds() == 60.0
+
+    monkeypatch.setenv("NIR_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS", "90")
+    assert knowledge._knowledge_http_timeout_seconds() == 90.0
+
+    monkeypatch.setenv("NIR_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS", "invalid")
+    assert knowledge._knowledge_http_timeout_seconds() == 60.0
+
+    monkeypatch.setenv("NIR_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS", "0")
+    assert knowledge._knowledge_http_timeout_seconds() == 60.0
+
+
+def test_http_knowledge_search_uses_configured_timeout(monkeypatch) -> None:
+    import urllib.request
+
+    from deerflow.community.nir import knowledge
+
+    observed: dict[str, object] = {}
+
+    class Response:
+        @staticmethod
+        def read() -> bytes:
+            return b'{"results": [], "count": 0, "query": "validation"}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:  # noqa: ANN001
+            return None
+
+    def fake_urlopen(request, timeout):  # noqa: ANN001
+        observed["url"] = request.full_url
+        observed["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setenv("NIR_KNOWLEDGE_URL", "http://knowledge.test:8089")
+    monkeypatch.setenv("NIR_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS", "75")
+    monkeypatch.setattr(knowledge, "_knowledge_http_url", None)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    payload = json.loads(
+        knowledge._search_knowledge_via_http(
+            "validation",
+            top_k=5,
+            purpose="answer",
+        )
+    )
+
+    assert payload["count"] == 0
+    assert observed == {
+        "url": "http://knowledge.test:8089/search",
+        "timeout": 75.0,
+    }

@@ -300,6 +300,11 @@ from deerflow.config import get_app_config
   signals, caps, candidates, failures, adoption evidence, and the selected
   family. Final holdout/external-test rows remain untouched until selection is
   complete. Multi-component modeling retains its explicit method behavior.
+  Every modeling tool runs a 1D-CNN dependency preflight before file IO or
+  preprocessing. Tool observations persist the requested model method; after
+  an explicitly selected model fails, `NIRWorkflowMiddleware` rejects a
+  different method until the latest user message explicitly approves that
+  replacement.
   `nir_analyze_collection` handles MATLAB files with multiple independent
   `available_subsets` in one tool call. It runs the existing single-dataset
   analysis sequentially for predictable memory use, writes one child artifact
@@ -323,8 +328,10 @@ from deerflow.config import get_app_config
   `schema_mapping.status=needs_user_mapping`; `nir_inspect` pauses with
   `action_required=confirm_field_mapping`, and `nir_load_data` accepts explicit
   `x_var`, `y_var`, `wv_var`, and `transpose` overrides. The backend depends on
-  `nir-core[mat73]`, so the h5py runtime required for MAT v7.3 is installed in
-  normal backend and Docker environments.
+  `nir-core[deep,mat73]`, so h5py for MAT v7.3 and PyTorch for 1D-CNN are
+  installed in normal backend and Docker environments. The workspace pins
+  `torch` to PyTorch's explicit CPU wheel index to prevent CPU Gateway images
+  from resolving multi-gigabyte CUDA dependency sets.
   NIR file loading and modeling are bounded by `nir_core.io.resources`.
   Public MAT/CSV loaders perform file-size preflight and matrix/memory checks;
   Gateway tools add run-linked deadline and cooperative cancellation checks at

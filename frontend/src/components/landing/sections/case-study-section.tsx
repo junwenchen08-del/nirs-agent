@@ -1,95 +1,74 @@
+import {
+  ActivityIcon,
+  ChartNoAxesCombinedIcon,
+  DatabaseIcon,
+  FlaskConicalIcon,
+  ScanSearchIcon,
+  ShieldCheckIcon,
+} from "lucide-react";
 import Link from "next/link";
 
 import { Card } from "@/components/ui/card";
-import { pathOfThread } from "@/core/threads/utils";
-import { cn } from "@/lib/utils";
 
 import { Section } from "../section";
 
+const APPLICATIONS = [
+  {
+    icon: DatabaseIcon,
+    title: "多格式光谱数据解析",
+    description:
+      "自动识别 CSV、TXT 与 MATLAB 数据结构，完成波长轴、样本、目标值和官方分区审计。",
+  },
+  {
+    icon: ScanSearchIcon,
+    title: "智能预处理与波长筛选",
+    description:
+      "组合 SNV、MSC、SG、导数等方法，并在训练集内评估 CARS 等波长选择策略。",
+  },
+  {
+    icon: FlaskConicalIcon,
+    title: "化学计量学自主建模",
+    description:
+      "以 PLS 为基线，按数据规模和调优证据比较 Ridge、SVR、Extra Trees 等模型。",
+  },
+  {
+    icon: ChartNoAxesCombinedIcon,
+    title: "单成分与多成分分析",
+    description:
+      "支持单目标定量、多目标共享划分及独立评估，自动生成指标、图表和分析报告。",
+  },
+  {
+    icon: ShieldCheckIcon,
+    title: "科学质量门禁",
+    description:
+      "检查数据泄漏、异常波长轴、重复样本、显著偏差与模型适用域，阻止不可靠模型注册。",
+  },
+  {
+    icon: ActivityIcon,
+    title: "预测审计与漂移监测",
+    description:
+      "验证模型完整性，对未知样品批量预测，并持续追踪 T²/Q 漂移与告警恢复状态。",
+  },
+];
+
 export function CaseStudySection({ className }: { className?: string }) {
-  const caseStudies = [
-    {
-      threadId: "7cfa5f8f-a2f8-47ad-acbd-da7137baf990",
-      title: "Forecast 2026 Agent Trends and Opportunities",
-      description:
-        "Create a webpage with a Deep Research report forecasting the agent technology trends and opportunities in 2026.",
-    },
-    {
-      threadId: "4f3e55ee-f853-43db-bfb3-7d1a411f03cb",
-      title: 'Generate a Video Based On the Novel "Pride and Prejudice"',
-      description:
-        'Search the specific scene from the novel "Pride and Prejudice", then generate a video as well as a reference image based on the scenes.',
-    },
-    {
-      threadId: "21cfea46-34bd-4aa6-9e1f-3009452fbeb9",
-      title: "Doraemon Explains the MOE Architecture",
-      description:
-        "Generate a Doraemon comic strip explaining the MOE architecture to the teenagers who are interested in AI.",
-    },
-    {
-      threadId: "ad76c455-5bf9-4335-8517-fc03834ab828",
-      title: "An Exploratory Data Analysis of the Titanic Dataset",
-      description:
-        "Explore the Titanic dataset and identify the key factors that influenced survival rates with visualizations and insights.",
-    },
-    {
-      threadId: "d3e5adaf-084c-4dd5-9d29-94f1d6bccd98",
-      title: "Watch Y Combinator's Video then Conduct a Deep Research",
-      description:
-        "Watch the given Y Combinator's YouTube video and conduct a deep research on the YC's tips for technical startup founders.",
-    },
-    {
-      threadId: "3823e443-4e2b-4679-b496-a9506eae462b",
-      title: "Collect and Summarize Dr. Fei Fei Li's Podcasts",
-      description:
-        "Collect all the podcast appearances of Dr. Fei Fei Li in the last 6 months, then summarize them into a comprehensive report.",
-    },
-  ];
   return (
     <Section
       className={className}
-      title="Case Studies"
-      subtitle="See how DeerFlow is used in the wild"
+      title="近红外分析全流程"
+      subtitle="从原始光谱到可部署模型，每一步都有确定性工具与科学证据支撑"
     >
-      <div className="container-md mt-8 grid grid-cols-1 gap-4 px-4 md:grid-cols-2 md:px-20 lg:grid-cols-3">
-        {caseStudies.map((caseStudy) => (
-          <Link
-            key={caseStudy.title}
-            href={pathOfThread(caseStudy.threadId) + "?mock=true"}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Card className="group/card relative h-64 overflow-hidden">
-              <div
-                className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat transition-all duration-300 group-hover/card:scale-110 group-hover/card:brightness-90"
-                style={{
-                  backgroundImage: `url(/images/${caseStudy.threadId}.jpg)`,
-                }}
-              ></div>
-              <div
-                className={cn(
-                  "flex h-full w-full translate-y-[calc(100%-60px)] flex-col items-center",
-                  "transition-all duration-300",
-                  "group-hover/card:translate-y-[calc(100%-128px)]",
-                )}
-              >
-                <div
-                  className="flex w-full flex-col p-4"
-                  style={{
-                    background:
-                      "linear-gradient(to bottom, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 1) 100%)",
-                  }}
-                >
-                  <div className="flex flex-col gap-2">
-                    <h3 className="flex h-14 items-center text-xl font-bold text-shadow-black">
-                      {caseStudy.title}
-                    </h3>
-                    <p className="box-shadow-black overflow-hidden text-sm text-white/85 text-shadow-black">
-                      {caseStudy.description}
-                    </p>
-                  </div>
-                </div>
+      <div className="container-md mt-10 grid grid-cols-1 gap-4 px-4 md:grid-cols-2 md:px-12 lg:grid-cols-3">
+        {APPLICATIONS.map(({ icon: Icon, title, description }) => (
+          <Link key={title} href="/workspace">
+            <Card className="group relative h-full min-h-56 overflow-hidden border-white/10 bg-linear-to-br from-white/8 to-white/2 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-amber-300/30 hover:shadow-[0_20px_60px_-30px_rgba(251,191,36,0.5)]">
+              <div className="mb-6 flex size-12 items-center justify-center rounded-xl border border-amber-300/20 bg-amber-300/10 text-amber-300 transition-transform group-hover:scale-110">
+                <Icon className="size-6" />
               </div>
+              <h3 className="text-xl font-semibold text-white">{title}</h3>
+              <p className="mt-3 text-sm leading-6 text-zinc-400">
+                {description}
+              </p>
             </Card>
           </Link>
         ))}

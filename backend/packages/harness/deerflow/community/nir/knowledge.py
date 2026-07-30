@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from typing import Annotated
 
@@ -31,6 +32,7 @@ _knowledge_http_url: str | None = None
 # Every _RETRY_INTERVAL calls in "http" mode, we retry direct import once.
 _knowledge_http_call_count: int = 0
 _RETRY_INTERVAL: int = 20
+_DEFAULT_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS: float = 60.0
 
 
 def _get_knowledge_http_url() -> str:
@@ -63,6 +65,21 @@ def _knowledge_http_headers() -> dict[str, str]:
     return headers
 
 
+def _knowledge_http_timeout_seconds() -> float:
+    """Return the validated, configurable HTTP search timeout."""
+    raw = os.environ.get(
+        "NIR_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS",
+        str(_DEFAULT_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS),
+    )
+    try:
+        timeout = float(raw)
+    except (TypeError, ValueError):
+        timeout = _DEFAULT_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS
+    if not math.isfinite(timeout) or timeout <= 0:
+        timeout = _DEFAULT_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS
+    return timeout
+
+
 def _search_knowledge_via_http(
     query: str,
     top_k: int,
@@ -90,7 +107,10 @@ def _search_knowledge_via_http(
             headers=_knowledge_http_headers(),
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(
+            req,
+            timeout=_knowledge_http_timeout_seconds(),
+        ) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         if data.get("error"):
             return _err(f"Knowledge search error: {data['error']}")

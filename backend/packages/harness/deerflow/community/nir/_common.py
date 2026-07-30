@@ -264,6 +264,29 @@ def _err(
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _model_runtime_preflight_error(method: str | None) -> str | None:
+    """Return a structured error before expensive work for unavailable models."""
+    requested = (method or "").strip().lower()
+    if requested != "cnn":
+        return None
+    try:
+        from nir_core.model.cnn import require_cnn_runtime
+
+        require_cnn_runtime()
+    except Exception as exc:  # noqa: BLE001 - native dependency loading may fail
+        return _err(
+            f"1D-CNN runtime is unavailable in the Gateway: {type(exc).__name__}: {exc}",
+            code="nir_model_runtime_unavailable",
+            details={
+                "requested_method": "cnn",
+                "required_dependency": "torch",
+                "action_required": "rebuild_gateway_with_deep_runtime",
+                "substitution_requires_user_approval": True,
+            },
+        )
+    return None
+
+
 def _ok(payload: dict) -> str:
     """Format a success payload as a JSON string."""
     return json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default)

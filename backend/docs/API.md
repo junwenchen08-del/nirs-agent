@@ -577,6 +577,10 @@ DELETE /api/threads/{thread_id}/uploads/{filename}
 Manage the NIR retrieval knowledge base used by `nir_search_knowledge`.
 The host knowledge server may require `NIR_KNOWLEDGE_TOKEN`; the Gateway
 forwards that token to the server as a bearer token when it is set.
+When the agent process cannot load the local vector dependencies, it falls back
+to the host HTTP service. Configure that tool-side request timeout with
+`NIR_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS` (default `60` seconds), especially when
+CPU cross-encoder reranking is enabled.
 
 #### List Knowledge Documents
 

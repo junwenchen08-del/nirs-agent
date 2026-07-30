@@ -219,7 +219,10 @@ JSON 和 Markdown 报告会一同保存。
 通用数据接入层还会递归检查 MAT v5/v7.3 的嵌套结构，根据字段名、向量长度和光谱轴
 单调性生成 `schema_mapping` 与置信度，必要时自动转置光谱矩阵。CSV/TXT 会检测编码、
 分隔符和小数点格式，并从字段名称和数值波长表头识别样本编号、目标值和光谱列。
-后端默认安装 `nir-core[mat73]`，Docker 中可以直接读取基于 HDF5 的 MAT v7.3 文件。
+后端默认安装 `nir-core[deep,mat73]`，Docker 中可以直接读取基于 HDF5 的 MAT v7.3
+文件并运行 PyTorch 1D-CNN。Gateway 固定使用 PyTorch 官方 CPU wheel，避免在无 GPU
+容器中下载整套 CUDA 组件。CNN 依赖会在读取和预处理数据前检查；若显式指定的模型
+失败，智能体不会自动换用 MLP 或其他模型，除非用户在后续消息中明确同意替代方法。
 只有高置信度映射会自动加载；多个等价矩阵或无法确定列角色时，`nir_inspect` 返回
 `action_required: confirm_field_mapping`，要求用户确认后使用 `x_var/y_var/wv_var` 或
 `y_col/x_cols` 显式加载，避免静默猜错。
@@ -609,6 +612,9 @@ ChromaDB 分块元数据，不会重新解析文档、生成向量或递增内�
 推理资源，`_MAX_CANDIDATES` 限制交叉编码候选数。当前 24 篇语料的校准值为最多
 12 个候选、512 token；候选池会先按文档限制重复分块，再进行重排，以保留跨文档证据。
 启用或更换重排模型同样不需要重新上传文档或重建向量索引。
+智能体在 Docker 中通过 HTTP 回退访问宿主机知识服务时，检索超时由
+`NIR_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS` 控制，默认 60 秒；启用 CPU 重排时不要将其
+设置得低于一次完整重排的实测延迟。
 BGE-M3 在 CPU 上处理大型 PDF 可能需要数分钟，因此 Gateway 和 Nginx 的知识库
 上传链路使用 600 秒单文件超时。前端会把多文件选择拆成逐篇请求，避免多篇串行处理
 共享同一个总超时；浏览器收到最终结果前不要重复上传同一文件。
