@@ -390,8 +390,44 @@ def test_active_nir_workflow_still_allows_small_metrics_report_read() -> None:
         ),
         lambda _: original,
     )
-
     assert result is original
+
+
+def test_partition_column_cannot_masquerade_as_sample_grouping_column() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state(validation_goal="external_validation")
+    workflow["grouping_column"] = "Set"
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_train_partitioned_model", {"status": "ok"})
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "nir_train_partitioned_model",
+            {"nir_workflow": workflow},
+            args={
+                "data_path": "/mnt/user-data/uploads/mango.csv",
+                "split_col": "Set",
+                "train_label": "Cal",
+                "tuning_label": "Tuning",
+                "test_label": "Val Ext",
+                "y_col": 8,
+                "x_cols": "9:",
+            },
+        ),
+        handler,
+    )
+
+    assert called is False
+    assert isinstance(result, Command)
+    payload = json.loads(result.update["messages"][0].content)
+    assert payload["code"] == "nir_grouping_split_column_conflict"
+    assert payload["details"]["split_column"] == "Set"
+    assert payload["details"]["grouping_column"] == "Set"
+    assert payload["details"]["action_required"] == "record_distinct_sample_grouping_column"
 
 
 @pytest.mark.parametrize(

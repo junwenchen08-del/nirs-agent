@@ -263,7 +263,85 @@ def _inspect_csv_like(filepath: str) -> dict:
     if preview.ndim != 2 or preview.shape[1] == 0:
         raise ValueError(f"Could not parse a 2D data block from {filepath!r}")
 
-    mapping = profile.mapping
+    mapping = dict(profile.mapping)
+    target_columns = [int(index) for index in mapping.get("target_columns", [])]
+    sample_id_columns = [int(index) for index in mapping.get("sample_id_columns", [])]
+    spectral_columns = {int(index) for index in mapping.get("spectral_columns", [])}
+    mapping["target_column_names"] = [
+        profile.headers[index]
+        for index in target_columns
+        if 0 <= index < len(profile.headers)
+    ]
+    mapping["sample_id_column_names"] = [
+        profile.headers[index]
+        for index in sample_id_columns
+        if 0 <= index < len(profile.headers)
+    ]
+
+    partition_tokens = {"set", "split", "partition", "subset", "fold"}
+    partition_columns = []
+    for index, name in enumerate(profile.headers):
+        if name.strip().lower() not in partition_tokens:
+            continue
+        observed_values = []
+        for row in profile.rows:
+            if index >= len(row):
+                continue
+            value = str(row[index]).strip()
+            if value and value not in observed_values:
+                observed_values.append(value)
+            if len(observed_values) >= 12:
+                break
+        partition_columns.append(
+            {
+                "index": index,
+                "name": name,
+                "observed_values": observed_values,
+            }
+        )
+    mapping["partition_columns"] = partition_columns
+
+    grouping_rank = {
+        "pop": 0,
+        "population": 0,
+        "sample_id": 1,
+        "sampleid": 1,
+        "batch": 2,
+        "lot": 2,
+        "season": 3,
+        "region": 4,
+        "origin": 4,
+        "site": 4,
+        "date": 5,
+        "cultivar": 6,
+    }
+    grouping_candidates = []
+    partition_indices = {int(item["index"]) for item in partition_columns}
+    for index, name in enumerate(profile.headers):
+        normalized_name = name.strip().lower().replace(" ", "_")
+        rank = grouping_rank.get(normalized_name)
+        if (
+            rank is None
+            or index in partition_indices
+            or index in spectral_columns
+            or index in target_columns
+        ):
+            continue
+        grouping_candidates.append(
+            {
+                "index": index,
+                "name": name,
+                "_rank": rank,
+            }
+        )
+    grouping_candidates.sort(key=lambda item: (item["_rank"], item["index"]))
+    mapping["grouping_column_candidates"] = [
+        {
+            "index": item["index"],
+            "name": item["name"],
+        }
+        for item in grouping_candidates
+    ]
     if mapping["status"] == "auto" and mapping.get("transpose"):
         n_samples = len(mapping["spectral_columns"])
         n_wavelengths = profile.total_rows

@@ -202,7 +202,42 @@ def test_inspect_csv_recognizes_dry_matter_abbreviation(tmp_path: Path) -> None:
     mapping = json.loads(inspect_file(str(fp)))["schema_mapping"]
     assert mapping["status"] == "auto"
     assert mapping["target_columns"] == [1]
+    assert mapping["target_column_names"] == ["DM"]
     assert mapping["spectral_columns"] == [2, 3, 4]
+    assert mapping["partition_columns"] == [
+        {"index": 0, "name": "Set", "observed_values": ["Cal", "Test"]}
+    ]
+
+
+def test_inspect_csv_surfaces_distinct_partition_and_grouping_candidates(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    fp = tmp_path / "mango_like.csv"
+    fp.write_text(
+        "Set,Pop,DM,900,910,920\n"
+        "Cal,1,12.1,0.1,0.2,0.3\n"
+        "Cal,1,12.2,0.2,0.3,0.4\n"
+        "Tuning,2,13.2,0.3,0.4,0.5\n"
+        "Val Ext,3,14.3,0.4,0.5,0.6\n",
+        encoding="utf-8",
+    )
+
+    mapping = json.loads(inspect_file(str(fp)))["schema_mapping"]
+
+    assert mapping["target_column_names"] == ["DM"]
+    assert mapping["partition_columns"] == [
+        {
+            "index": 0,
+            "name": "Set",
+            "observed_values": ["Cal", "Tuning", "Val Ext"],
+        }
+    ]
+    assert mapping["grouping_column_candidates"][0] == {
+        "index": 1,
+        "name": "Pop",
+    }
 
 
 def test_inspect_file_mat(tmp_path: Path) -> None:

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from langchain.agents import create_agent
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tools import tool
 
 from deerflow.agents.middlewares.nir_workflow_middleware import NIRWorkflowMiddleware
 from deerflow.agents.thread_state import ThreadState
@@ -21,6 +23,30 @@ from deerflow.community.nir.workflow import start_workflow, transition_workflow
 class _FakeModel(FakeMessagesListChatModel):
     def bind_tools(self, tools, **kwargs):  # noqa: ARG002
         return self
+
+
+@tool("nir_reflect")
+def _fake_nir_reflect(
+    metrics_path: str,
+    history: str,
+    domain: str,
+    attempt: int,
+    max_retries: int,
+) -> str:
+    """Return a deterministic stop reflection for graph integration tests."""
+
+    assert metrics_path.endswith("metrics.json")
+    assert history == "[]"
+    assert domain == "food_protein"
+    assert max_retries == 3
+    return json.dumps(
+        {
+            "attempt": attempt,
+            "should_retry": False,
+            "reason": "No evidence-backed retry is available.",
+            "diagnostics": {"residual_trend": "none"},
+        }
+    )
 
 
 def _review_workflow(
@@ -99,7 +125,10 @@ def test_response_without_attempt_evidence_cannot_claim_metrics() -> None:
     verdict = validate_nir_response("此前模型 R²=0.88。", workflow)
 
     assert verdict.passed is False
-    assert verdict.violations == ("metric_not_in_current_evidence:r2",)
+    assert verdict.violations == (
+        "workflow_incomplete:inspect_data",
+        "metric_not_in_current_evidence:r2",
+    )
 
 
 def test_response_rejects_metric_value_not_present_in_current_attempt() -> None:
@@ -141,6 +170,112 @@ def test_failed_attempt_rejects_positive_quality_claim() -> None:
 
     assert verdict.passed is False
     assert "quality_overclaim:passed" in verdict.violations
+
+
+def test_failed_attempt_cannot_publish_before_required_reflection() -> None:
+    workflow = _review_workflow(passed=False)
+
+    verdict = validate_nir_response(
+        "本次内部留出测试 R²=0.91，RPD=3.46；这不是外部验证。",
+        workflow,
+    )
+
+    assert verdict.passed is False
+    assert "workflow_incomplete:reflect_on_attempt" in verdict.violations
+
+
+def test_middleware_reengages_model_when_failed_attempt_skips_reflection() -> None:
+    workflow = _review_workflow(passed=False)
+    message = AIMessage(
+        content="本次内部留出测试 R²=0.91，RPD=3.46；这不是外部验证。",
+        id="premature-answer",
+    )
+
+    update = NIRWorkflowMiddleware().after_model(
+        {"messages": [message], "nir_workflow": workflow},
+        SimpleNamespace(context={"run_id": "run-mango"}),
+    )
+
+    assert update is not None
+    assert update["jump_to"] == "model"
+    reminder = update["messages"][0]
+    assert isinstance(reminder, HumanMessage)
+    assert reminder.name == "nir_workflow_completion_reminder"
+    assert reminder.additional_kwargs["hide_from_ui"] is True
+    assert "nir_reflect" in reminder.content
+    assert update["nir_workflow"]["response_guard_events"][-1]["violations"] == ["workflow_incomplete:reflect_on_attempt"]
+
+
+def test_graph_forces_reflection_before_releasing_failed_attempt_summary() -> None:
+    workflow = _review_workflow(passed=False)
+    agent = create_agent(
+        model=_FakeModel(
+            disable_streaming=True,
+            responses=[
+                AIMessage(
+                    content="本次内部留出测试 R²=0.91，RPD=3.46；这不是外部验证。",
+                    id="premature-graph-answer",
+                ),
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": "reflect-call",
+                            "name": "nir_reflect",
+                            "args": {},
+                        }
+                    ],
+                ),
+                AIMessage(
+                    content=("本次内部留出测试 R²=0.91，RPD=3.46，质量门禁未通过；这不是外部验证。"),
+                    id="grounded-graph-answer",
+                ),
+            ],
+        ),
+        tools=[_fake_nir_reflect],
+        middleware=[NIRWorkflowMiddleware()],
+        state_schema=ThreadState,
+    )
+
+    result = agent.invoke(
+        {
+            "messages": [{"role": "user", "content": "请总结失败结果"}],
+            "nir_workflow": workflow,
+        }
+    )
+
+    assert result["nir_workflow"]["stage"] == "blocked"
+    assert result["nir_workflow"]["reflection"]["should_retry"] is False
+    assert any(event["action"] == "record_reflection" for event in result["nir_workflow"]["history"])
+    assert result["messages"][-1].id == "grounded-graph-answer"
+
+
+def test_response_rejects_unsupported_constant_column_removal_claim() -> None:
+    workflow = _review_workflow()
+    workflow["attempt_evidence"]["result_facts"] = {
+        "wavelength_selection": {
+            "n_original": 306,
+            "n_selected": 306,
+        }
+    }
+
+    verdict = validate_nir_response(
+        "25 个恒定波长列已经自动排除。本次内部留出测试 R²=0.91；这不是外部验证。",
+        workflow,
+    )
+
+    assert "unsupported_preprocessing_claim:constant_columns_removed" in verdict.violations
+
+
+def test_response_rejects_literature_comparison_without_retrieved_evidence() -> None:
+    workflow = _review_workflow()
+
+    verdict = validate_nir_response(
+        "本次内部留出测试 R²=0.91；这不是外部验证，结果与文献预期一致。",
+        workflow,
+    )
+
+    assert "knowledge_claim_without_evidence" in verdict.violations
 
 
 def test_grounded_replacement_contains_only_current_evidence() -> None:

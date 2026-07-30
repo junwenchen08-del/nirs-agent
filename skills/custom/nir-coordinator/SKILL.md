@@ -72,12 +72,19 @@ nir_workflow(
 - 每组问题用返回的 `reason` 简要说明它会影响哪个分析决策；
 - 调用一次 `ask_clarification(clarification_type="missing_info")` 提问并等待用户回答；
 - 用户回答后调用一次 `set_requirements` 写回，已通过的数据审查不会重复执行；
-- 用户明确表示“不知道”或“没有”时，分别写入 `unknown` 或 `none`，不要反复追问；
+- `unknown`、`none`、`N/A` 等占位值不能满足外部验证/生产任务的高保证输入；
+  用户确实无法提供时，不要猜测或反复盘问，应说明限制并请求补充真实字段，或请用户把
+  `validation_goal` 降为 `internal_holdout` / `exploratory`；
 - 只有工作流进入 `planning` 后才能制定计划，进入 `execution` 后才能调用建模工具。
 
 `validation_goal` 使用 `exploratory`、`internal_holdout`、`external_validation` 或
 `production`。外部验证和生产部署还必须确认 `instrument`、`grouping_column` 和
 `reference_method`，因为这些信息决定域偏移和无泄漏验证边界。
+
+命名分区列与样本群组列不是同一概念：`Set` / `Split` / `Partition` 用于指定
+Cal/Tuning/Test 边界；`Pop` / 样本号 / 批次 / 季节 / 产地等才可作为
+`grouping_column`。不得把建模调用中的 `split_col` 同时写为 `grouping_column`；
+运行时会拒绝这种语义冲突。
 
 验证目标是运行时协议，不是报告标签：
 
@@ -401,6 +408,9 @@ nir_analyze(
 你根据诊断和已检索证据**自主构造**下一步计划，但必须先用
 `nir_workflow(action="record_retry_plan", ...)` 固化工具、模型、`pipeline_steps`、理由和预期改善，
 再调用 `nir_workflow(action="plan_ready")`。下一次建模必须与固化计划完全一致。
+只要持久状态仍为 `evaluation / reflect_on_attempt`，就不得输出最终报告；无工具调用的
+提前回答会被隐藏，运行时会重新唤起模型并明确要求调用 `nir_reflect`。连续忽略该动作时
+工作流将以可审计的失败关闭，只允许输出当前证据的最佳努力摘要。
 
 ```
 步骤1: nir_load_data(file_path, output_path) → 生成 data.npz
@@ -423,6 +433,9 @@ nir_analyze(
 
 不得跳过 `record_retry_plan` 直接重试，不得重复上一轮完全相同的执行签名，也不得在计划后
 临时更换工具、模型、预处理或其他决策参数；这些调用会被运行时拒绝并记为对话验收违规。
+最终报告不得把“检测到恒定波长”改写成“已经删除恒定波长”；只有运行证据中的
+`n_selected < n_original` 或明确的选择记录才能支持“已排除”。“与文献一致”“属于典型范围”
+等结论必须绑定本线程检索得到的稳定证据 ID，否则省略。
 
 ### 残差模式-解决方案映射（推理跳板）
 

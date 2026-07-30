@@ -69,6 +69,19 @@
       "tags": ["retry", "budget", "failure"]
     },
     {
+      "id": "named-external-failure-must-reflect",
+      "description": "官方命名外部分区的首轮模型未过门禁时，智能体必须反思，不能直接用首轮指标结束对话。",
+      "task_type": "analysis",
+      "user_message": "用芒果光谱预测 DM；Cal、Tuning、Val Ext 是官方分区，Pop 是样本群组。首轮不达标时先诊断再决定是否重试。",
+      "expected_route": "nir-coordinator",
+      "expected_final_stages": ["review", "blocked"],
+      "required_workflow_actions": ["start", "record_audit", "plan_ready", "record_attempt", "record_reflection"],
+      "required_tools": ["nir_inspect", "nir_train_partitioned_model", "nir_reflect"],
+      "expected_approval_status": "not_required",
+      "required_trace_fields": ["model_path", "metrics_path"],
+      "tags": ["real-data", "external-validation", "reflection", "premature-exit"]
+    },
+    {
       "id": "prediction-complete",
       "description": "使用已有模型完成预测，且不进入模型注册流程。",
       "task_type": "prediction",

@@ -212,6 +212,13 @@ from deerflow.config import get_app_config
   Failed modeling attempts enter `evaluation` and must call `nir_reflect`;
   middleware replaces model-authored reflection history, attempt, budget,
   domain, and metrics path with values derived from durable attempt evidence.
+  A plain final response cannot terminate active `data_audit`, `planning`,
+  `execution`, `evaluation`, or retry-knowledge stages. The response stream
+  withholds that text, `NIRWorkflowMiddleware` injects a hidden completion
+  reminder and jumps back to the model, and repeated non-compliance closes the
+  workflow as a bounded, auditable best-effort failure. High-assurance
+  requirements treat `unknown`, `none`, and `N/A` as missing; named partition
+  columns are also rejected when reused as the sample grouping column.
   A retryable reflection moves through required knowledge retrieval and then
   requires `record_retry_plan`, which persists diagnostics, evidence ids,
   rationale, expected improvement, canonical pipeline parameters, and a stable
@@ -219,6 +226,11 @@ from deerflow.config import get_app_config
   unless that call exactly matches the ready plan; repeating the prior
   execution signature is rejected. Attempts, reflections, and retry plans are
   bounded audit records used by deterministic trajectory evaluation.
+  Modeling attempt evidence includes bounded preprocessing, wavelength-
+  selection, and model-selection facts. Response grounding rejects claims that
+  constant columns were removed when the recorded selected feature count did
+  not decrease, and rejects literature-comparison claims without retrieved
+  knowledge evidence.
   `merge_nir_workflow` preserves bounded audit evidence across parallel updates
   for the same project, including updates that reach different revisions;
   same-revision project-id

@@ -36,6 +36,22 @@ _PREREQUISITE_INPUTS = {
 }
 _DECISION_INPUTS = ("domain", "analyte", "unit", "validation_goal")
 _HIGH_ASSURANCE_INPUTS = ("instrument", "grouping_column", "reference_method")
+_REQUIREMENT_PLACEHOLDERS = frozenset(
+    {
+        "unknown",
+        "none",
+        "n/a",
+        "na",
+        "null",
+        "unspecified",
+        "not specified",
+        "未知",
+        "不清楚",
+        "不知道",
+        "无",
+        "没有",
+    }
+)
 _VALIDATION_GOAL_ALIASES = {
     "exploratory": "exploratory",
     "exploration": "exploratory",
@@ -229,8 +245,15 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _is_meaningful_requirement(value: Any) -> bool:
+    if not isinstance(value, str):
+        return bool(value)
+    normalized = re.sub(r"\s+", " ", value.strip().lower())
+    return bool(normalized) and normalized not in _REQUIREMENT_PLACEHOLDERS
+
+
 def _missing_inputs(state: NIRWorkflowState, required: tuple[str, ...]) -> list[str]:
-    return [field for field in required if not state.get(field)]
+    return [field for field in required if not _is_meaningful_requirement(state.get(field))]
 
 
 def _prerequisite_missing(state: NIRWorkflowState) -> list[str]:
@@ -312,7 +335,7 @@ def _requirement_updates(
         "grouping_column": grouping_column,
         "reference_method": reference_method,
     }
-    updates = {key: value.strip() for key, value in values.items() if isinstance(value, str) and value.strip()}
+    updates = {key: value.strip() for key, value in values.items() if _is_meaningful_requirement(value)}
     if isinstance(validation_goal, str) and validation_goal.strip():
         updates["validation_goal"] = _normalize_validation_goal(validation_goal)
     return updates
@@ -436,6 +459,26 @@ def record_response_guard(
             "stage": state.get("stage"),
             "message_id": message_id,
             "violations": guard_event["violations"],
+        },
+    )
+
+
+def block_workflow_after_continuation_failure(
+    state: NIRWorkflowState,
+    *,
+    required_action: str,
+) -> NIRWorkflowState:
+    """Fail closed after repeated attempts to skip a mandatory workflow action."""
+
+    return _with_update(
+        state,
+        action="continuation_guard_exhausted",
+        stage="blocked",
+        next_action="report_best_effort",
+        approval_status="not_required",
+        event_details={
+            "required_action": required_action,
+            "outcome": "agent_failed_to_complete_required_workflow_action",
         },
     )
 

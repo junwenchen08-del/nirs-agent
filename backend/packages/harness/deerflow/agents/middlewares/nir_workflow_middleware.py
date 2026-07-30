@@ -10,15 +10,20 @@ from dataclasses import dataclass, replace
 from typing import Any, override
 
 from langchain.agents import AgentState
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, hook_config
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
 from deerflow.agents.thread_state import NIRWorkflowState
-from deerflow.community.nir.response_grounding import render_grounded_nir_response, validate_nir_response
+from deerflow.community.nir.response_grounding import (
+    render_grounded_nir_response,
+    required_nir_workflow_action,
+    validate_nir_response,
+)
 from deerflow.community.nir.workflow import (
     NIRWorkflowError,
+    block_workflow_after_continuation_failure,
     record_response_guard,
     record_tool_observation,
     retry_execution_signature,
@@ -80,6 +85,8 @@ _MODEL_DEFAULTS = {
     "nir_analyze_collection": "auto",
     "nir_compare": "pls",
 }
+_MAX_WORKFLOW_CONTINUATION_REMINDERS = 2
+_GROUPING_SPLIT_CONFLICT_CODE = "nir_grouping_split_column_conflict"
 _MODEL_SUBSTITUTION_CODE = "nir_model_substitution_requires_approval"
 _VALIDATION_GOAL_CONFLICT_CODE = "nir_validation_goal_conflict"
 _RETRY_PLAN_MISMATCH_CODE = "nir_retry_plan_mismatch"
@@ -409,6 +416,33 @@ def _deny_validation_goal_conflict(
     )
 
 
+def _deny_grouping_split_column_conflict(
+    request: ToolCallRequest,
+    workflow: Mapping[str, Any],
+    policy: _ToolPolicy,
+) -> ToolMessage | None:
+    if str(request.tool_call.get("name", "")) != "nir_train_partitioned_model":
+        return None
+    args = request.tool_call.get("args")
+    args = args if isinstance(args, Mapping) else {}
+    split_column = str(args.get("split_col") or "").strip()
+    grouping_column = str(workflow.get("grouping_column") or "").strip()
+    if not split_column or split_column.casefold() != grouping_column.casefold():
+        return None
+    return _denied_message(
+        request,
+        code=_GROUPING_SPLIT_CONFLICT_CODE,
+        error=("The named partition column and the sample-grouping column have different scientific roles and cannot be the same field."),
+        workflow=workflow,
+        policy=policy,
+        details={
+            "split_column": split_column,
+            "grouping_column": grouping_column,
+            "action_required": "record_distinct_sample_grouping_column",
+        },
+    )
+
+
 def _deny_registration_evidence_mismatch(
     request: ToolCallRequest,
     workflow: Mapping[str, Any],
@@ -508,6 +542,12 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
 
     if validation_denial := _deny_validation_goal_conflict(request, workflow, policy):
         return validation_denial
+    if grouping_denial := _deny_grouping_split_column_conflict(
+        request,
+        workflow,
+        policy,
+    ):
+        return grouping_denial
     stage = str(workflow.get("stage", ""))
     task_type = str(workflow.get("task_type", ""))
     if stage not in policy.stages:
@@ -629,6 +669,16 @@ def _model_attempt_update(
             {key: component.get(key) for key in ("name", "R2_val", "RPD", "RMSEP", "grade", "passed") if component.get(key) is not None} for component in result["per_component"][:20] if isinstance(component, Mapping)
         ]
         metrics_summary["component_count"] = len(result["per_component"])
+    result_fact_keys = (
+        "preprocessing",
+        "wavelength_selection",
+        "wavelength_selection_decision",
+        "model_selection_decision",
+        "candidate_results",
+        "model_candidates",
+        "method",
+    )
+    result_facts = {key: result.get(key) for key in result_fact_keys if result.get(key) is not None}
     try:
         pipeline_steps, model_args, execution_signature = _request_execution_signature(request)
     except NIRWorkflowError:
@@ -650,6 +700,7 @@ def _model_attempt_update(
         "execution_signature": execution_signature,
         **digest_fields,
         "metrics_summary": metrics_summary,
+        **({"result_facts": result_facts} if result_facts else {}),
     }
     return transition_workflow(
         workflow,
@@ -766,6 +817,31 @@ def _advance(request: ToolCallRequest, result: ToolMessage | Command) -> ToolMes
     return _attach_workflow_update(result, updated) if updated is not None else result
 
 
+def _workflow_completion_reminder(
+    required_action: str,
+    workflow: Mapping[str, Any],
+) -> str:
+    instructions = {
+        "inspect_data": ("Call nir_inspect or the required structured NIR audit tool before forming a conclusion."),
+        "prepare_analysis_plan": ("Record the analysis plan with nir_workflow(action='plan_ready') and execute it before reporting results."),
+        "execute_nir_tools": ("Execute the authorized NIR tool for the current plan before reporting results."),
+        "reflect_on_attempt": ("Call nir_reflect now. Its inputs will be bound to the latest failed attempt by the runtime. Then follow the persisted reflection decision; do not report a final result yet."),
+        "retrieve_evidence_for_retry": ("Retrieve the evidence requested by the latest reflection, record it, and continue to retry planning."),
+        "prepare_retry_plan": ("Call nir_workflow(action='record_retry_plan', ...) with a materially changed execution, then call plan_ready and execute that exact plan."),
+    }
+    instruction = instructions.get(
+        required_action,
+        f"Complete the required workflow action {required_action!r}.",
+    )
+    return (
+        "Your previous response attempted to end an active NIR workflow before "
+        "its mandatory next action was completed. This control message is "
+        "hidden from the user. "
+        f"Current stage={workflow.get('stage')!r}, "
+        f"required next_action={required_action!r}. {instruction}"
+    )
+
+
 class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
     """Enforce NIR workflow policy and persist deterministic tool outcomes."""
 
@@ -806,6 +882,65 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         workflow = state.get("nir_workflow")
         if not isinstance(workflow, dict):
             return None
+        required_action = required_nir_workflow_action(workflow)
+        if required_action:
+            violation = f"workflow_incomplete:{required_action}"
+            guarded_workflow = record_response_guard(
+                workflow,
+                violations=[violation],
+                message_id=str(message.id) if message.id else None,
+            )
+            reminder_count = sum(violation in event.get("violations", []) for event in guarded_workflow.get("response_guard_events", []) if isinstance(event, Mapping))
+            if reminder_count <= _MAX_WORKFLOW_CONTINUATION_REMINDERS:
+                reminder = HumanMessage(
+                    name="nir_workflow_completion_reminder",
+                    content=_workflow_completion_reminder(
+                        required_action,
+                        workflow,
+                    ),
+                    additional_kwargs={
+                        "hide_from_ui": True,
+                        "nir_required_action": required_action,
+                    },
+                )
+                logger.warning(
+                    "Re-engaging NIR agent after premature final response",
+                    extra={
+                        "project_id": workflow.get("project_id"),
+                        "stage": workflow.get("stage"),
+                        "required_action": required_action,
+                        "reminder_count": reminder_count,
+                    },
+                )
+                return {
+                    "messages": [reminder],
+                    "nir_workflow": guarded_workflow,
+                    "jump_to": "model",
+                }
+
+            blocked_workflow = block_workflow_after_continuation_failure(
+                guarded_workflow,
+                required_action=required_action,
+            )
+            additional_kwargs = dict(message.additional_kwargs or {})
+            additional_kwargs["nir_response_grounding"] = {
+                "passed": False,
+                "violations": [violation],
+                "replacement": "blocked_best_effort_evidence_summary",
+            }
+            replacement = message.model_copy(
+                update={
+                    "content": render_grounded_nir_response(
+                        blocked_workflow,
+                        violations=(violation,),
+                    ),
+                    "additional_kwargs": additional_kwargs,
+                }
+            )
+            return {
+                "messages": [replacement],
+                "nir_workflow": blocked_workflow,
+            }
         response_text = message_content_to_text(message.content)
         verdict = validate_nir_response(response_text, workflow)
         if verdict.passed:
@@ -845,10 +980,12 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
             "nir_workflow": guarded_workflow,
         }
 
+    @hook_config(can_jump_to=["model"])
     @override
     def after_model(self, state: AgentState, runtime: Runtime) -> dict | None:  # noqa: ARG002
         return self._guard_final_response(state)
 
+    @hook_config(can_jump_to=["model"])
     @override
     async def aafter_model(self, state: AgentState, runtime: Runtime) -> dict | None:  # noqa: ARG002
         return self._guard_final_response(state)

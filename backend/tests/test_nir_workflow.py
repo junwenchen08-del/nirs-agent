@@ -82,6 +82,32 @@ def test_external_validation_requests_high_impact_context_in_one_question():
     ]
 
 
+def test_high_assurance_placeholders_do_not_satisfy_required_context():
+    state = start_workflow(
+        task_type="calibration",
+        data_path="mango.csv",
+        analyte="DM",
+        unit="%",
+        domain="food_moisture",
+        validation_goal="external_validation",
+        instrument="unknown",
+        grouping_column="none",
+        reference_method="N/A",
+    )
+
+    state = transition_workflow(state, action="record_audit", audit_passed=True)
+
+    assert state["stage"] == "clarification"
+    assert state["missing_inputs"] == [
+        "instrument",
+        "grouping_column",
+        "reference_method",
+    ]
+    assert state["instrument"] is None
+    assert state["grouping_column"] is None
+    assert state["reference_method"] is None
+
+
 @pytest.mark.parametrize(
     ("provided", "expected"),
     [
@@ -130,7 +156,7 @@ def test_exploratory_plan_routes_to_findings_without_modeling():
     assert state["history"][-1]["outcome"] == "exploratory_findings_ready"
 
 
-def test_requirements_after_passed_audit_advance_without_repeating_inspection():
+def test_unknown_high_assurance_requirements_do_not_advance_to_planning():
     state = start_workflow(
         task_type="calibration",
         data_path="corn.npz",
@@ -149,11 +175,15 @@ def test_requirements_after_passed_audit_advance_without_repeating_inspection():
         reference_method="unknown",
     )
 
-    assert state["stage"] == "planning"
+    assert state["stage"] == "clarification"
     assert state["audit_status"] == "passed"
-    assert state["missing_inputs"] == []
-    assert state["clarification_questions"] == []
-    assert state["next_action"] == "prepare_analysis_plan"
+    assert state["missing_inputs"] == [
+        "instrument",
+        "grouping_column",
+        "reference_method",
+    ]
+    assert state["clarification_questions"][0]["fields"] == state["missing_inputs"]
+    assert state["next_action"] == "ask_targeted_clarification"
 
 
 def test_start_multi_modeling_enters_data_audit_with_complete_requirements():

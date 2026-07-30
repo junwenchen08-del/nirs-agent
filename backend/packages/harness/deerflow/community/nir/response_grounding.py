@@ -7,6 +7,37 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+_MANDATORY_WORKFLOW_ACTIONS = {
+    "data_audit": {
+        "inspect_data",
+    },
+    "planning": {
+        "prepare_analysis_plan",
+        "prepare_retry_plan",
+    },
+    "execution": {
+        "execute_nir_tools",
+    },
+    "evaluation": {
+        "reflect_on_attempt",
+    },
+    "knowledge": {
+        "retrieve_evidence_for_retry",
+    },
+}
+_CONSTANT_COLUMNS_REMOVED_RE = re.compile(
+    r"(?:恒定|常量|无变异|constant).{0,24}(?:波长|光谱|列).{0,24}"
+    r"(?:已|被|自动)?(?:排除|删除|移除|剔除|removed|excluded|dropped)",
+    re.IGNORECASE,
+)
+_LITERATURE_COMPARISON_RE = re.compile(
+    r"(?:与|同).{0,8}(?:文献|论文|研究).{0,16}(?:一致|相符|吻合)"
+    r"|(?:文献|论文|研究).{0,24}(?:典型范围|预期表现)"
+    r"|(?:consistent\s+with|matches?).{0,16}(?:the\s+)?literature"
+    r"|typical\s+(?:literature\s+)?range",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class NIRResponseGroundingResult:
@@ -14,6 +45,20 @@ class NIRResponseGroundingResult:
 
     passed: bool
     violations: tuple[str, ...]
+
+
+def required_nir_workflow_action(
+    workflow: Mapping[str, Any] | None,
+) -> str | None:
+    """Return the mandatory next action that prevents a final response."""
+
+    if not isinstance(workflow, Mapping):
+        return None
+    stage = str(workflow.get("stage") or "")
+    next_action = str(workflow.get("next_action") or "")
+    if next_action in _MANDATORY_WORKFLOW_ACTIONS.get(stage, set()):
+        return next_action
+    return None
 
 
 class NIRStreamMessageGate:
@@ -237,8 +282,8 @@ def _claim_tolerance(raw_value: str, *, percent: bool) -> float:
 def _has_positive_marker(text: str, pattern: re.Pattern[str]) -> bool:
     lowered = text.lower()
     for match in pattern.finditer(text):
-        prefix = lowered[max(0, match.start() - 18) : match.start()]
-        if any(negation in prefix for negation in _NEGATIONS):
+        local_context = lowered[max(0, match.start() - 18) : min(len(lowered), match.end() + 1)]
+        if any(negation in local_context for negation in _NEGATIONS):
             continue
         return True
     return False
@@ -279,6 +324,9 @@ def validate_nir_response(
     summary = summary if isinstance(summary, Mapping) else {}
     allowed_metrics = _summary_values(summary)
     violations: list[str] = []
+    required_action = required_nir_workflow_action(workflow)
+    if required_action:
+        violations.append(f"workflow_incomplete:{required_action}")
     metric_claims = list(_METRIC_CLAIM_RE.finditer(response_text))
 
     for claim in metric_claims:
@@ -319,6 +367,19 @@ def validate_nir_response(
     has_result_claim = bool(metric_claims or _MODEL_PATH_RE.search(response_text) or _QUALITY_PASSED_RE.search(response_text))
     if evidence and has_result_claim and not _scope_disclosed(response_text, validation_scope):
         violations.append("validation_scope_disclosure_missing")
+
+    result_facts = evidence.get("result_facts")
+    result_facts = result_facts if isinstance(result_facts, Mapping) else {}
+    selection = result_facts.get("wavelength_selection")
+    selection = selection if isinstance(selection, Mapping) else {}
+    original_count = selection.get("n_original")
+    selected_count = selection.get("n_selected")
+    if _CONSTANT_COLUMNS_REMOVED_RE.search(response_text) and isinstance(original_count, int | float) and isinstance(selected_count, int | float) and selected_count >= original_count:
+        violations.append("unsupported_preprocessing_claim:constant_columns_removed")
+
+    knowledge_evidence = workflow.get("knowledge_evidence")
+    if _LITERATURE_COMPARISON_RE.search(response_text) and not (isinstance(knowledge_evidence, list) and any(str(item).strip() for item in knowledge_evidence)):
+        violations.append("knowledge_claim_without_evidence")
 
     deduplicated = tuple(dict.fromkeys(violations))
     return NIRResponseGroundingResult(
