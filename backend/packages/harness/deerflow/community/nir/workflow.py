@@ -94,6 +94,7 @@ _HIGH_ASSURANCE_GOAL_MARKERS = (
 )
 _HISTORY_LIMIT = 50
 _TOOL_OBSERVATION_LIMIT = 100
+_RESPONSE_GUARD_LIMIT = 20
 _APPROVAL_PATTERNS = (
     r"批准",
     r"同意(?:采用|使用|注册)",
@@ -224,6 +225,13 @@ def workflow_agent_view(state: NIRWorkflowState | dict) -> dict[str, Any]:
     projected["tool_observation_count"] = len(observations) if isinstance(observations, list) else 0
     if isinstance(observations, list) and observations and isinstance(observations[-1], dict):
         projected["last_tool_observation"] = {field: observations[-1].get(field) for field in _AGENT_OBSERVATION_FIELDS if observations[-1].get(field) is not None}
+    guard_events = state.get("response_guard_events")
+    projected["response_guard_count"] = len(guard_events) if isinstance(guard_events, list) else 0
+    if isinstance(guard_events, list) and guard_events and isinstance(guard_events[-1], dict):
+        projected["last_response_guard"] = {
+            "violations": list(guard_events[-1].get("violations") or []),
+            "stage": guard_events[-1].get("stage"),
+        }
     return projected
 
 
@@ -291,6 +299,33 @@ def record_tool_observation(
             "call_id": call_id,
             "run_id": run_id,
             "trace_id": trace_id,
+        },
+    )
+
+
+def record_response_guard(
+    state: NIRWorkflowState,
+    *,
+    violations: list[str],
+    message_id: str | None,
+) -> NIRWorkflowState:
+    """Persist a bounded audit event when an unsupported response is replaced."""
+
+    guard_event = {
+        "at": _now(),
+        "stage": state.get("stage"),
+        "message_id": message_id,
+        "violations": list(dict.fromkeys(violations)),
+    }
+    events = [*(state.get("response_guard_events") or []), guard_event][-_RESPONSE_GUARD_LIMIT:]
+    return _with_update(
+        state,
+        action="response_guard",
+        response_guard_events=events,
+        event_details={
+            "stage": state.get("stage"),
+            "message_id": message_id,
+            "violations": guard_event["violations"],
         },
     )
 
@@ -378,6 +413,7 @@ def start_workflow(
         "run_ids": [],
         "trace_ids": [],
         "tool_observations": [],
+        "response_guard_events": [],
         "attempt": 0,
         "max_attempts": max_attempts,
         "audit_status": "pending",

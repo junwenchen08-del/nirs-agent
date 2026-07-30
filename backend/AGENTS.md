@@ -284,6 +284,18 @@ from deerflow.config import get_app_config
   accepts only the exact approved paths, requires the metrics protocol/scope
   to match the workflow goal, and rechecks emitted hashes against the bound
   model manifest.
+  Final NIR natural-language responses pass through the shared deterministic
+  response-grounding validator. Numeric metrics, validation-scope language,
+  quality-passage claims, and model/metrics paths must match the current
+  `attempt_evidence`; unsupported claims are replaced with a bounded
+  evidence-only summary and recorded in `response_guard_events`. Evaluation
+  trace export captures the latest visible final `AIMessage` as
+  `response_text`; offline scoring applies the same validator and fails traces
+  where the runtime guard had to intervene.
+  LangGraph emits raw model chunks before `after_model` runs, so both the
+  Gateway worker and embedded client buffer NIR AI chunks and suppress unsafe
+  intermediate `values` snapshots. They release the complete AI message only
+  after that snapshot passes the shared grounding validator.
   `nir_train_auto_split_model` is the autonomous CSV path for single-target
   datasets without official partitions. Its default `auto` strategy first
   detects eligible batch/domain metadata (instrument, batch, season/year,

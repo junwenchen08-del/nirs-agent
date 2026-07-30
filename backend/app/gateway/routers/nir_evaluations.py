@@ -11,12 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
 from app.gateway.authz import get_auth_context, require_permission
 from app.gateway.deps import get_checkpointer, get_current_user, get_run_event_store, get_run_manager, get_thread_store
 from app.gateway.utils import sanitize_log_param
 from deerflow.community.nir.evaluation import NIREvalTrace, evaluate_suite, load_scenarios, trace_from_workflow
+from deerflow.utils.messages import message_content_to_text
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["nir-evaluations"])
@@ -61,6 +63,30 @@ def _duration_ms(records: list[Any]) -> float:
     return total
 
 
+def _latest_final_response(channel_values: Mapping[str, Any]) -> str | None:
+    messages = channel_values.get("messages")
+    if not isinstance(messages, list):
+        return None
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            if message.tool_calls or message.additional_kwargs.get("hide_from_ui"):
+                continue
+            text = message_content_to_text(message.content).strip()
+            if text:
+                return text
+            continue
+        if isinstance(message, Mapping):
+            role = str(message.get("role") or message.get("type") or "").lower()
+            additional_kwargs = message.get("additional_kwargs")
+            hidden = isinstance(additional_kwargs, Mapping) and additional_kwargs.get("hide_from_ui")
+            if role not in {"assistant", "ai"} or message.get("tool_calls") or hidden:
+                continue
+            text = message_content_to_text(message.get("content")).strip()
+            if text:
+                return text
+    return None
+
+
 async def _capture_nir_evaluation_trace(
     thread_id: str,
     request: Request,
@@ -98,6 +124,7 @@ async def _capture_nir_evaluation_trace(
         scenario_id=scenario_id,
         workflow=workflow,
         routed_skill=_activated_nir_skill(event_groups),
+        response_text=_latest_final_response(channel_values),
         duration_ms=_duration_ms(records),
         input_tokens=sum(record.total_input_tokens for record in records),
         output_tokens=sum(record.total_output_tokens for record in records),

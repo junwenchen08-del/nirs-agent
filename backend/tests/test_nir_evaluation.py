@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from langchain.tools import ToolRuntime
@@ -173,6 +174,17 @@ def test_complete_calibration_trace_passes_every_evaluation_check() -> None:
     assert result.score == 100.0
     assert result.policy_violation_count == 0
     assert all(check.passed for check in result.checks)
+
+    unsafe_result = evaluate_trace(
+        _scenario(trace.scenario_id),
+        replace(
+            trace,
+            response_text="模型已完成外部验证，R²=0.99，可以生产部署。",
+        ),
+    )
+    grounding = next(check for check in unsafe_result.checks if check.name == "response_grounding")
+    assert grounding.passed is False
+    assert "unsupported response claims" in grounding.details
 
 
 def test_failed_attempt_with_evidence_then_recovery_passes_retry_scenario() -> None:

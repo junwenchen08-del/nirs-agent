@@ -11,14 +11,21 @@ from typing import Any, override
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
 from deerflow.agents.thread_state import NIRWorkflowState
-from deerflow.community.nir.workflow import NIRWorkflowError, record_tool_observation, transition_workflow
+from deerflow.community.nir.response_grounding import render_grounded_nir_response, validate_nir_response
+from deerflow.community.nir.workflow import (
+    NIRWorkflowError,
+    record_response_guard,
+    record_tool_observation,
+    transition_workflow,
+)
+from deerflow.tools.types import Runtime
 from deerflow.trace_context import DEERFLOW_TRACE_METADATA_KEY
-from deerflow.utils.messages import get_original_user_content_text
+from deerflow.utils.messages import get_original_user_content_text, message_content_to_text
 
 logger = logging.getLogger(__name__)
 
@@ -649,3 +656,60 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         if denied is not None:
             return _record_observation(request, denied)
         return _record_observation(request, _advance(request, await handler(request)))
+
+    def _guard_final_response(self, state: AgentState) -> dict | None:
+        messages = state.get("messages") or []
+        if not messages or not isinstance(messages[-1], AIMessage):
+            return None
+        message = messages[-1]
+        if message.tool_calls:
+            return None
+        workflow = state.get("nir_workflow")
+        if not isinstance(workflow, dict):
+            return None
+        response_text = message_content_to_text(message.content)
+        verdict = validate_nir_response(response_text, workflow)
+        if verdict.passed:
+            return None
+
+        grounding_metadata = {
+            "passed": False,
+            "violations": list(verdict.violations),
+            "replacement": "current_attempt_evidence_summary",
+        }
+        additional_kwargs = dict(message.additional_kwargs or {})
+        additional_kwargs["nir_response_grounding"] = grounding_metadata
+        replacement = message.model_copy(
+            update={
+                "content": render_grounded_nir_response(
+                    workflow,
+                    violations=verdict.violations,
+                ),
+                "additional_kwargs": additional_kwargs,
+            }
+        )
+        guarded_workflow = record_response_guard(
+            workflow,
+            violations=list(verdict.violations),
+            message_id=str(message.id) if message.id else None,
+        )
+        logger.warning(
+            "Replaced unsupported NIR final response claims",
+            extra={
+                "project_id": workflow.get("project_id"),
+                "stage": workflow.get("stage"),
+                "violations": list(verdict.violations),
+            },
+        )
+        return {
+            "messages": [replacement],
+            "nir_workflow": guarded_workflow,
+        }
+
+    @override
+    def after_model(self, state: AgentState, runtime: Runtime) -> dict | None:  # noqa: ARG002
+        return self._guard_final_response(state)
+
+    @override
+    async def aafter_model(self, state: AgentState, runtime: Runtime) -> dict | None:  # noqa: ARG002
+        return self._guard_final_response(state)

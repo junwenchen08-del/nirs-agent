@@ -6,6 +6,7 @@ import asyncio
 
 from _router_auth_helpers import make_authed_test_app
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -81,14 +82,25 @@ def test_gateway_exports_checkpointed_workflow_as_cli_compatible_trace() -> None
             }
         ]
         checkpoint = empty_checkpoint()
-        checkpoint["channel_values"] = {"nir_workflow": workflow}
+        checkpoint["channel_values"] = {
+            "nir_workflow": workflow,
+            "messages": [
+                AIMessage(
+                    content="内部独立留出结果已记录；这不是外部验证。",
+                    id="final-answer",
+                )
+            ],
+        }
         version = checkpointer.get_next_version(None, None)
-        checkpoint["channel_versions"] = {"nir_workflow": version}
+        checkpoint["channel_versions"] = {
+            "nir_workflow": version,
+            "messages": version,
+        }
         await checkpointer.aput(
             {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
             checkpoint,
             {"step": 1, "source": "loop", "writes": {}, "parents": {}},
-            {"nir_workflow": version},
+            {"nir_workflow": version, "messages": version},
         )
 
     asyncio.run(_seed())
@@ -112,6 +124,7 @@ def test_gateway_exports_checkpointed_workflow_as_cli_compatible_trace() -> None
     assert trace["trace_id"] == "trace-gateway"
     assert trace["input_tokens"] == 700
     assert trace["output_tokens"] == 300
+    assert trace["response_text"] == "内部独立留出结果已记录；这不是外部验证。"
 
 
 def test_gateway_returns_404_when_thread_has_no_nir_workflow() -> None:

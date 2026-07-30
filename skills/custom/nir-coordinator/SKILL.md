@@ -40,6 +40,10 @@ allowed-tools:
 - Preserve the returned `protocol`, `validation_scope`, and SHA-256 evidence in
   any audit explanation. Internal holdout evidence must never be described as
   external or production validation.
+- Every final model-result answer must explicitly state its validation scope.
+  Numeric metrics and artifact paths must be copied from the current
+  `attempt_evidence`; unsupported claims are replaced by the runtime evidence
+  guard and count as a failed dialogue-acceptance check.
 
 # NIR 光谱分析协调器
 

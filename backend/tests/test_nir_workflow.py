@@ -583,6 +583,13 @@ def test_nir_workflow_reducer_preserves_evidence_from_lower_revision():
     observed = {
         **existing,
         "tool_observations": [{"name": "nir_inspect", "status": "success"}],
+        "response_guard_events": [
+            {
+                "stage": "data_audit",
+                "message_id": "answer-unsafe",
+                "violations": ["metric_not_in_current_evidence:r2"],
+            }
+        ],
         "run_ids": ["run-lower"],
         "history": [*existing["history"], {"action": "tool_call", "tool": "nir_inspect"}],
     }
@@ -594,6 +601,7 @@ def test_nir_workflow_reducer_preserves_evidence_from_lower_revision():
     assert merged["revision"] == progressed["revision"]
     assert merged["stage"] == "planning"
     assert merged["tool_observations"] == [{"name": "nir_inspect", "status": "success"}]
+    assert merged["response_guard_events"][0]["message_id"] == "answer-unsafe"
     assert merged["run_ids"] == ["run-lower"]
 
 

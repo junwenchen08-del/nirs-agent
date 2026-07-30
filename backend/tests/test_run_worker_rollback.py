@@ -111,6 +111,67 @@ async def test_run_agent_threads_explicit_app_config_into_config_only_factory():
 
 
 @pytest.mark.anyio
+async def test_run_agent_nir_stream_publishes_only_grounded_answer():
+    run_manager = RunManager()
+    record = await run_manager.create("thread-1")
+    bridge = SimpleNamespace(
+        publish=AsyncMock(),
+        publish_end=AsyncMock(),
+        cleanup=AsyncMock(),
+    )
+    workflow = {
+        "attempt_evidence": {
+            "validation_scope": "independent_holdout_not_external",
+            "metrics_summary": {"R2_val": 0.91234},
+        }
+    }
+    raw = AIMessage(
+        content="External validation R2=0.99; production-ready.",
+        id="nir-answer",
+    )
+    corrected = AIMessage(
+        content="Internal holdout R2=0.91234; this is not external validation.",
+        id="nir-answer",
+    )
+
+    class DummyAgent:
+        async def astream(self, graph_input, config=None, stream_mode=None, subgraphs=False):
+            del graph_input, config, stream_mode, subgraphs
+            yield "values", {"messages": [], "nir_workflow": workflow}
+            yield "messages", (raw, {"langgraph_node": "model"})
+            yield "values", {"messages": [raw], "nir_workflow": workflow}
+            yield "values", {"messages": [corrected], "nir_workflow": workflow}
+
+    def factory(*, config):
+        del config
+        return DummyAgent()
+
+    await run_agent(
+        bridge,
+        run_manager,
+        record,
+        ctx=RunContext(checkpointer=None),
+        agent_factory=factory,
+        graph_input={"messages": [], "nir_workflow": workflow},
+        config={},
+        stream_modes=["values", "messages-tuple"],
+    )
+
+    published = bridge.publish.await_args_list
+    payload_text = repr(published)
+    assert "0.99" not in payload_text
+    assert "production-ready" not in payload_text
+    assert "0.91234" in payload_text
+    grounded_messages = [
+        invocation.args[2]
+        for invocation in published
+        if invocation.args[1] == "messages"
+    ]
+    assert len(grounded_messages) == 1
+    assert grounded_messages[0][0]["content"].startswith("Internal holdout")
+
+
+@pytest.mark.anyio
 async def test_run_agent_marks_llm_error_fallback_as_error_status():
     run_manager = RunManager()
     record = await run_manager.create("thread-1")

@@ -37,6 +37,7 @@ from langchain_core.runnables import RunnableConfig
 from deerflow.agents.lead_agent.agent import build_middlewares
 from deerflow.agents.lead_agent.prompt import apply_prompt_template
 from deerflow.agents.thread_state import ThreadState
+from deerflow.community.nir.response_grounding import NIRStreamMessageGate
 from deerflow.config.agents_config import AGENT_NAME_PATTERN
 from deerflow.config.app_config import get_app_config, is_trace_correlation_enabled, reload_app_config
 from deerflow.config.extensions_config import ExtensionsConfig, SkillStateConfig, get_extensions_config, reload_extensions_config
@@ -749,6 +750,7 @@ class DeerFlowClient:
         counted_usage_ids: set[str] = set()
         sent_additional_kwargs_by_id: dict[str, dict[str, Any]] = {}
         cumulative_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        nir_message_gate = NIRStreamMessageGate()
 
         def _account_usage(msg_id: str | None, usage: Any) -> dict | None:
             """Add *usage* to cumulative totals if this id has not been counted.
@@ -817,6 +819,8 @@ class DeerFlowClient:
                 msg_id = getattr(msg_chunk, "id", None)
 
                 if isinstance(msg_chunk, AIMessage):
+                    if nir_message_gate.suppresses(msg_chunk):
+                        continue
                     text = self._extract_text(msg_chunk.content)
                     additional_kwargs = self._serialize_additional_kwargs(msg_chunk)
                     counted_usage = _account_usage(msg_id, msg_chunk.usage_metadata)
@@ -852,8 +856,15 @@ class DeerFlowClient:
 
             # mode == "values"
             messages = chunk.get("messages", [])
+            authoritative_nir_message = nir_message_gate.observe_values(chunk)
+            publish_values_snapshot = nir_message_gate.allows_values(chunk)
 
             for msg in messages:
+                if nir_message_gate.active and msg is messages[-1] and isinstance(msg, AIMessage) and authoritative_nir_message is None:
+                    # The complete NIR response still fails the evidence gate.
+                    # Do not mark its id as seen: after_model may replace it in
+                    # the next values snapshot while preserving the same id.
+                    continue
                 msg_id = getattr(msg, "id", None)
                 if msg_id and msg_id in seen_ids:
                     continue
@@ -908,15 +919,18 @@ class DeerFlowClient:
                 elif isinstance(msg, ToolMessage):
                     yield self._tool_message_event(msg)
 
-            # Emit a values event for each state snapshot
-            yield StreamEvent(
-                type="values",
-                data={
-                    "title": chunk.get("title"),
-                    "messages": [self._serialize_message(m) for m in messages],
-                    "artifacts": chunk.get("artifacts", []),
-                },
-            )
+            # An invalid raw NIR answer is replaced by after_model in the next
+            # snapshot; exposing this intermediate values payload would bypass
+            # the same grounding gate applied to messages-mode chunks.
+            if publish_values_snapshot:
+                yield StreamEvent(
+                    type="values",
+                    data={
+                        "title": chunk.get("title"),
+                        "messages": [self._serialize_message(m) for m in messages],
+                        "artifacts": chunk.get("artifacts", []),
+                    },
+                )
 
         yield StreamEvent(type="end", data={"usage": cumulative_usage})
 

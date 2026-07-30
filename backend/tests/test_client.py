@@ -224,6 +224,44 @@ class TestStream:
         msg_events = _ai_events(events)
         assert msg_events[0].data["content"] == "Hello!"
 
+    def test_nir_stream_withholds_unsupported_raw_answer(self, client):
+        """NIR streams expose only the complete response that passes evidence grounding."""
+        workflow = {
+            "attempt_evidence": {
+                "validation_scope": "independent_holdout_not_external",
+                "metrics_summary": {"R2_val": 0.91234},
+            }
+        }
+        human = HumanMessage(content="Summarize the result", id="h-1")
+        raw = AIMessage(
+            content="External validation R2=0.99; production-ready.",
+            id="ai-nir",
+        )
+        corrected = AIMessage(
+            content="Internal holdout R2=0.91234; this is not external validation.",
+            id="ai-nir",
+        )
+        agent = _make_agent_mock(
+            [
+                ("values", {"messages": [human], "nir_workflow": workflow}),
+                ("messages", (raw, {})),
+                ("values", {"messages": [human, raw], "nir_workflow": workflow}),
+                ("values", {"messages": [human, corrected], "nir_workflow": workflow}),
+            ]
+        )
+
+        with (
+            patch.object(client, "_ensure_agent"),
+            patch.object(client, "_agent", agent),
+        ):
+            events = list(client.stream("Summarize the result", thread_id="nir-thread"))
+
+        serialized = json.dumps([event.data for event in events], ensure_ascii=False)
+        assert "0.99" not in serialized
+        assert "production-ready" not in serialized
+        assert "0.91234" in serialized
+        assert [event.data["content"] for event in _ai_events(events)] == ["Internal holdout R2=0.91234; this is not external validation."]
+
     def test_custom_events_are_forwarded(self, client):
         """stream() forwards custom stream events alongside normal values output."""
         ai = AIMessage(content="Hello!", id="ai-1")

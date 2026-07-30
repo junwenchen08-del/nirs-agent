@@ -6,6 +6,10 @@
 [![nir-core](https://img.shields.io/badge/nir--core-0.1.0-blue)](./nir_core/pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
+最终自然语言回答也会经过确定性证据门禁：指标数值、验证范围和模型产物路径必须来自当前
+`attempt_evidence`。违规回答会被当前证据摘要替换并留下审计事件；真实对话评估导出会
+保存最终 `response_text`，并与在线门禁共用同一校验器。
+
 ## 验证协议与当前运行证据
 
 智能体会在运行时强制执行验证目标：`internal_holdout` 只能使用同一数据集的独立留出

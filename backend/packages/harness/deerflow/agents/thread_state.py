@@ -69,6 +69,7 @@ class NIRWorkflowState(TypedDict):
     run_ids: list[str]
     trace_ids: list[str]
     tool_observations: list[dict]
+    response_guard_events: list[dict]
     attempt: int
     max_attempts: int
     audit_status: Literal["pending", "passed", "failed"]
@@ -129,6 +130,7 @@ _NIR_STAGE_RANK = {
 }
 _NIR_HISTORY_LIMIT = 50
 _NIR_TOOL_OBSERVATION_LIMIT = 100
+_NIR_RESPONSE_GUARD_LIMIT = 20
 
 
 def _dedupe_ordered(values: list | None) -> list:
@@ -190,6 +192,12 @@ def _merge_nir_workflow_evidence(
     merged["run_ids"] = _dedupe_ordered([*(existing.get("run_ids") or []), *(new.get("run_ids") or [])])
     merged["trace_ids"] = _dedupe_ordered([*(existing.get("trace_ids") or []), *(new.get("trace_ids") or [])])
     merged["tool_observations"] = _dedupe_ordered([*(existing.get("tool_observations") or []), *(new.get("tool_observations") or [])])[-_NIR_TOOL_OBSERVATION_LIMIT:]
+    merged["response_guard_events"] = _dedupe_ordered(
+        [
+            *(existing.get("response_guard_events") or []),
+            *(new.get("response_guard_events") or []),
+        ]
+    )[-_NIR_RESPONSE_GUARD_LIMIT:]
     merged["history"] = _dedupe_ordered([*(existing.get("history") or []), *(new.get("history") or [])])[-_NIR_HISTORY_LIMIT:]
     merged["updated_at"] = max(str(existing.get("updated_at") or ""), str(new.get("updated_at") or "")) or preferred.get("updated_at")
     return merged  # type: ignore[return-value]

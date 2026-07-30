@@ -27,6 +27,7 @@ from typing import Any, Literal, cast
 from langgraph.checkpoint.base import empty_checkpoint
 
 from deerflow.agents.goal_state import GoalEvaluation, GoalState
+from deerflow.community.nir.response_grounding import NIRStreamMessageGate
 from deerflow.config.app_config import AppConfig
 from deerflow.runtime.cancellation import register_run_cancellation, unregister_run_cancellation
 from deerflow.runtime.goal import (
@@ -405,6 +406,12 @@ async def run_agent(
                 seen.add(m)
                 deduped.append(m)
         lg_modes = deduped
+        publish_values = "values" in requested_modes
+        if "messages" in lg_modes and "values" not in lg_modes:
+            # NIR answer grounding needs complete values snapshots before any
+            # model text can be released. Keep this mode internal when the
+            # caller requested messages only.
+            lg_modes.append("values")
 
         logger.info("Run %s: streaming with modes %s (requested: %s)", run_id, lg_modes, requested_modes)
 
@@ -414,6 +421,26 @@ async def run_agent(
         subagent_events = _SubagentEventBuffer(event_store, thread_id, run_id)
 
         goal_evaluator_model: Any | None = None
+        initial_nir_workflow = graph_input.get("nir_workflow") if isinstance(graph_input, dict) else None
+        if not isinstance(initial_nir_workflow, dict) and isinstance(pre_run_snapshot, dict):
+            checkpoint = pre_run_snapshot.get("checkpoint")
+            channel_values = checkpoint.get("channel_values") if isinstance(checkpoint, dict) else None
+            if isinstance(channel_values, dict):
+                initial_nir_workflow = channel_values.get("nir_workflow")
+        nir_message_gate = NIRStreamMessageGate(initial_nir_workflow)
+
+        async def _publish_authoritative_nir_message(values_chunk: Any) -> bool:
+            if "messages" not in lg_modes:
+                nir_message_gate.observe_values(values_chunk)
+                return nir_message_gate.allows_values(values_chunk)
+            message = nir_message_gate.observe_values(values_chunk)
+            if message is not None:
+                await bridge.publish(
+                    run_id,
+                    _lg_mode_to_sse_event("messages"),
+                    serialize((message, {"langgraph_node": "nir_response_grounding"}), mode="messages"),
+                )
+            return nir_message_gate.allows_values(values_chunk)
 
         def _get_goal_evaluator_model() -> Any:
             nonlocal goal_evaluator_model
@@ -434,8 +461,16 @@ async def run_agent(
                         logger.info("Run %s abort requested — stopping", run_id)
                         break
                     llm_error_fallback_message = llm_error_fallback_message or _extract_llm_error_fallback_message(chunk)
+                    if single_mode == "messages":
+                        message = chunk[0] if isinstance(chunk, tuple) and len(chunk) == 2 else chunk
+                        if nir_message_gate.suppresses(message):
+                            continue
+                    publish_values_chunk = True
+                    if single_mode == "values":
+                        publish_values_chunk = await _publish_authoritative_nir_message(chunk)
                     sse_event = _lg_mode_to_sse_event(single_mode)
-                    await bridge.publish(run_id, sse_event, serialize(chunk, mode=single_mode))
+                    if single_mode != "values" or (publish_values and publish_values_chunk):
+                        await bridge.publish(run_id, sse_event, serialize(chunk, mode=single_mode))
                     if single_mode == "custom":
                         await subagent_events.add(chunk)
                 return
@@ -456,8 +491,16 @@ async def run_agent(
                     continue
 
                 llm_error_fallback_message = llm_error_fallback_message or _extract_llm_error_fallback_message(chunk)
+                if mode == "messages":
+                    message = chunk[0] if isinstance(chunk, tuple) and len(chunk) == 2 else chunk
+                    if nir_message_gate.suppresses(message):
+                        continue
+                publish_values_chunk = True
+                if mode == "values":
+                    publish_values_chunk = await _publish_authoritative_nir_message(chunk)
                 sse_event = _lg_mode_to_sse_event(mode)
-                await bridge.publish(run_id, sse_event, serialize(chunk, mode=mode))
+                if mode != "values" or (publish_values and publish_values_chunk):
+                    await bridge.publish(run_id, sse_event, serialize(chunk, mode=mode))
                 if mode == "custom":
                     await subagent_events.add(chunk)
 
