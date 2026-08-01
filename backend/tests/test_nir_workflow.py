@@ -235,6 +235,57 @@ def test_complete_calibration_requires_explicit_approval_before_registration():
     assert state["approval_status"] == "approved"
 
 
+def test_retry_execution_signature_ignores_transport_paths() -> None:
+    steps, model_args, signature = retry_execution_signature(
+        tool_name="nir_train_partitioned_model",
+        method="auto",
+        pipeline_steps=["snv"],
+        model_args={
+            "file_path": "/mnt/user-data/uploads/mango.csv",
+            "model_output": "/mnt/user-data/outputs/retry.pkl",
+            "metrics_output": "/mnt/user-data/outputs/retry.json",
+            "x_cols": "309:1149",
+            "y_col": "DM",
+        },
+    )
+    _same_steps, same_model_args, same_signature = retry_execution_signature(
+        tool_name="nir_train_partitioned_model",
+        method="auto",
+        pipeline_steps=["snv"],
+        model_args={"x_cols": "309:1149", "y_col": "DM"},
+    )
+
+    assert steps == [{"method": "snv", "params": {}}]
+    assert model_args == same_model_args == {"x_cols": "309:1149", "y_col": "DM"}
+    assert signature == same_signature
+
+
+def test_retry_execution_signature_normalizes_tool_defaults_and_aliases() -> None:
+    _steps, _args, implicit_default = retry_execution_signature(
+        tool_name="nir_train_model",
+        method=None,
+        pipeline_steps=["snv"],
+    )
+    _steps, _args, explicit_default = retry_execution_signature(
+        tool_name="nir_train_model",
+        method="pls",
+        pipeline_steps=["snv"],
+    )
+    _steps, _args, cnn_alias = retry_execution_signature(
+        tool_name="nir_train_model",
+        method="1d-cnn",
+        pipeline_steps=["snv"],
+    )
+    _steps, _args, canonical_cnn = retry_execution_signature(
+        tool_name="nir_train_model",
+        method="cnn",
+        pipeline_steps=["snv"],
+    )
+
+    assert implicit_default == explicit_default
+    assert cnn_alias == canonical_cnn
+
+
 def test_failed_attempt_requires_reflection_and_bound_retry_plan_until_budget_is_exhausted():
     state = start_workflow(
         task_type="analysis",
@@ -644,6 +695,57 @@ def test_agent_view_bounds_multi_target_attempt_evidence():
     assert len(projected["attempt_evidence"]["metrics_summary"]["per_component"]) == 5
 
 
+def test_agent_view_exposes_bounded_attempt_evidence_for_grounded_summary():
+    state = start_workflow(
+        task_type="calibration",
+        data_path="mango.csv",
+        validation_goal="external_validation",
+    )
+    state["attempts"] = [
+        {
+            "attempt": index,
+            "passed": False,
+            "protocol": "named_partition_external_validation",
+            "validation_scope": "independent_external_validation",
+            "metrics_summary": {"external": {"R2": index / 10}},
+            "model_path": f"/mnt/user-data/outputs/model-v{index}.pkl",
+            "metrics_path": f"/mnt/user-data/outputs/metrics-v{index}.json",
+            "execution_signature": f"secret-{index}",
+        }
+        for index in range(1, 13)
+    ]
+
+    projected = workflow_agent_view(state)
+
+    assert len(projected["attempts"]) == 10
+    assert projected["attempts"][0]["attempt"] == 3
+    assert projected["attempts"][-1]["metrics_summary"]["external"]["R2"] == 1.2
+    assert "execution_signature" not in projected["attempts"][-1]
+
+
+def test_agent_view_preserves_durable_data_audit_evidence() -> None:
+    state = start_workflow(
+        task_type="calibration",
+        data_path="mango.csv",
+        validation_goal="external_validation",
+    )
+    state = transition_workflow(
+        state,
+        action="record_audit_evidence",
+        audit_evidence={
+            "raw_wavelength_range": [285.0, 1200.0],
+            "usable_wavelength_range": [309.0, 1149.0],
+            "constant_wavelength_count": 25,
+            "usable_wavelength_count": 281,
+        },
+    )
+
+    projected = workflow_agent_view(state)
+
+    assert projected["audit_evidence"]["raw_wavelength_range"] == [285.0, 1200.0]
+    assert projected["audit_evidence"]["usable_wavelength_range"] == [309.0, 1149.0]
+
+
 def test_workflow_tool_returns_compact_agent_view_but_persists_full_state():
     state = start_workflow(
         task_type="calibration",
@@ -776,6 +878,34 @@ def test_nir_workflow_reducer_preserves_evidence_from_lower_revision():
     assert merged["tool_observations"] == [{"name": "nir_inspect", "status": "success"}]
     assert merged["response_guard_events"][0]["message_id"] == "answer-unsafe"
     assert merged["run_ids"] == ["run-lower"]
+
+
+def test_nir_workflow_reducer_prefers_richer_data_audit_evidence() -> None:
+    state = start_workflow(task_type="calibration", data_path="mango.csv")
+    inspected = {
+        **state,
+        "revision": 2,
+        "audit_evidence": {
+            "source_tool": "nir_inspect",
+            "raw_wavelength_range": [285.0, 1200.0],
+        },
+    }
+    loaded = {
+        **state,
+        "revision": 2,
+        "audit_evidence": {
+            "source_tool": "nir_load_data",
+            "raw_wavelength_range": [285.0, 1200.0],
+            "usable_wavelength_range": [309.0, 1149.0],
+            "constant_wavelength_count": 25,
+            "usable_wavelength_count": 281,
+        },
+    }
+
+    merged = merge_nir_workflow(inspected, loaded)
+
+    assert merged is not None
+    assert merged["audit_evidence"] == loaded["audit_evidence"]
 
 
 def test_model_registration_rejects_unapproved_workflow_before_file_access():

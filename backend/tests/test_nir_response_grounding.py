@@ -142,6 +142,117 @@ def test_response_rejects_metric_value_not_present_in_current_attempt() -> None:
     assert "metric_value_mismatch:rpd" in verdict.violations
 
 
+def test_response_accepts_bounded_metrics_and_artifacts_from_prior_attempts() -> None:
+    workflow = _review_workflow(validation_goal="external_validation", passed=False)
+    workflow["stage"] = "blocked"
+    workflow["next_action"] = "report_best_effort"
+    workflow["attempts"] = [
+        {
+            "attempt": 1,
+            "passed": False,
+            "grade": "D",
+            "protocol": "named_partition_external_validation",
+            "validation_scope": "independent_external_validation",
+            "metrics_summary": {
+                "external": {"R2": 0.8326, "RMSE": 1.092, "RPD": 2.44, "bias": -0.021},
+                "passed": False,
+            },
+            "model_path": "/mnt/user-data/outputs/model-v1.pkl",
+            "metrics_path": "/mnt/user-data/outputs/metrics-v1.json",
+        },
+        {
+            "attempt": 2,
+            "passed": False,
+            "grade": "D",
+            "protocol": "named_partition_external_validation",
+            "validation_scope": "independent_external_validation",
+            "metrics_summary": {
+                "external": {"R2": 0.7083, "RMSE": 1.441, "RPD": 1.85, "bias": -0.216},
+                "passed": False,
+            },
+            "model_path": "/mnt/user-data/outputs/model-v2.pkl",
+            "metrics_path": "/mnt/user-data/outputs/metrics-v2.json",
+        },
+    ]
+
+    verdict = validate_nir_response(
+        "独立外部验证共两次：尝试1 R²=0.8326、RMSE=1.092、RPD=2.44、偏差=-0.021，"
+        "产物 `/mnt/user-data/outputs/model-v1.pkl` 和 `/mnt/user-data/outputs/metrics-v1.json`；"
+        "尝试2 R²=0.7083、RMSE=1.441、RPD=1.85、偏差=-0.216。两次质量门禁均未通过。",
+        workflow,
+    )
+
+    assert verdict.passed is True
+    assert verdict.violations == ()
+
+
+def test_response_still_rejects_metric_absent_from_all_attempt_evidence() -> None:
+    workflow = _review_workflow(validation_goal="external_validation", passed=False)
+    workflow["stage"] = "blocked"
+    workflow["next_action"] = "report_best_effort"
+    workflow["attempts"] = [
+        {
+            "attempt": 1,
+            "metrics_summary": {"external": {"R2": 0.8326}},
+            "model_path": "/mnt/user-data/outputs/model-v1.pkl",
+            "metrics_path": "/mnt/user-data/outputs/metrics-v1.json",
+        }
+    ]
+
+    verdict = validate_nir_response(
+        "独立外部验证尝试1 R²=0.9999。",
+        workflow,
+    )
+
+    assert verdict.passed is False
+    assert "metric_value_mismatch:r2" in verdict.violations
+
+
+def test_response_accepts_quality_thresholds_recorded_with_attempt() -> None:
+    workflow = _review_workflow(validation_goal="external_validation", passed=False)
+    workflow["stage"] = "blocked"
+    workflow["next_action"] = "report_best_effort"
+    workflow["attempt_evidence"]["metrics_summary"]["thresholds_used"] = {
+        "min_r2": 0.90,
+        "min_rpd": 4.0,
+    }
+    workflow["attempts"][0]["metrics_summary"]["thresholds_used"] = {
+        "min_r2": 0.90,
+        "min_rpd": 4.0,
+    }
+
+    verdict = validate_nir_response(
+        "本次独立外部验证未通过；质量门槛为 R²=0.90、RPD=4.0。",
+        workflow,
+    )
+
+    assert verdict.passed is True
+
+
+def test_response_validates_raw_and_usable_wavelength_audit_evidence() -> None:
+    workflow = _review_workflow()
+    workflow["audit_evidence"] = {
+        "raw_wavelength_range": [285.0, 1200.0],
+        "usable_wavelength_range": [309.0, 1149.0],
+        "constant_wavelength_count": 25,
+        "usable_wavelength_count": 281,
+    }
+
+    supported = validate_nir_response(
+        "原始采集光谱范围为 285–1200 nm，实际可用光谱范围为 309–1149 nm；共有 25 个恒定波长列和 281 个可用波长。",
+        workflow,
+    )
+    unsupported = validate_nir_response(
+        "原始采集光谱范围为 285–1200 nm，实际可用光谱范围为 285–1200 nm；constant_wavelength_count=0，共有 306 个可用波长。",
+        workflow,
+    )
+
+    assert supported.passed is True
+    assert "wavelength_range_mismatch:usable" in unsupported.violations
+    assert "wavelength_count_mismatch:constant" in unsupported.violations
+    assert "wavelength_count_mismatch:usable" in unsupported.violations
+
+
 def test_internal_holdout_response_rejects_external_validation_overclaim() -> None:
     verdict = validate_nir_response(
         "该模型已经完成独立外部验证，可以用于外部样品。",
@@ -288,6 +399,62 @@ def test_grounded_replacement_contains_only_current_evidence() -> None:
     assert "0.99" not in rendered
     assert "不是外部验证" in rendered
     assert "/mnt/user-data/outputs/model.pkl" in rendered
+    assert validate_nir_response(rendered, workflow).passed is True
+
+
+def test_grounded_replacement_summarizes_all_bounded_attempts() -> None:
+    workflow = _review_workflow(validation_goal="external_validation", passed=False)
+    workflow["stage"] = "blocked"
+    workflow["next_action"] = "report_best_effort"
+    workflow["attempts"] = [
+        {
+            "attempt": 1,
+            "passed": False,
+            "grade": "D",
+            "protocol": "named_partition_external_validation",
+            "validation_scope": "independent_external_validation",
+            "metrics_summary": {"external": {"R2": 0.8326, "RMSE": 1.092, "RPD": 2.44}},
+            "model_path": "/mnt/user-data/outputs/model-v1.pkl",
+            "metrics_path": "/mnt/user-data/outputs/metrics-v1.json",
+        },
+        {
+            "attempt": 2,
+            "passed": False,
+            "grade": "D",
+            "protocol": "named_partition_external_validation",
+            "validation_scope": "independent_external_validation",
+            "metrics_summary": {"external": {"R2": 0.7682, "RMSE": 1.285, "RPD": 2.08}},
+            "model_path": "/mnt/user-data/outputs/model-v2.pkl",
+            "metrics_path": "/mnt/user-data/outputs/metrics-v2.json",
+        },
+    ]
+
+    rendered = render_grounded_nir_response(workflow, violations=("metric_value_mismatch:r2",))
+
+    assert "尝试 1" in rendered
+    assert "0.8326" in rendered
+    assert "尝试 2" in rendered
+    assert "0.7682" in rendered
+    assert validate_nir_response(rendered, workflow).passed is True
+
+
+def test_grounded_replacement_includes_durable_wavelength_ranges() -> None:
+    workflow = _review_workflow()
+    workflow["audit_evidence"] = {
+        "raw_wavelength_range": [285.0, 1200.0],
+        "usable_wavelength_range": [309.0, 1149.0],
+        "constant_wavelength_count": 25,
+        "usable_wavelength_count": 281,
+    }
+
+    rendered = render_grounded_nir_response(
+        workflow,
+        violations=("wavelength_count_mismatch:constant",),
+    )
+
+    assert "原始采集光谱范围：285.0–1200.0 nm" in rendered
+    assert "实际可用光谱范围：309.0–1149.0 nm" in rendered
+    assert "恒定波长列 25 个；可用波长 281 个" in rendered
     assert validate_nir_response(rendered, workflow).passed is True
 
 

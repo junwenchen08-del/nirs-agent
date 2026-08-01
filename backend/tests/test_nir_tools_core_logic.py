@@ -222,6 +222,7 @@ def test_partitioned_model_uses_named_external_split(tmp_path: Path):
     assert payload["evidence"]["metrics_sha256"] == manifest["metrics_sha256"]
     assert payload["evidence"]["training_data_sha256"] == metrics["training_data_hash"]
     assert isinstance(payload["passed"], bool)
+    assert payload["thresholds_used"] == metrics["quality"]["thresholds_used"]
     assert metrics["partitions"]["train"]["n_samples"] == 18
     assert metrics["partitions"]["tuning"]["n_samples"] == 9
     assert metrics["partitions"]["external_test"]["n_samples"] == 9
@@ -283,6 +284,7 @@ def test_auto_split_model_persists_deterministic_holdout_protocol(tmp_path: Path
     assert payload["evidence"]["model_sha256"] == manifest["sha256"]
     assert payload["evidence"]["metrics_sha256"] == manifest["metrics_sha256"]
     assert payload["evidence"]["training_data_sha256"] == metrics["training_data_hash"]
+    assert payload["thresholds_used"] == metrics["quality"]["thresholds_used"]
     assert [partitions[name]["n_samples"] for name in ("calibration", "tuning", "holdout_test")] == [56, 12, 12]
     assert not (split_indices[0] & split_indices[1] or split_indices[0] & split_indices[2] or split_indices[1] & split_indices[2])
     assert set.union(*split_indices) == set(range(n_samples))

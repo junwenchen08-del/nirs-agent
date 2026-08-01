@@ -64,6 +64,7 @@ class NIRWorkflowState(TypedDict):
     data_path: NotRequired[str | None]
     model_path: NotRequired[str | None]
     metrics_path: NotRequired[str | None]
+    audit_evidence: NotRequired[dict | None]
     attempt_evidence: NotRequired[dict | None]
     attempts: list[dict]
     reflection: NotRequired[dict | None]
@@ -194,6 +195,16 @@ def _merge_nir_workflow_evidence(
 ) -> NIRWorkflowState:
     """Merge bounded audit evidence without overwriting preferred workflow fields."""
     merged: dict = dict(preferred)
+    audit_candidates = [evidence for evidence in (existing.get("audit_evidence"), new.get("audit_evidence")) if isinstance(evidence, dict)]
+    if audit_candidates:
+        merged["audit_evidence"] = max(
+            audit_candidates,
+            key=lambda evidence: (
+                int(evidence.get("usable_wavelength_range") is not None),
+                int(evidence.get("raw_wavelength_range") is not None),
+                len(evidence),
+            ),
+        )
     merged["knowledge_evidence"] = _dedupe_ordered([*(existing.get("knowledge_evidence") or []), *(new.get("knowledge_evidence") or [])])
     merged["attempts"] = _dedupe_ordered([*(existing.get("attempts") or []), *(new.get("attempts") or [])])[-_NIR_RETRY_RECORD_LIMIT:]
     merged["reflections"] = _dedupe_ordered([*(existing.get("reflections") or []), *(new.get("reflections") or [])])[-_NIR_RETRY_RECORD_LIMIT:]

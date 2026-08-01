@@ -24,6 +24,8 @@ from deerflow.community.nir.response_grounding import (
 from deerflow.community.nir.workflow import (
     NIRWorkflowError,
     block_workflow_after_continuation_failure,
+    block_workflow_after_retry_plan_mismatch,
+    normalize_retry_model_method,
     record_response_guard,
     record_tool_observation,
     retry_execution_signature,
@@ -76,20 +78,12 @@ _TOOL_VALIDATION_PROTOCOL = {
     "nir_analyze_collection": ("mat_collection_sequential_compact", "independent_holdout_not_external"),
     "nir_compare": ("preprocessing_comparison_three_way_holdout", "independent_holdout_not_external"),
 }
-_MODEL_DEFAULTS = {
-    "nir_train_auto_split_model": "auto",
-    "nir_train_model": "pls",
-    "nir_train_partitioned_model": "auto",
-    "nir_train_multi_model": "pls",
-    "nir_analyze": "auto",
-    "nir_analyze_collection": "auto",
-    "nir_compare": "pls",
-}
 _MAX_WORKFLOW_CONTINUATION_REMINDERS = 2
 _GROUPING_SPLIT_CONFLICT_CODE = "nir_grouping_split_column_conflict"
 _MODEL_SUBSTITUTION_CODE = "nir_model_substitution_requires_approval"
 _VALIDATION_GOAL_CONFLICT_CODE = "nir_validation_goal_conflict"
 _RETRY_PLAN_MISMATCH_CODE = "nir_retry_plan_mismatch"
+_RETRY_PLAN_MISMATCH_EXHAUSTED_CODE = "nir_retry_plan_mismatch_exhausted"
 _MODEL_ALIASES = {
     "cnn": ("cnn", "1dcnn", "一维卷积"),
     "mlp": ("mlp", "多层感知机"),
@@ -208,9 +202,7 @@ def _requested_model_method(request: ToolCallRequest) -> str | None:
         return None
     args = request.tool_call.get("args")
     args = args if isinstance(args, Mapping) else {}
-    raw = args.get("method", _MODEL_DEFAULTS[tool_name])
-    method = str(raw or _MODEL_DEFAULTS[tool_name]).strip().lower()
-    return "cnn" if method in {"1d-cnn", "1d_cnn"} else method
+    return normalize_retry_model_method(tool_name, args.get("method"))
 
 
 def _request_execution_signature(
@@ -221,25 +213,40 @@ def _request_execution_signature(
     pipeline_steps = args.get("pipeline_steps")
     if pipeline_steps is None:
         pipeline_steps = ["tool_default"]
-    ignored_keys = {
-        "method",
-        "pipeline_steps",
-        "input_path",
-        "file_path",
-        "data_path",
-        "output_path",
-        "output_dir",
-        "model_path",
-        "metrics_path",
-        "attempt",
-        "tool_call_id",
-    }
-    model_args = {str(key): value for key, value in args.items() if key not in ignored_keys}
     return retry_execution_signature(
         tool_name=str(request.tool_call.get("name") or ""),
         method=_requested_model_method(request),
         pipeline_steps=pipeline_steps,
-        model_args=model_args,
+        model_args=args,
+    )
+
+
+def _retry_plan_mismatch_denial(
+    request: ToolCallRequest,
+    workflow: Mapping[str, Any],
+    policy: _ToolPolicy,
+    *,
+    error: str,
+    details: Mapping[str, Any] | None = None,
+) -> ToolMessage:
+    observations = workflow.get("tool_observations")
+    latest = observations[-1] if isinstance(observations, list) and observations else None
+    repeated = bool(isinstance(latest, Mapping) and latest.get("name") == request.tool_call.get("name") and latest.get("code") == _RETRY_PLAN_MISMATCH_CODE)
+    denial_details = dict(details or {})
+    if repeated:
+        denial_details.update(
+            {
+                "action_required": "stop_retrying_and_report_runtime_blocker",
+                "mismatch_count": 2,
+            }
+        )
+    return _denied_message(
+        request,
+        code=_RETRY_PLAN_MISMATCH_EXHAUSTED_CODE if repeated else _RETRY_PLAN_MISMATCH_CODE,
+        error=error,
+        workflow={**workflow, "stage": "blocked", "next_action": "report_best_effort"} if repeated else workflow,
+        policy=policy,
+        details=denial_details,
     )
 
 
@@ -252,36 +259,41 @@ def _deny_retry_plan_mismatch(
         return None
     plan = workflow.get("retry_plan")
     if not isinstance(plan, Mapping) or plan.get("status") != "ready":
-        return _denied_message(
+        return _retry_plan_mismatch_denial(
             request,
-            code=_RETRY_PLAN_MISMATCH_CODE,
-            error="A ready retry plan bound to the latest failed attempt is required.",
             workflow=workflow,
             policy=policy,
+            error="A ready retry plan bound to the latest failed attempt is required.",
             details={"action_required": "record_retry_plan_then_plan_ready"},
         )
     try:
         _steps, _model_args, signature = _request_execution_signature(request)
+        _planned_steps, _planned_model_args, canonical_plan_signature = retry_execution_signature(
+            tool_name=str(plan.get("tool_name") or ""),
+            method=str(plan.get("method") or "auto"),
+            pipeline_steps=plan.get("pipeline_steps"),
+            model_args=plan.get("model_args"),
+        )
     except NIRWorkflowError as exc:
-        return _denied_message(
+        return _retry_plan_mismatch_denial(
             request,
-            code=_RETRY_PLAN_MISMATCH_CODE,
-            error=str(exc),
             workflow=workflow,
             policy=policy,
+            error=str(exc),
         )
-    if plan.get("source_attempt") == workflow.get("attempt") and plan.get("tool_name") == request.tool_call.get("name") and plan.get("execution_signature") == signature:
+    accepted_signatures = {plan.get("execution_signature"), canonical_plan_signature}
+    if plan.get("source_attempt") == workflow.get("attempt") and plan.get("tool_name") == request.tool_call.get("name") and signature in accepted_signatures:
         return None
-    return _denied_message(
+    return _retry_plan_mismatch_denial(
         request,
-        code=_RETRY_PLAN_MISMATCH_CODE,
-        error="The modeling call does not match the active retry plan.",
         workflow=workflow,
         policy=policy,
+        error="The modeling call does not match the active retry plan.",
         details={
             "plan_id": plan.get("plan_id"),
             "planned_tool": plan.get("tool_name"),
-            "planned_signature": plan.get("execution_signature"),
+            "planned_signature": canonical_plan_signature,
+            "recorded_plan_signature": plan.get("execution_signature"),
             "actual_signature": signature,
             "action_required": "execute_exactly_the_recorded_retry_plan",
         },
@@ -660,7 +672,18 @@ def _model_attempt_update(
         value = str(emitted_evidence.get(key) or "").lower()
         if len(value) == 64 and all(character in "0123456789abcdef" for character in value):
             digest_fields[key] = value
-    metric_keys = ("R2_val", "RPD", "RMSEC", "RMSECV", "RMSEP", "holdout", "external", "grade", "passed")
+    metric_keys = (
+        "R2_val",
+        "RPD",
+        "RMSEC",
+        "RMSECV",
+        "RMSEP",
+        "holdout",
+        "external",
+        "grade",
+        "passed",
+        "thresholds_used",
+    )
     metrics_summary = {key: result.get(key) for key in metric_keys if result.get(key) is not None}
     if isinstance(result.get("overall"), Mapping):
         metrics_summary["overall"] = {key: result["overall"].get(key) for key in ("passed", "n_passed", "n_targets") if result["overall"].get(key) is not None}
@@ -714,12 +737,56 @@ def _model_attempt_update(
     )
 
 
+def _data_audit_update(
+    request: ToolCallRequest,
+    workflow: NIRWorkflowState,
+    payload: Mapping[str, Any],
+) -> NIRWorkflowState:
+    """Persist bounded structural facts needed by the final response."""
+
+    tool_name = str(request.tool_call.get("name") or "")
+    args = request.tool_call.get("args")
+    args = args if isinstance(args, Mapping) else {}
+    payload_fields = (
+        "n_samples",
+        "n_wavelengths",
+        "raw_wavelength_range",
+        "usable_wavelength_range",
+        "constant_wavelength_count",
+        "usable_wavelength_count",
+        "wavelength_range_semantics",
+        "y_names",
+        "y_range",
+        "y_ranges",
+        "y_separated",
+        "wv_separated",
+    )
+    evidence = {
+        "source_tool": tool_name,
+        "data_path": str(args.get("file_path") or args.get("data_path") or workflow.get("data_path") or ""),
+        **{key: payload[key] for key in payload_fields if payload.get(key) is not None},
+    }
+    if "raw_wavelength_range" not in evidence and payload.get("wavelength_range") is not None:
+        evidence["raw_wavelength_range"] = payload["wavelength_range"]
+    for key in ("y_col", "y_cols", "x_cols", "wv_row", "x_var", "y_var", "wv_var", "subset", "transpose"):
+        if args.get(key) is not None:
+            evidence[key] = args[key]
+    return transition_workflow(
+        workflow,
+        action="record_audit_evidence",
+        audit_evidence=evidence,
+        notes=f"Automatically recorded bounded {tool_name} evidence.",
+    )
+
+
 def _next_workflow(
     request: ToolCallRequest,
     workflow: NIRWorkflowState,
     payload: Mapping[str, Any],
 ) -> NIRWorkflowState | None:
     tool_name = str(request.tool_call.get("name", ""))
+    if tool_name in {"nir_inspect", "nir_load_data"}:
+        return _data_audit_update(request, workflow, payload)
     if tool_name in _MODELING_TOOLS:
         return _model_attempt_update(request, workflow, payload)
     if tool_name == "nir_reflect":
@@ -787,6 +854,13 @@ def _record_observation(request: ToolCallRequest, result: ToolMessage | Command)
         except (TypeError, ValueError):
             pass
     status = "error" if message is not None and (message.status == "error" or payload.get("status") == "error") else "success"
+    if payload.get("code") == _RETRY_PLAN_MISMATCH_EXHAUSTED_CODE:
+        details = payload.get("details")
+        plan_id = details.get("plan_id") if isinstance(details, Mapping) else None
+        workflow = block_workflow_after_retry_plan_mismatch(
+            workflow,
+            plan_id=str(plan_id) if plan_id else None,
+        )
     observed = record_tool_observation(
         workflow,
         name=tool_name,

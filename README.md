@@ -6,8 +6,9 @@
 [![nir-core](https://img.shields.io/badge/nir--core-0.1.0-blue)](./nir_core/pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-最终自然语言回答也会经过确定性证据门禁：指标数值、验证范围和模型产物路径必须来自当前
-`attempt_evidence`。违规回答会被当前证据摘要替换并留下审计事件；真实对话评估导出会
+最终自然语言回答也会经过确定性证据门禁：指标数值、质量阈值、验证范围和模型产物路径
+必须来自有界的历次尝试证据。智能体可以比较同一工作流内的多次真实实验，但不能引用
+证据账本以外的数值或产物。违规回答会被证据摘要替换并留下审计事件；真实对话评估导出会
 保存最终 `response_text`，并与在线门禁共用同一校验器。
 
 未通过质量门禁的建模尝试必须进入“反思—证据检索—重试计划—执行”闭环。反思输入由当前
@@ -265,6 +266,10 @@ CARS 的 Monte Carlo 子集使用 80% 训练样本，ARS 按权重从完整变�
 `input_preprocessed=true` 跳过流水线。metrics 和返回值会包含
 `wavelength_selection`、`wavelength_selection_decision`、候选方案的调优证据、
 `n_wavelengths_original`、`n_wavelengths_model`。测试集/外部测试集不参与是否采用波长选择的决策。
+数据加载摘要同时报告 `raw_wavelength_range` 和 `usable_wavelength_range`：前者覆盖所有采集列，
+后者仅由非恒定光谱列确定，并附带恒定列数和可用列数。这里的“可用范围”是信息范围说明，
+不代表恒定列已经从建模矩阵中删除。这些审查事实会持久化到工作流，最终回答中的光谱范围与
+波长数量必须与该证据一致，不能通过所选波长索引反推或臆测。
 
 模型产物还保存训练模型空间中的 PCA T²/Q 适用域参考。`nir_predict` 会在完成训练时的
 预处理和波长选择后，将新样本与该训练参考比较，并分别报告高杠杆漂移和未建模残差漂移；

@@ -13,9 +13,7 @@ from nir_core.io.writers import save_npz
 def test_load_csv_multiple_reference_columns_with_names(tmp_path: Path) -> None:
     path = tmp_path / "multi.csv"
     path.write_text(
-        "protein,moisture,oil,1100,1200,1300\n"
-        "10.1,12.0,4.1,0.10,0.20,0.30\n"
-        "10.8,11.5,4.4,0.15,0.25,0.35\n",
+        "protein,moisture,oil,1100,1200,1300\n10.1,12.0,4.1,0.10,0.20,0.30\n10.8,11.5,4.4,0.15,0.25,0.35\n",
         encoding="utf-8",
     )
 
@@ -43,9 +41,7 @@ def test_load_csv_keeps_wavelengths_aligned_with_selected_columns(
 ) -> None:
     path = tmp_path / "selected.csv"
     path.write_text(
-        ",,1000,1100,1200,1300\n"
-        "10.1,12.0,0.10,0.20,0.30,0.40\n"
-        "10.8,11.5,0.15,0.25,0.35,0.45\n",
+        ",,1000,1100,1200,1300\n10.1,12.0,0.10,0.20,0.30,0.40\n10.8,11.5,0.15,0.25,0.35,0.45\n",
         encoding="utf-8",
     )
 
@@ -89,3 +85,27 @@ def test_summary_y_range_1d_returns_scalar_range() -> None:
     assert summary["y_range"] == [8.0, 12.0]
     # y_ranges still populated for consistency (single-entry dict).
     assert summary["y_ranges"] == {"ref": [8.0, 12.0]}
+
+
+def test_summary_distinguishes_raw_and_usable_wavelength_ranges() -> None:
+    from nir_core.models import SpectralData
+
+    data = SpectralData(
+        X=np.array(
+            [
+                [7.0, 7.0, 0.10, 0.20, 3.0, 3.0],
+                [7.0, 7.0, 0.15, 0.30, 3.0, 3.0],
+                [7.0, 7.0, 0.12, 0.25, 3.0, 3.0],
+            ]
+        ),
+        wv=np.array([285.0, 300.0, 309.0, 1149.0, 1175.0, 1200.0]),
+    )
+
+    summary = data.summary()
+
+    assert summary["wavelength_range"] == [285.0, 1200.0]
+    assert summary["raw_wavelength_range"] == [285.0, 1200.0]
+    assert summary["usable_wavelength_range"] == [309.0, 1149.0]
+    assert summary["constant_wavelength_count"] == 4
+    assert summary["usable_wavelength_count"] == 2
+    assert summary["wavelength_range_semantics"] == ("raw includes all measured columns; usable spans non-constant columns only and does not imply those columns were removed")

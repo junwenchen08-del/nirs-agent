@@ -37,6 +37,33 @@ _LITERATURE_COMPARISON_RE = re.compile(
     r"|typical\s+(?:literature\s+)?range",
     re.IGNORECASE,
 )
+_WAVELENGTH_RANGE_RE = re.compile(
+    r"(?P<label>原始(?:采集)?(?:光谱|波长)?范围|实际可用(?:光谱|波长)?范围|"
+    r"可用(?:光谱|波长)?范围|raw\s+(?:spectral|wavelength)?\s*range|"
+    r"usable\s+(?:spectral|wavelength)?\s*range)"
+    r"[^0-9+-]{0,16}(?P<low>[+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*"
+    r"(?:–|—|-|~|至|到)\s*(?P<high>[+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*"
+    r"(?:nm|纳米)",
+    re.IGNORECASE,
+)
+_WAVELENGTH_COUNT_RE = re.compile(
+    r"(?P<count>\d+)\s*个\s*(?P<label>非恒定|可用|恒定|常量|无变异)\s*"
+    r"(?:波长|光谱(?:列)?|列)",
+    re.IGNORECASE,
+)
+_WAVELENGTH_KEY_COUNT_RE = re.compile(
+    r"(?P<label>constant_wavelength_count|usable_wavelength_count)\s*=\s*(?P<count>\d+)",
+    re.IGNORECASE,
+)
+_WAVELENGTH_LABEL_COUNT_RE = re.compile(
+    r"(?P<label>非恒定|可用|恒定|常量|无变异)\s*(?:波长|光谱(?:列)?|列)\s*"
+    r"(?P<count>\d+)\s*个",
+    re.IGNORECASE,
+)
+_NO_CONSTANT_WAVELENGTH_RE = re.compile(
+    r"(?:无|没有|不存在)\s*(?:恒定|常量|无变异)\s*(?:波长|光谱列)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -248,7 +275,11 @@ def _summary_values(summary: Mapping[str, Any]) -> dict[str, list[float]]:
             return
         key = re.sub(r"[\s_^²-]+", "", path[-1]).lower()
         parent = re.sub(r"[\s_^²-]+", "", path[-2]).lower() if len(path) > 1 else ""
-        if key.startswith("r2"):
+        if key in {"minr2", "r2threshold"}:
+            add("r2", value)
+        elif key in {"minrpd", "rpdthreshold"}:
+            add("rpd", value)
+        elif key.startswith("r2"):
             add("r2", value)
         elif key == "rpd":
             add("rpd", value)
@@ -272,6 +303,30 @@ def _summary_values(summary: Mapping[str, Any]) -> dict[str, list[float]]:
     return values
 
 
+def _attempt_evidence_records(workflow: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Return the bounded attempt ledger plus the latest evidence if needed."""
+
+    records = [item for item in (workflow.get("attempts") or []) if isinstance(item, Mapping)]
+    latest = workflow.get("attempt_evidence")
+    if isinstance(latest, Mapping):
+        latest_path = _normalized_path(latest.get("metrics_path"))
+        already_present = any(latest_path and _normalized_path(item.get("metrics_path")) == latest_path for item in records)
+        if not already_present:
+            records.append(latest)
+    return records[-10:]
+
+
+def _allowed_metric_values(records: list[Mapping[str, Any]]) -> dict[str, list[float]]:
+    allowed: dict[str, list[float]] = {}
+    for record in records:
+        summary = record.get("metrics_summary")
+        if not isinstance(summary, Mapping):
+            continue
+        for category, values in _summary_values(summary).items():
+            allowed.setdefault(category, []).extend(values)
+    return allowed
+
+
 def _claim_tolerance(raw_value: str, *, percent: bool) -> float:
     mantissa = re.split(r"[eE]", raw_value, maxsplit=1)[0]
     decimals = len(mantissa.split(".", maxsplit=1)[1]) if "." in mantissa else 0
@@ -291,6 +346,14 @@ def _has_positive_marker(text: str, pattern: re.Pattern[str]) -> bool:
 
 def _normalized_path(value: Any) -> str:
     return str(value or "").strip().replace("\\", "/")
+
+
+def _numeric_pair(value: Any) -> tuple[float, float] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    if any(isinstance(item, bool) or not isinstance(item, int | float) for item in value):
+        return None
+    return float(value[0]), float(value[1])
 
 
 def _scope_disclosed(text: str, validation_scope: str) -> bool:
@@ -322,7 +385,8 @@ def validate_nir_response(
     evidence = evidence if isinstance(evidence, Mapping) else {}
     summary = evidence.get("metrics_summary")
     summary = summary if isinstance(summary, Mapping) else {}
-    allowed_metrics = _summary_values(summary)
+    attempt_records = _attempt_evidence_records(workflow)
+    allowed_metrics = _allowed_metric_values(attempt_records)
     violations: list[str] = []
     required_action = required_nir_workflow_action(workflow)
     if required_action:
@@ -342,7 +406,8 @@ def validate_nir_response(
             violations.append(f"metric_value_mismatch:{category}")
 
     validation_scope = str(evidence.get("validation_scope") or "")
-    if validation_scope != "independent_external_validation" and _has_positive_marker(
+    validation_scopes = {str(record.get("validation_scope") or validation_scope) for record in attempt_records if record.get("validation_scope") or validation_scope}
+    if "independent_external_validation" not in validation_scopes and _has_positive_marker(
         response_text,
         _EXTERNAL_VALIDATION_RE,
     ):
@@ -350,22 +415,23 @@ def validate_nir_response(
     if _has_positive_marker(response_text, _DEPLOYMENT_READY_RE):
         violations.append("deployment_readiness_overclaim")
 
-    quality_passed = summary.get("passed")
+    quality_passed = any(isinstance(record.get("metrics_summary"), Mapping) and record["metrics_summary"].get("passed") is True for record in attempt_records)
     if quality_passed is not True and _has_positive_marker(response_text, _QUALITY_PASSED_RE):
         violations.append("quality_overclaim:passed")
 
-    approved_model_path = _normalized_path(evidence.get("model_path"))
+    approved_model_paths = {_normalized_path(record.get("model_path")) for record in attempt_records if _normalized_path(record.get("model_path"))}
     for match in _MODEL_PATH_RE.finditer(response_text):
-        if _normalized_path(match.group("path")) != approved_model_path:
+        if _normalized_path(match.group("path")) not in approved_model_paths:
             violations.append("artifact_path_mismatch:model")
 
-    approved_metrics_path = _normalized_path(evidence.get("metrics_path"))
+    approved_metrics_paths = {_normalized_path(record.get("metrics_path")) for record in attempt_records if _normalized_path(record.get("metrics_path"))}
     for match in _METRICS_PATH_RE.finditer(response_text):
-        if _normalized_path(match.group("path")) != approved_metrics_path:
+        if _normalized_path(match.group("path")) not in approved_metrics_paths:
             violations.append("artifact_path_mismatch:metrics")
 
     has_result_claim = bool(metric_claims or _MODEL_PATH_RE.search(response_text) or _QUALITY_PASSED_RE.search(response_text))
-    if evidence and has_result_claim and not _scope_disclosed(response_text, validation_scope):
+    scope_is_disclosed = any(_scope_disclosed(response_text, scope) for scope in validation_scopes)
+    if evidence and has_result_claim and not scope_is_disclosed:
         violations.append("validation_scope_disclosure_missing")
 
     result_facts = evidence.get("result_facts")
@@ -380,6 +446,47 @@ def validate_nir_response(
     knowledge_evidence = workflow.get("knowledge_evidence")
     if _LITERATURE_COMPARISON_RE.search(response_text) and not (isinstance(knowledge_evidence, list) and any(str(item).strip() for item in knowledge_evidence)):
         violations.append("knowledge_claim_without_evidence")
+
+    audit_evidence = workflow.get("audit_evidence")
+    audit_evidence = audit_evidence if isinstance(audit_evidence, Mapping) else {}
+    expected_ranges = {
+        "raw": _numeric_pair(audit_evidence.get("raw_wavelength_range")),
+        "usable": _numeric_pair(audit_evidence.get("usable_wavelength_range")),
+    }
+    for claim in _WAVELENGTH_RANGE_RE.finditer(response_text):
+        label = claim.group("label").lower()
+        category = "usable" if "可用" in label or "usable" in label else "raw"
+        expected = expected_ranges[category]
+        claimed = float(claim.group("low")), float(claim.group("high"))
+        if expected is None:
+            violations.append(f"wavelength_range_not_in_audit_evidence:{category}")
+        elif any(abs(actual - stated) > 1e-9 for actual, stated in zip(expected, claimed, strict=True)):
+            violations.append(f"wavelength_range_mismatch:{category}")
+
+    expected_counts = {
+        "constant": audit_evidence.get("constant_wavelength_count"),
+        "usable": audit_evidence.get("usable_wavelength_count"),
+    }
+    count_claims: list[tuple[str, int]] = []
+    for claim in _WAVELENGTH_COUNT_RE.finditer(response_text):
+        label = claim.group("label").lower()
+        category = "usable" if label in {"非恒定", "可用"} else "constant"
+        count_claims.append((category, int(claim.group("count"))))
+    for claim in _WAVELENGTH_KEY_COUNT_RE.finditer(response_text):
+        category = "usable" if claim.group("label").lower().startswith("usable") else "constant"
+        count_claims.append((category, int(claim.group("count"))))
+    for claim in _WAVELENGTH_LABEL_COUNT_RE.finditer(response_text):
+        label = claim.group("label").lower()
+        category = "usable" if label in {"非恒定", "可用"} else "constant"
+        count_claims.append((category, int(claim.group("count"))))
+    if _NO_CONSTANT_WAVELENGTH_RE.search(response_text):
+        count_claims.append(("constant", 0))
+    for category, claimed_count in count_claims:
+        expected_count = expected_counts[category]
+        if isinstance(expected_count, bool) or not isinstance(expected_count, int | float):
+            violations.append(f"wavelength_count_not_in_audit_evidence:{category}")
+        elif claimed_count != int(expected_count):
+            violations.append(f"wavelength_count_mismatch:{category}")
 
     deduplicated = tuple(dict.fromkeys(violations))
     return NIRResponseGroundingResult(
@@ -412,7 +519,7 @@ def render_grounded_nir_response(
     *,
     violations: tuple[str, ...] = (),
 ) -> str:
-    """Build a bounded, deterministic response from the current attempt only."""
+    """Build a bounded, deterministic response from the attempt ledger."""
 
     evidence = workflow.get("attempt_evidence")
     if not isinstance(evidence, Mapping):
@@ -435,13 +542,33 @@ def render_grounded_nir_response(
         f"- 验证范围：{scope_text}",
         f"- 质量门禁：{'通过' if summary.get('passed') is True else '未通过'}",
     ]
-    metric_text = _render_metric_summary(summary)
-    if metric_text:
-        lines.append(f"- 当前运行指标：{metric_text}")
-    if evidence.get("model_path"):
-        lines.append(f"- 模型产物：`{evidence['model_path']}`")
-    if evidence.get("metrics_path"):
-        lines.append(f"- 指标产物：`{evidence['metrics_path']}`")
+    audit_evidence = workflow.get("audit_evidence")
+    audit_evidence = audit_evidence if isinstance(audit_evidence, Mapping) else {}
+    raw_range = _numeric_pair(audit_evidence.get("raw_wavelength_range"))
+    usable_range = _numeric_pair(audit_evidence.get("usable_wavelength_range"))
+    if raw_range:
+        lines.append(f"- 原始采集光谱范围：{raw_range[0]}–{raw_range[1]} nm")
+    if usable_range:
+        lines.append(f"- 实际可用光谱范围：{usable_range[0]}–{usable_range[1]} nm")
+    constant_count = audit_evidence.get("constant_wavelength_count")
+    usable_count = audit_evidence.get("usable_wavelength_count")
+    if isinstance(constant_count, int) and isinstance(usable_count, int):
+        lines.append(f"- 光谱列：恒定波长列 {constant_count} 个；可用波长 {usable_count} 个（范围说明不代表已删除恒定列）")
+    attempts = _attempt_evidence_records(workflow)
+    for index, attempt in enumerate(attempts, start=1):
+        attempt_number = attempt.get("attempt") or index
+        attempt_summary = attempt.get("metrics_summary")
+        attempt_summary = attempt_summary if isinstance(attempt_summary, Mapping) else {}
+        metric_text = _render_metric_summary(attempt_summary)
+        status = "通过" if attempt.get("passed") is True or attempt_summary.get("passed") is True else "未通过"
+        attempt_line = f"- 尝试 {attempt_number}：质量门禁{status}"
+        if metric_text:
+            attempt_line += f"；{metric_text}"
+        lines.append(attempt_line)
+        if attempt.get("model_path"):
+            lines.append(f"  - 模型产物：`{attempt['model_path']}`")
+        if attempt.get("metrics_path"):
+            lines.append(f"  - 指标产物：`{attempt['metrics_path']}`")
     if violations:
         lines.append("- 说明：未采用原回答中与当前证据不一致的数值、验证范围或产物声明。")
     return "\n".join(lines)

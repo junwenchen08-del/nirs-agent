@@ -480,6 +480,7 @@ def nir_train_auto_split_model_tool(
                 "grade": quality["grade"],
                 "passed": quality["passed"],
                 "action": quality["action"],
+                "thresholds_used": quality["thresholds_used"],
                 "model_path": model_output,
                 "metrics_path": metrics_output,
                 "evidence": _model_evidence(
@@ -859,6 +860,7 @@ def nir_train_partitioned_model_tool(
                 "grade": quality["grade"],
                 "passed": quality["passed"],
                 "action": quality["action"],
+                "thresholds_used": quality["thresholds_used"],
                 "model_path": model_output,
                 "metrics_path": metrics_output,
                 "evidence": _model_evidence(

@@ -43,9 +43,7 @@ class SpectralData(BaseModel):
         if arr.ndim == 1:
             arr = arr.reshape(1, -1)
         if arr.ndim != 2:
-            raise ValueError(
-                f"X must be 1D or 2D, got {arr.ndim}D with shape {arr.shape}"
-            )
+            raise ValueError(f"X must be 1D or 2D, got {arr.ndim}D with shape {arr.shape}")
         return arr
 
     @field_validator("y", mode="before")
@@ -55,9 +53,7 @@ class SpectralData(BaseModel):
             return None
         arr = np.asarray(v, dtype=float)
         if arr.ndim not in {1, 2}:
-            raise ValueError(
-                f"y must be 1D or 2D, got {arr.ndim}D with shape {arr.shape}"
-            )
+            raise ValueError(f"y must be 1D or 2D, got {arr.ndim}D with shape {arr.shape}")
         return arr
 
     def summary(self) -> dict:
@@ -70,26 +66,44 @@ class SpectralData(BaseModel):
             n_components = 1 if y_arr.ndim == 1 else int(y_arr.shape[1])
             y_names = self.y_names or [f"y{i}" for i in range(n_components)]
             y_2d = y_arr.reshape(-1, 1) if y_arr.ndim == 1 else y_arr
-            y_ranges = {
-                name: [float(y_2d[:, i].min()), float(y_2d[:, i].max())]
-                for i, name in enumerate(y_names)
-            }
+            y_ranges = {name: [float(y_2d[:, i].min()), float(y_2d[:, i].max())] for i, name in enumerate(y_names)}
+        raw_wavelength_range: list[float] | None = None
+        usable_wavelength_range: list[float] | None = None
+        constant_wavelength_count = 0
+        usable_wavelength_count = int(self.X.shape[1])
+        if self.wv is not None:
+            wavelengths = np.asarray(self.wv, dtype=float).ravel()
+            finite_wavelengths = wavelengths[np.isfinite(wavelengths)]
+            if finite_wavelengths.size:
+                raw_wavelength_range = [
+                    float(finite_wavelengths.min()),
+                    float(finite_wavelengths.max()),
+                ]
+            if wavelengths.size == self.X.shape[1]:
+                finite_spectra = np.isfinite(self.X).all(axis=0)
+                column_ranges = np.ptp(self.X, axis=0)
+                usable_mask = finite_spectra & (column_ranges > 1e-12)
+                constant_wavelength_count = int(np.count_nonzero(finite_spectra & ~usable_mask))
+                usable_wavelength_count = int(np.count_nonzero(usable_mask))
+                usable_wavelengths = wavelengths[usable_mask & np.isfinite(wavelengths)]
+                if usable_wavelengths.size:
+                    usable_wavelength_range = [
+                        float(usable_wavelengths.min()),
+                        float(usable_wavelengths.max()),
+                    ]
         return {
             "n_samples": int(self.X.shape[0]),
             "n_wavelengths": int(self.X.shape[1]),
-            "wavelength_range": (
-                [float(self.wv.min()), float(self.wv.max())]
-                if self.wv is not None
-                else None
-            ),
+            "wavelength_range": raw_wavelength_range,
+            "raw_wavelength_range": raw_wavelength_range,
+            "usable_wavelength_range": usable_wavelength_range,
+            "constant_wavelength_count": constant_wavelength_count,
+            "usable_wavelength_count": usable_wavelength_count,
+            "wavelength_range_semantics": ("raw includes all measured columns; usable spans non-constant columns only and does not imply those columns were removed"),
             "has_reference": self.y is not None,
             "n_components": n_components,
             "y_names": y_names,
-            "y_range": (
-                [float(self.y.min()), float(self.y.max())]
-                if self.y is not None and np.asarray(self.y).ndim == 1
-                else None
-            ),
+            "y_range": ([float(self.y.min()), float(self.y.max())] if self.y is not None and np.asarray(self.y).ndim == 1 else None),
             "y_ranges": y_ranges,
             "source_file": self.source_file,
             "original_format": self.original_format,

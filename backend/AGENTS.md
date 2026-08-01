@@ -227,7 +227,11 @@ from deerflow.config import get_app_config
   execution signature is rejected. Attempts, reflections, and retry plans are
   bounded audit records used by deterministic trajectory evaluation.
   Modeling attempt evidence includes bounded preprocessing, wavelength-
-  selection, and model-selection facts. Response grounding rejects claims that
+  selection, model-selection facts, validation protocol/scope, and quality
+  thresholds. The compact agent view exposes the bounded attempt ledger so a
+  final response can compare real retry results; response grounding accepts
+  metrics and artifact paths from that ledger while continuing to reject any
+  value outside it. Response grounding rejects claims that
   constant columns were removed when the recorded selected feature count did
   not decrease, and rejects literature-comparison claims without retrieved
   knowledge evidence.
@@ -242,7 +246,13 @@ from deerflow.config import get_app_config
   `nir_train_model` and `nir_analyze` support explicit train-only wavelength
   selection (`none`, `cars`, `spa`, `manual`) after leakage-safe preprocessing
   and before model fitting; `nir_analyze` additionally defaults to the
-  autonomous `auto` policy for PLS. Selected original-column indices are
+  autonomous `auto` policy for PLS. `SpectralData.summary()` reports the raw
+  measured wavelength range separately from the usable span of non-constant
+  columns, plus constant/usable counts; the usable span is informational and
+  does not claim that constant columns were removed. Successful `nir_inspect`
+  and `nir_load_data` calls persist a bounded `audit_evidence` snapshot in the
+  workflow; the compact agent view retains it through retries and response
+  grounding rejects range/count claims that disagree with it. Selected original-column indices are
   persisted in metrics and,
   when selection is enabled, in the saved model artifact. Version-2 artifacts
   also persist the fitted preprocessing pipeline, so `nir_predict` can apply

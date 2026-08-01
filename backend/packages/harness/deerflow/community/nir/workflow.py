@@ -89,7 +89,9 @@ _AGENT_VIEW_FIELDS = (
     "data_path",
     "model_path",
     "metrics_path",
+    "audit_evidence",
     "attempt_evidence",
+    "attempts",
     "reflection",
     "retry_plan",
     "knowledge_evidence",
@@ -125,6 +127,32 @@ _RETRY_MODELING_TOOLS = frozenset(
         "nir_analyze",
         "nir_analyze_collection",
         "nir_compare",
+    }
+)
+_RETRY_MODEL_DEFAULTS = {
+    "nir_train_auto_split_model": "auto",
+    "nir_train_model": "pls",
+    "nir_train_partitioned_model": "auto",
+    "nir_train_multi_model": "pls",
+    "nir_analyze": "auto",
+    "nir_analyze_collection": "auto",
+    "nir_compare": "pls",
+}
+_RETRY_SIGNATURE_IGNORED_MODEL_ARGS = frozenset(
+    {
+        "method",
+        "pipeline_steps",
+        "input_path",
+        "file_path",
+        "data_path",
+        "output_path",
+        "output_dir",
+        "model_path",
+        "metrics_path",
+        "model_output",
+        "metrics_output",
+        "attempt",
+        "tool_call_id",
     }
 )
 _RETRY_TOOLS_BY_TASK = {
@@ -205,6 +233,17 @@ def normalize_retry_pipeline_steps(value: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def normalize_retry_model_method(tool_name: str, method: str | None) -> str:
+    """Canonicalize tool-specific model defaults and accepted aliases."""
+
+    normalized_tool = str(tool_name or "").strip()
+    if normalized_tool not in _RETRY_MODELING_TOOLS:
+        raise NIRWorkflowError(f"Unsupported retry modeling tool {normalized_tool!r}")
+    default = _RETRY_MODEL_DEFAULTS[normalized_tool]
+    normalized_method = str(method or default).strip().lower() or default
+    return "cnn" if normalized_method in {"1d-cnn", "1d_cnn"} else normalized_method
+
+
 def retry_execution_signature(
     *,
     tool_name: str,
@@ -228,12 +267,13 @@ def retry_execution_signature(
     if not isinstance(model_args, Mapping):
         raise NIRWorkflowError("retry_model_args must be a JSON object")
     try:
-        normalized_model_args = json.loads(json.dumps(dict(model_args), sort_keys=True, ensure_ascii=False))
+        semantic_model_args = {str(key): value for key, value in model_args.items() if str(key) not in _RETRY_SIGNATURE_IGNORED_MODEL_ARGS}
+        normalized_model_args = json.loads(json.dumps(semantic_model_args, sort_keys=True, ensure_ascii=False))
     except (TypeError, ValueError) as exc:
         raise NIRWorkflowError("retry_model_args must be JSON serializable") from exc
     payload = {
         "tool_name": normalized_tool,
-        "method": str(method or "auto").strip().lower() or "auto",
+        "method": normalize_retry_model_method(normalized_tool, method),
         "pipeline_steps": normalized_steps,
         "model_args": normalized_model_args,
     }
@@ -354,6 +394,29 @@ def workflow_agent_view(state: NIRWorkflowState | dict) -> dict[str, Any]:
                 "per_component": metrics_summary["per_component"][:5],
             }
         projected["attempt_evidence"] = compact_evidence
+    attempts = projected.get("attempts")
+    if isinstance(attempts, list):
+        projected["attempts"] = [
+            {
+                field: attempt.get(field)
+                for field in (
+                    "attempt",
+                    "passed",
+                    "grade",
+                    "tool_name",
+                    "method",
+                    "pipeline_steps",
+                    "protocol",
+                    "validation_scope",
+                    "metrics_summary",
+                    "model_path",
+                    "metrics_path",
+                )
+                if attempt.get(field) is not None
+            }
+            for attempt in attempts[-_RETRY_RECORD_LIMIT:]
+            if isinstance(attempt, Mapping)
+        ]
     observations = state.get("tool_observations")
     projected["tool_observation_count"] = len(observations) if isinstance(observations, list) else 0
     if isinstance(observations, list) and observations and isinstance(observations[-1], dict):
@@ -483,6 +546,37 @@ def block_workflow_after_continuation_failure(
     )
 
 
+def block_workflow_after_retry_plan_mismatch(
+    state: NIRWorkflowState,
+    *,
+    plan_id: str | None,
+) -> NIRWorkflowState:
+    """Fail closed after the agent repeats a retry-plan signature mismatch."""
+
+    active_plan = state.get("retry_plan")
+    invalid_plan: dict[str, Any] | None = None
+    if isinstance(active_plan, Mapping):
+        invalid_plan = {
+            **active_plan,
+            "status": "invalid",
+            "invalid_reason": "repeated_execution_signature_mismatch",
+        }
+    retry_plans = [invalid_plan if invalid_plan is not None and isinstance(plan, Mapping) and plan.get("plan_id") == invalid_plan.get("plan_id") else plan for plan in (state.get("retry_plans") or [])]
+    return _with_update(
+        state,
+        action="retry_plan_mismatch_exhausted",
+        stage="blocked",
+        next_action="report_best_effort",
+        approval_status="not_required",
+        retry_plan=invalid_plan,
+        retry_plans=retry_plans,
+        event_details={
+            "plan_id": plan_id,
+            "outcome": "repeated_execution_signature_mismatch",
+        },
+    )
+
+
 def _event(action: str, **details: Any) -> dict[str, Any]:
     return {
         "action": action,
@@ -561,6 +655,7 @@ def start_workflow(
         "data_path": normalized_requirements.get("data_path"),
         "model_path": normalized_requirements.get("model_path"),
         "metrics_path": None,
+        "audit_evidence": None,
         "attempt_evidence": None,
         "attempts": [],
         "reflection": None,
@@ -611,6 +706,7 @@ def transition_workflow(
     grouping_column: str | None = None,
     reference_method: str | None = None,
     audit_passed: bool | None = None,
+    audit_evidence: dict[str, Any] | None = None,
     attempt_passed: bool | None = None,
     grade: str | None = None,
     missing_inputs: list[str] | None = None,
@@ -627,6 +723,23 @@ def transition_workflow(
 ) -> NIRWorkflowState:
     """Apply one validated state transition to an existing workflow."""
     action = action.strip().lower()
+
+    if action == "record_audit_evidence":
+        if state["stage"] != "data_audit":
+            raise NIRWorkflowError("record_audit_evidence is only allowed during data_audit")
+        if not isinstance(audit_evidence, Mapping) or not audit_evidence:
+            raise NIRWorkflowError("audit_evidence is required for record_audit_evidence")
+        bounded_evidence = dict(audit_evidence)
+        return _with_update(
+            state,
+            action=action,
+            audit_evidence=bounded_evidence,
+            event_details={
+                "source_tool": bounded_evidence.get("source_tool"),
+                "n_samples": bounded_evidence.get("n_samples"),
+                "n_wavelengths": bounded_evidence.get("n_wavelengths"),
+            },
+        )
 
     if action == "set_requirements":
         requirement_updates = _requirement_updates(
@@ -759,8 +872,25 @@ def transition_workflow(
         evidence = attempt_evidence if isinstance(attempt_evidence, Mapping) else {}
         active_retry_plan = state.get("retry_plan") if state.get("attempt", 0) > 0 else None
         if isinstance(active_retry_plan, Mapping):
-            if evidence.get("execution_signature") != active_retry_plan.get("execution_signature"):
+            canonical_steps, canonical_model_args, canonical_signature = retry_execution_signature(
+                tool_name=str(active_retry_plan.get("tool_name") or ""),
+                method=str(active_retry_plan.get("method") or "auto"),
+                pipeline_steps=active_retry_plan.get("pipeline_steps"),
+                model_args=active_retry_plan.get("model_args"),
+            )
+            accepted_signatures = {
+                active_retry_plan.get("execution_signature"),
+                canonical_signature,
+            }
+            if evidence.get("execution_signature") not in accepted_signatures:
                 raise NIRWorkflowError("The modeling attempt does not match the active retry plan")
+            if evidence.get("execution_signature") == canonical_signature:
+                active_retry_plan = {
+                    **active_retry_plan,
+                    "pipeline_steps": canonical_steps,
+                    "model_args": canonical_model_args,
+                    "execution_signature": canonical_signature,
+                }
         attempt_record = {
             "attempt": attempt,
             "passed": attempt_passed,
@@ -770,6 +900,8 @@ def transition_workflow(
             "pipeline_steps": evidence.get("pipeline_steps") or [],
             "model_args": evidence.get("model_args") or {},
             "execution_signature": evidence.get("execution_signature"),
+            "protocol": evidence.get("protocol"),
+            "validation_scope": evidence.get("validation_scope"),
             "metrics_summary": evidence.get("metrics_summary") or {},
             "model_path": model_path,
             "metrics_path": metrics_path,
@@ -962,7 +1094,7 @@ def transition_workflow(
             "target_attempt": state["attempt"] + 1,
             "reflection_id": reflection.get("reflection_id"),
             "tool_name": normalized_retry_tool,
-            "method": str(retry_method or "auto").strip().lower() or "auto",
+            "method": normalize_retry_model_method(normalized_retry_tool, retry_method),
             "pipeline_steps": normalized_steps,
             "model_args": normalized_model_args,
             "execution_signature": signature,

@@ -605,6 +605,7 @@ def test_successful_auto_split_model_result_automatically_enters_review() -> Non
             "grade": "B",
             "model_path": "/mnt/user-data/outputs/auto-split.pkl",
             "metrics_path": "/mnt/user-data/outputs/auto-split.json",
+            "thresholds_used": {"min_r2": 0.9, "min_rpd": 4.0},
             "evidence": {
                 "schema_version": 1,
                 "protocol": "deterministic_auto_split_holdout",
@@ -648,8 +649,14 @@ def test_successful_auto_split_model_result_automatically_enters_review() -> Non
         "pipeline_steps": [{"method": "tool_default", "params": {}}],
         "model_args": {},
         "execution_signature": updated["attempt_evidence"]["execution_signature"],
-        "metrics_summary": {"grade": "B", "passed": True},
+        "metrics_summary": {
+            "grade": "B",
+            "passed": True,
+            "thresholds_used": {"min_r2": 0.9, "min_rpd": 4.0},
+        },
     }
+    assert updated["attempts"][0]["protocol"] == "deterministic_auto_split_holdout"
+    assert updated["attempts"][0]["validation_scope"] == "independent_holdout_not_external"
 
 
 def test_successful_mat_collection_result_automatically_enters_review() -> None:
@@ -786,6 +793,73 @@ def test_denied_tool_observation_is_checkpointed_for_agent_evaluation() -> None:
     assert observation["stage_after"] == "data_audit"
 
 
+def test_load_data_persists_bounded_wavelength_audit_evidence() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="calibration",
+        data_path="/mnt/user-data/uploads/mango.csv",
+        analyte="DM",
+        unit="%",
+        domain="food_moisture",
+        validation_goal="external_validation",
+        instrument="Felix F-750",
+        grouping_column="Season",
+        reference_method="laboratory DM",
+    )
+    message = _result(
+        "nir_load_data",
+        {
+            "status": "ok",
+            "n_samples": 11691,
+            "n_wavelengths": 306,
+            "raw_wavelength_range": [285.0, 1200.0],
+            "usable_wavelength_range": [309.0, 1149.0],
+            "constant_wavelength_count": 25,
+            "usable_wavelength_count": 281,
+            "wavelength_range_semantics": ("raw includes all measured columns; usable spans non-constant columns only and does not imply those columns were removed"),
+            "y_names": ["DM"],
+            "y_separated": True,
+            "wv_separated": True,
+            "x_cols_used": "9:",
+        },
+    )
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "nir_load_data",
+            {"nir_workflow": workflow},
+            args={
+                "file_path": "/mnt/user-data/uploads/mango.csv",
+                "y_col": 8,
+                "x_cols": "9:",
+                "wv_row": 0,
+            },
+        ),
+        lambda _: message,
+    )
+
+    assert isinstance(result, Command)
+    updated = result.update["nir_workflow"]
+    assert updated["stage"] == "data_audit"
+    assert updated["audit_evidence"] == {
+        "source_tool": "nir_load_data",
+        "data_path": "/mnt/user-data/uploads/mango.csv",
+        "n_samples": 11691,
+        "n_wavelengths": 306,
+        "raw_wavelength_range": [285.0, 1200.0],
+        "usable_wavelength_range": [309.0, 1149.0],
+        "constant_wavelength_count": 25,
+        "usable_wavelength_count": 281,
+        "wavelength_range_semantics": ("raw includes all measured columns; usable spans non-constant columns only and does not imply those columns were removed"),
+        "y_names": ["DM"],
+        "y_separated": True,
+        "wv_separated": True,
+        "y_col": 8,
+        "x_cols": "9:",
+        "wv_row": 0,
+    }
+
+
 def test_failed_model_requires_bound_reflection_then_search_returns_to_retry_planning() -> None:
     middleware = NIRWorkflowMiddleware()
     workflow = _execution_state()
@@ -890,6 +964,13 @@ def test_retry_modeling_call_must_match_recorded_plan() -> None:
         retry_tool="nir_analyze",
         retry_method="auto",
         retry_pipeline_steps='["snv", {"method": "derivative1", "params": {"window": 11}}]',
+        retry_model_args=json.dumps(
+            {
+                "file_path": "/mnt/user-data/uploads/data.npz",
+                "model_output": "/mnt/user-data/outputs/retry.pkl",
+                "metrics_output": "/mnt/user-data/outputs/retry.json",
+            }
+        ),
         retry_rationale="Use a derivative to address residual curvature.",
         expected_improvement="Lower RMSEP without increasing bias.",
     )
@@ -912,6 +993,21 @@ def test_retry_modeling_call_must_match_recorded_plan() -> None:
     assert called is False
     assert json.loads(denied.update["messages"][0].content)["code"] == "nir_retry_plan_mismatch"
 
+    repeated_denial = middleware.wrap_tool_call(
+        _request(
+            "nir_analyze",
+            {"nir_workflow": denied.update["nir_workflow"]},
+            args={"method": "auto", "pipeline_steps": '["snv", "autoscale"]'},
+            call_id="call-repeated-mismatch",
+        ),
+        wrong_handler,
+    )
+    repeated_payload = json.loads(repeated_denial.update["messages"][0].content)
+    assert repeated_payload["code"] == "nir_retry_plan_mismatch_exhausted"
+    assert repeated_payload["details"]["action_required"] == "stop_retrying_and_report_runtime_blocker"
+    assert repeated_denial.update["nir_workflow"]["stage"] == "blocked"
+    assert repeated_denial.update["nir_workflow"]["next_action"] == "report_best_effort"
+
     changed_hyperparameter = middleware.wrap_tool_call(
         _request(
             "nir_analyze",
@@ -927,13 +1023,30 @@ def test_retry_modeling_call_must_match_recorded_plan() -> None:
     assert called is False
     assert json.loads(changed_hyperparameter.update["messages"][0].content)["code"] == "nir_retry_plan_mismatch"
 
+    legacy_plan = {
+        **execution["retry_plan"],
+        "model_args": {
+            "file_path": "/mnt/user-data/uploads/data.npz",
+            "model_output": "/mnt/user-data/outputs/retry.pkl",
+            "metrics_output": "/mnt/user-data/outputs/retry.json",
+        },
+        "execution_signature": "legacy-path-sensitive-signature",
+    }
+    legacy_execution = {
+        **execution,
+        "retry_plan": legacy_plan,
+        "retry_plans": [legacy_plan],
+    }
     allowed = middleware.wrap_tool_call(
         _request(
             "nir_analyze",
-            {"nir_workflow": execution},
+            {"nir_workflow": legacy_execution},
             args={
                 "method": "auto",
                 "pipeline_steps": '["snv", {"method": "derivative1", "params": {"window": 11}}]',
+                "file_path": "/mnt/user-data/uploads/data.npz",
+                "model_output": "/mnt/user-data/outputs/retry.pkl",
+                "metrics_output": "/mnt/user-data/outputs/retry.json",
             },
         ),
         lambda _: _result(
@@ -949,6 +1062,7 @@ def test_retry_modeling_call_must_match_recorded_plan() -> None:
     )
     assert allowed.update["nir_workflow"]["stage"] == "review"
     assert allowed.update["nir_workflow"]["retry_plan"]["status"] == "executed"
+    assert allowed.update["nir_workflow"]["retry_plan"]["execution_signature"] != "legacy-path-sensitive-signature"
 
 
 def test_tool_error_does_not_advance_workflow() -> None:
