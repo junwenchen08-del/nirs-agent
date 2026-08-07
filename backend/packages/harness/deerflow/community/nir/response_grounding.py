@@ -200,6 +200,15 @@ _METRIC_CLAIM_RE = re.compile(
     r"(?P<percent>\s*%)?",
     re.IGNORECASE,
 )
+_CLASSIFICATION_METRIC_CLAIM_RE = re.compile(
+    r"(?P<label>balanced[\s_-]*accuracy|macro[\s_-]*F1|MCC|"
+    r"min(?:imum)?[\s_-]*class[\s_-]*recall|平衡准确率|宏(?:平均)?F1|"
+    r"马修斯相关系数|最(?:低|小)类别召回率)"
+    r"\s*(?:[:=]|is|of|为|是|约为|达到|达)?\s*"
+    r"(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)"
+    r"(?P<percent>\s*%)?",
+    re.IGNORECASE,
+)
 _MODEL_PATH_RE = re.compile(
     r"(?P<path>(?:[A-Za-z]:[\\/]|/)[^\s`\"'<>，。；;]+?\.pkl)",
     re.IGNORECASE,
@@ -251,6 +260,19 @@ def _metric_category(label: str) -> str:
         return "rmse"
     if normalized.startswith("rpd"):
         return "rpd"
+    if normalized in {"balancedaccuracy", "平衡准确率"}:
+        return "balanced_accuracy"
+    if normalized in {"macrof1", "宏f1", "宏平均f1"}:
+        return "macro_f1"
+    if normalized in {"mcc", "马修斯相关系数"}:
+        return "mcc"
+    if normalized in {
+        "minclassrecall",
+        "minimumclassrecall",
+        "最低类别召回率",
+        "最小类别召回率",
+    }:
+        return "class_recall"
     return "bias"
 
 
@@ -298,6 +320,16 @@ def _summary_values(summary: Mapping[str, Any]) -> dict[str, list[float]]:
                 add("rmsep", value)
         elif key == "bias":
             add("bias", value)
+        elif key == "balancedaccuracy":
+            add("balanced_accuracy", value)
+        elif key == "macrof1":
+            add("macro_f1", value)
+        elif key == "mcc":
+            add("mcc", value)
+        elif key in {"minimumclassrecall", "minclassrecall"}:
+            add("class_recall", value)
+        elif key == "recall" and "perclass" in {re.sub(r"[\s_^虏-]+", "", item).lower() for item in path[:-1]}:
+            add("class_recall", value)
 
     walk(summary)
     return values
@@ -391,7 +423,10 @@ def validate_nir_response(
     required_action = required_nir_workflow_action(workflow)
     if required_action:
         violations.append(f"workflow_incomplete:{required_action}")
-    metric_claims = list(_METRIC_CLAIM_RE.finditer(response_text))
+    metric_claims = [
+        *_METRIC_CLAIM_RE.finditer(response_text),
+        *_CLASSIFICATION_METRIC_CLAIM_RE.finditer(response_text),
+    ]
 
     for claim in metric_claims:
         category = _metric_category(claim.group("label"))
@@ -504,6 +539,14 @@ def _render_metric_summary(summary: Mapping[str, Any]) -> str | None:
         ("RMSEP", "RMSEP"),
     )
     values = [f"{label}={summary[key]}" for key, label in labels if isinstance(summary.get(key), int | float) and not isinstance(summary.get(key), bool)]
+    holdout = summary.get("holdout")
+    if isinstance(holdout, Mapping):
+        classification_labels = (
+            ("balanced_accuracy", "balanced accuracy"),
+            ("macro_f1", "macro-F1"),
+            ("mcc", "MCC"),
+        )
+        values.extend(f"{label}={holdout[key]}" for key, label in classification_labels if isinstance(holdout.get(key), int | float) and not isinstance(holdout.get(key), bool))
     for section_key, section_label in (("holdout", "留出测试"), ("external", "外部测试")):
         section = summary.get(section_key)
         if not isinstance(section, Mapping):

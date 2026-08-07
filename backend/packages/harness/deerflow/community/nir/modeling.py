@@ -522,6 +522,7 @@ def nir_train_partitioned_model_tool(
     max_svr_samples: int = 1500,
     max_tree_samples: int = 2500,
     min_model_improvement: float = 0.01,
+    validation_scope: str = "independent_external_validation",
     model_output: str = "/mnt/user-data/outputs/partitioned_model.pkl",
     metrics_output: str = "/mnt/user-data/outputs/partitioned_metrics.json",
     tool_call_id: Annotated[str, InjectedToolCallId] = "",  # noqa: ARG001
@@ -532,9 +533,11 @@ def nir_train_partitioned_model_tool(
     column, rather than a random split.  It enforces the following protocol:
     preprocessing and CARS selection are fitted on ``train_label`` only;
     ``tuning_label`` selects wavelengths and a bounded model family;
-    ``test_label`` is used once for final external metrics. This prevents a
+    ``test_label`` is used once for final holdout metrics. This prevents a
     held-out season, batch, or instrument set from leaking into any selection
-    decision.
+    decision. Use ``independent_holdout_not_external`` when named partitions
+    exist but the provenance required for a strict external-validation claim
+    is unavailable.
 
     Args:
         file_path: Virtual path to the original labelled CSV file.
@@ -559,11 +562,14 @@ def nir_train_partitioned_model_tool(
         max_tree_samples: Largest Cal set eligible for autonomous Extra Trees.
         min_model_improvement: Minimum relative Tuning RMSE improvement required
             before an alternative model replaces PLS.
+        validation_scope: ``independent_external_validation`` (default) or
+            ``independent_holdout_not_external``. The latter preserves named
+            partitions without claiming strict external validation.
         model_output: Virtual output path for a deployable model artifact.
-        metrics_output: Virtual output path for external-validation metrics.
+        metrics_output: Virtual output path for holdout metrics.
 
     Returns:
-        JSON containing tuning and external metrics, selected wavelengths, and
+        JSON containing tuning and holdout metrics, selected wavelengths, and
         paths to the persisted model, metrics, and Markdown report.
     """
     try:
@@ -578,6 +584,19 @@ def nir_train_partitioned_model_tool(
         from nir_core.model.selection import cars_wavelength_selection
         from nir_core.preprocess.pipeline import PreprocessingPipeline, validate_pipeline
         from nir_core.utils.metrics import evaluate_quality
+
+        normalized_scope = str(validation_scope).strip().lower()
+        supported_scopes = {
+            "independent_external_validation",
+            "independent_holdout_not_external",
+        }
+        if normalized_scope not in supported_scopes:
+            return _err("validation_scope must be 'independent_external_validation' or 'independent_holdout_not_external'")
+        is_external_validation = normalized_scope == "independent_external_validation"
+        protocol = "named_partition_external_validation" if is_external_validation else "named_partition_independent_holdout"
+        reproducibility_protocol = "official_partition_external_holdout" if is_external_validation else "official_partition_independent_holdout"
+        holdout_partition_key = "external_test" if is_external_validation else "holdout"
+        holdout_label = "External" if is_external_validation else "Independent holdout"
 
         budget = budget_for_runtime(runtime)
         real_in = _resolve(runtime, file_path, read_only=True)
@@ -742,7 +761,7 @@ def nir_train_partitioned_model_tool(
             },
             "reproducibility": reproducibility_evidence(
                 random_state=42,
-                protocol="official_partition_external_holdout",
+                protocol=reproducibility_protocol,
                 input_sha256=training_data_hash,
                 parameters={
                     "split_column": split_col,
@@ -756,8 +775,8 @@ def nir_train_partitioned_model_tool(
                     "min_model_improvement": float(min_model_improvement),
                 },
             ),
-            "protocol": "named_partition_external_validation",
-            "validation_scope": "independent_external_validation",
+            "protocol": protocol,
+            "validation_scope": normalized_scope,
             "method": chosen_model["method"],
             "n_components": None if best_n is None else int(best_n),
             "n_samples": int(X.shape[0]),
@@ -772,7 +791,7 @@ def nir_train_partitioned_model_tool(
                 "column": split_col,
                 "train": {"label": train_label, "n_samples": int(train_mask.sum())},
                 "tuning": {"label": tuning_label, "n_samples": int(tune_mask.sum())},
-                "external_test": {"label": test_label, "n_samples": int(test_mask.sum())},
+                holdout_partition_key: {"label": test_label, "n_samples": int(test_mask.sum())},
             },
             "candidate_results": candidate_results,
             "model_candidates": _model_candidate_summary(model_candidate_results),
@@ -814,7 +833,7 @@ def nir_train_partitioned_model_tool(
 
         report_path = os.path.join(os.path.dirname(real_model), "partitioned_report.md")
         report = [
-            "# Partitioned NIR external-validation report",
+            ("# Partitioned NIR external-validation report" if is_external_validation else "# Partitioned NIR independent-holdout report"),
             "",
             f"- Split: `{split_col}` = `{train_label}` / `{tuning_label}` / `{test_label}`",
             f"- Samples: {int(train_mask.sum())} / {int(tune_mask.sum())} / {int(test_mask.sum())}",
@@ -825,9 +844,10 @@ def nir_train_partitioned_model_tool(
             f"- Selected model: {chosen_model['method']}",
             f"- Latent variables: {best_n if best_n is not None else 'not applicable'}",
             f"- Tuning RMSE: {chosen_model['RMSE_tuning']:.5f}",
-            f"- External RMSE: {metrics['test']['RMSE']:.5f}",
-            f"- External R2: {metrics['test']['R2']:.5f}",
-            f"- External RPD: {metrics['test']['RPD']:.5f}",
+            f"- Validation scope: `{normalized_scope}`",
+            f"- {holdout_label} RMSE: {metrics['test']['RMSE']:.5f}",
+            f"- {holdout_label} R2: {metrics['test']['R2']:.5f}",
+            f"- {holdout_label} RPD: {metrics['test']['RPD']:.5f}",
         ]
         with open(report_path, "w", encoding="utf-8") as handle:
             handle.write("\n".join(report) + "\n")
@@ -842,38 +862,37 @@ def nir_train_partitioned_model_tool(
             }
             for item in candidate_results
         ]
-        return _ok(
-            {
-                "status": "ok",
-                "protocol": "named_partition_external_validation",
-                "validation_scope": "independent_external_validation",
-                "preprocessing": final_pipe.description(),
-                "wavelength_selection": selection_meta,
-                "wavelength_selection_decision": selection_decision,
-                "model_selection_decision": model_selection_decision,
-                "method": chosen_model["method"],
-                "n_components": None if best_n is None else int(best_n),
-                "RMSE_tuning": round(float(chosen_model["RMSE_tuning"]), 5),
-                "external": {key: round(float(metrics["test"][key]), 5) for key in ("RMSE", "R2", "RPD", "bias")},
-                "candidate_results": candidate_summary,
-                "model_candidates": _model_candidate_summary(model_candidate_results),
-                "grade": quality["grade"],
-                "passed": quality["passed"],
-                "action": quality["action"],
-                "thresholds_used": quality["thresholds_used"],
-                "model_path": model_output,
-                "metrics_path": metrics_output,
-                "evidence": _model_evidence(
-                    real_model,
-                    real_metrics,
-                    training_data_hash=training_data_hash,
-                    protocol="named_partition_external_validation",
-                    validation_scope="independent_external_validation",
-                ),
-                "report": out_virtual + "/partitioned_report.md",
-                "resource_budget": budget.evidence(),
-            }
-        )
+        result_payload = {
+            "status": "ok",
+            "protocol": protocol,
+            "validation_scope": normalized_scope,
+            "preprocessing": final_pipe.description(),
+            "wavelength_selection": selection_meta,
+            "wavelength_selection_decision": selection_decision,
+            "model_selection_decision": model_selection_decision,
+            "method": chosen_model["method"],
+            "n_components": None if best_n is None else int(best_n),
+            "RMSE_tuning": round(float(chosen_model["RMSE_tuning"]), 5),
+            "candidate_results": candidate_summary,
+            "model_candidates": _model_candidate_summary(model_candidate_results),
+            "grade": quality["grade"],
+            "passed": quality["passed"],
+            "action": quality["action"],
+            "thresholds_used": quality["thresholds_used"],
+            "model_path": model_output,
+            "metrics_path": metrics_output,
+            "evidence": _model_evidence(
+                real_model,
+                real_metrics,
+                training_data_hash=training_data_hash,
+                protocol=protocol,
+                validation_scope=normalized_scope,
+            ),
+            "report": out_virtual + "/partitioned_report.md",
+            "resource_budget": budget.evidence(),
+        }
+        result_payload["external" if is_external_validation else "holdout"] = {key: round(float(metrics["test"][key]), 5) for key in ("RMSE", "R2", "RPD", "bias")}
+        return _ok(result_payload)
     except ResourceLimitError as exc:
         return resource_error(exc)
     except Exception as exc:  # noqa: BLE001

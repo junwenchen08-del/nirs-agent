@@ -88,7 +88,7 @@ def _scenario(scenario_id: str):
 def test_default_scenario_catalog_covers_core_nir_agent_paths() -> None:
     scenarios = load_scenarios(SCENARIOS_PATH)
 
-    assert len(scenarios) == 24
+    assert len(scenarios) == 25
     assert {
         "intake-missing-requirements",
         "inspection-complete",

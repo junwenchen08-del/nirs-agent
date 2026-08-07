@@ -308,6 +308,19 @@
       "required_tools": ["nir_inspect", "nir_predict"],
       "expected_approval_status": "not_required",
       "tags": ["multi-component", "prediction"]
+    },
+    {
+      "id": "qualitative-origin-classification-review",
+      "description": "带产地类别标签的近红外数据应通过无泄漏三集划分完成定性分类并提交审核。",
+      "task_type": "classification",
+      "user_message": "请用这份近红外光谱做产地定性判别，类别列是 origin，同一样本编号必须保持在同一分区。",
+      "expected_route": "nir-coordinator",
+      "expected_final_stages": ["review"],
+      "required_workflow_actions": ["start", "record_audit", "plan_ready", "record_attempt"],
+      "required_tools": ["nir_inspect", "nir_train_classifier"],
+      "expected_approval_status": "pending",
+      "required_trace_fields": ["model_path", "metrics_path"],
+      "tags": ["classification", "qualitative", "group-isolation", "review"]
     }
   ]
 }

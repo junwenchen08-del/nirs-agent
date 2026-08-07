@@ -31,6 +31,42 @@ def test_start_audits_data_before_asking_inferable_professional_requirements():
     assert state["next_action"] == "inspect_data"
 
 
+def test_classification_workflow_requires_label_context_but_not_regression_unit():
+    state = start_workflow(
+        task_type="classification",
+        data_path="/mnt/user-data/uploads/origin.csv",
+    )
+
+    assert state["stage"] == "data_audit"
+    state = transition_workflow(
+        state,
+        action="record_audit",
+        audit_passed=True,
+        domain="food_authenticity",
+        label_column="origin",
+        validation_goal="internal_holdout",
+    )
+
+    assert state["stage"] == "planning"
+    assert state["label_column"] == "origin"
+    assert state["missing_inputs"] == []
+
+
+def test_classification_workflow_asks_for_missing_label_column_after_audit():
+    state = start_workflow(
+        task_type="classification",
+        data_path="/mnt/user-data/uploads/origin.csv",
+        domain="food_authenticity",
+        validation_goal="internal_holdout",
+    )
+
+    state = transition_workflow(state, action="record_audit", audit_passed=True)
+
+    assert state["stage"] == "clarification"
+    assert state["missing_inputs"] == ["label_column"]
+    assert state["clarification_questions"][0]["fields"] == ["label_column"]
+
+
 def test_passed_audit_requests_only_missing_decision_context():
     state = start_workflow(task_type="calibration", data_path="/mnt/user-data/uploads/corn.npz")
 

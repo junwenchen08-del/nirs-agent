@@ -23,11 +23,12 @@ from deerflow.agents.thread_state import NIRClarificationQuestion, NIRWorkflowSt
 from deerflow.tools.types import Runtime
 from deerflow.utils.messages import get_original_user_content_text
 
-_SUPPORTED_TASK_TYPES = frozenset({"analysis", "calibration", "multi_modeling", "compare", "prediction", "inspection", "knowledge"})
-_MODELING_TASK_TYPES = frozenset({"analysis", "calibration", "multi_modeling", "compare"})
+_SUPPORTED_TASK_TYPES = frozenset({"analysis", "calibration", "classification", "multi_modeling", "compare", "prediction", "inspection", "knowledge"})
+_MODELING_TASK_TYPES = frozenset({"analysis", "calibration", "classification", "multi_modeling", "compare"})
 _PREREQUISITE_INPUTS = {
     "analysis": ("data_path",),
     "calibration": ("data_path",),
+    "classification": ("data_path",),
     "multi_modeling": ("data_path",),
     "compare": ("data_path",),
     "prediction": ("data_path", "model_path"),
@@ -35,6 +36,7 @@ _PREREQUISITE_INPUTS = {
     "knowledge": (),
 }
 _DECISION_INPUTS = ("domain", "analyte", "unit", "validation_goal")
+_CLASSIFICATION_DECISION_INPUTS = ("domain", "label_column", "validation_goal")
 _HIGH_ASSURANCE_INPUTS = ("instrument", "grouping_column", "reference_method")
 _REQUIREMENT_PLACEHOLDERS = frozenset(
     {
@@ -82,6 +84,7 @@ _AGENT_VIEW_FIELDS = (
     "domain",
     "analyte",
     "unit",
+    "label_column",
     "validation_goal",
     "instrument",
     "grouping_column",
@@ -127,6 +130,7 @@ _RETRY_MODELING_TOOLS = frozenset(
         "nir_analyze",
         "nir_analyze_collection",
         "nir_compare",
+        "nir_train_classifier",
     }
 )
 _RETRY_MODEL_DEFAULTS = {
@@ -137,6 +141,7 @@ _RETRY_MODEL_DEFAULTS = {
     "nir_analyze": "auto",
     "nir_analyze_collection": "auto",
     "nir_compare": "pls",
+    "nir_train_classifier": "auto",
 }
 _RETRY_SIGNATURE_IGNORED_MODEL_ARGS = frozenset(
     {
@@ -178,6 +183,7 @@ _RETRY_TOOLS_BY_TASK = {
     ),
     "multi_modeling": frozenset({"nir_train_multi_model", "nir_compare"}),
     "compare": frozenset({"nir_compare"}),
+    "classification": frozenset({"nir_train_classifier"}),
 }
 _APPROVAL_PATTERNS = (
     r"批准",
@@ -316,7 +322,7 @@ def _normalize_validation_goal(value: str) -> str:
 def _decision_missing(state: NIRWorkflowState) -> list[str]:
     if state["task_type"] not in _MODELING_TASK_TYPES:
         return []
-    required = list(_DECISION_INPUTS)
+    required = list(_CLASSIFICATION_DECISION_INPUTS if state["task_type"] == "classification" else _DECISION_INPUTS)
     if _requires_high_assurance_context(state.get("validation_goal")):
         required.extend(_HIGH_ASSURANCE_INPUTS)
     return _missing_inputs(state, tuple(required))
@@ -341,6 +347,14 @@ def _clarification_questions(missing: list[str]) -> list[NIRClarificationQuestio
                 "reason": "验证目标决定数据划分、质量声明和是否需要额外域信息。",
             }
         )
+    if "label_column" in missing:
+        questions.append(
+            {
+                "fields": ["label_column"],
+                "question": "请确认用于定性判别的类别标签列名；该列应表示品种、产地、真伪或等级，而不是连续参考值。",
+                "reason": "分类标签决定类别词表、分层划分、混淆矩阵和最终判别含义。",
+            }
+        )
     assurance_fields = [field for field in _HIGH_ASSURANCE_INPUTS if field in missing]
     if assurance_fields:
         questions.append(
@@ -360,6 +374,7 @@ def _requirement_updates(
     domain: str | None = None,
     analyte: str | None = None,
     unit: str | None = None,
+    label_column: str | None = None,
     validation_goal: str | None = None,
     instrument: str | None = None,
     grouping_column: str | None = None,
@@ -371,6 +386,7 @@ def _requirement_updates(
         "domain": domain,
         "analyte": analyte,
         "unit": unit,
+        "label_column": label_column,
         "instrument": instrument,
         "grouping_column": grouping_column,
         "reference_method": reference_method,
@@ -616,6 +632,7 @@ def start_workflow(
     domain: str | None = None,
     analyte: str | None = None,
     unit: str | None = None,
+    label_column: str | None = None,
     validation_goal: str | None = None,
     instrument: str | None = None,
     grouping_column: str | None = None,
@@ -635,6 +652,7 @@ def start_workflow(
         domain=domain,
         analyte=analyte,
         unit=unit,
+        label_column=label_column,
         validation_goal=validation_goal,
         instrument=instrument,
         grouping_column=grouping_column,
@@ -648,6 +666,7 @@ def start_workflow(
         "domain": normalized_requirements.get("domain"),
         "analyte": normalized_requirements.get("analyte"),
         "unit": normalized_requirements.get("unit"),
+        "label_column": normalized_requirements.get("label_column"),
         "validation_goal": normalized_requirements.get("validation_goal"),
         "instrument": normalized_requirements.get("instrument"),
         "grouping_column": normalized_requirements.get("grouping_column"),
@@ -701,6 +720,7 @@ def transition_workflow(
     domain: str | None = None,
     analyte: str | None = None,
     unit: str | None = None,
+    label_column: str | None = None,
     validation_goal: str | None = None,
     instrument: str | None = None,
     grouping_column: str | None = None,
@@ -748,6 +768,7 @@ def transition_workflow(
             domain=domain,
             analyte=analyte,
             unit=unit,
+            label_column=label_column,
             validation_goal=validation_goal,
             instrument=instrument,
             grouping_column=grouping_column,
@@ -789,6 +810,7 @@ def transition_workflow(
             domain=domain,
             analyte=analyte,
             unit=unit,
+            label_column=label_column,
             validation_goal=validation_goal,
             instrument=instrument,
             grouping_column=grouping_column,
@@ -1242,6 +1264,7 @@ def nir_workflow_tool(
     domain: str | None = None,
     analyte: str | None = None,
     unit: str | None = None,
+    label_column: str | None = None,
     validation_goal: str | None = None,
     instrument: str | None = None,
     grouping_column: str | None = None,
@@ -1273,7 +1296,7 @@ def nir_workflow_tool(
             plan_ready, record_attempt, record_retry_plan, knowledge_retrieved,
             approve, reject, registered, or complete.
         task_type: For start: analysis, calibration, multi_modeling, compare,
-            prediction, inspection, or knowledge.
+            classification, prediction, inspection, or knowledge.
         project_id: Optional stable identifier for a new workflow.
         data_path: Input spectral data path.
         model_path: Model artifact path.
@@ -1281,6 +1304,7 @@ def nir_workflow_tool(
         domain: NIR application domain.
         analyte: Property being predicted or analysed.
         unit: Reference/prediction unit.
+        label_column: Category-label column for classification tasks.
         validation_goal: Exploratory, internal_holdout, external_validation, or
             production. This controls the validation claim and extra context.
         instrument: Instrument model or an explicit ``unknown``.
@@ -1324,6 +1348,7 @@ def nir_workflow_tool(
                 domain=domain,
                 analyte=analyte,
                 unit=unit,
+                label_column=label_column,
                 validation_goal=validation_goal,
                 instrument=instrument,
                 grouping_column=grouping_column,
@@ -1346,6 +1371,7 @@ def nir_workflow_tool(
                 domain=domain,
                 analyte=analyte,
                 unit=unit,
+                label_column=label_column,
                 validation_goal=validation_goal,
                 instrument=instrument,
                 grouping_column=grouping_column,

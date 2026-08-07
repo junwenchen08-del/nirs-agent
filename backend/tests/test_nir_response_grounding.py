@@ -97,6 +97,59 @@ def _review_workflow(
     )
 
 
+def _classification_review_workflow() -> dict:
+    workflow = _review_workflow()
+    workflow["task_type"] = "classification"
+    workflow["attempt_evidence"] = {
+        **workflow["attempt_evidence"],
+        "tool_name": "nir_train_classifier",
+        "protocol": "classification_three_way_holdout",
+        "metrics_summary": {
+            "holdout": {
+                "balanced_accuracy": 0.9134,
+                "macro_f1": 0.9078,
+                "mcc": 0.8712,
+                "per_class": {
+                    "A": {"recall": 0.95},
+                    "B": {"recall": 0.88},
+                },
+            },
+            "grade": "A",
+            "passed": True,
+        },
+    }
+    workflow["attempts"] = [workflow["attempt_evidence"]]
+    return workflow
+
+
+def test_classification_response_accepts_current_holdout_metrics() -> None:
+    verdict = validate_nir_response(
+        "Internal holdout balanced accuracy=0.913, macro-F1=0.908, MCC=0.871; this is not external validation.",
+        _classification_review_workflow(),
+    )
+
+    assert verdict.passed is True
+
+
+def test_classification_response_rejects_invented_metric() -> None:
+    verdict = validate_nir_response(
+        "Internal holdout balanced accuracy=0.990; this is not external validation.",
+        _classification_review_workflow(),
+    )
+
+    assert "metric_value_mismatch:balanced_accuracy" in verdict.violations
+
+
+def test_classification_response_rejects_invented_chinese_metrics() -> None:
+    verdict = validate_nir_response(
+        "本次内部留出平衡准确率=0.99，宏平均F1=0.98；这不是外部验证。",
+        _classification_review_workflow(),
+    )
+
+    assert "metric_value_mismatch:balanced_accuracy" in verdict.violations
+    assert "metric_value_mismatch:macro_f1" in verdict.violations
+
+
 def test_internal_holdout_response_accepts_rounded_current_metrics_and_negated_external_claim() -> None:
     verdict = validate_nir_response(
         "本次独立留出测试 R²=0.91，RPD=3.46，RMSEP=0.123。这不是外部验证。",

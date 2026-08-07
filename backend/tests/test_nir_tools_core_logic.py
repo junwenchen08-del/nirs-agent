@@ -230,6 +230,64 @@ def test_partitioned_model_uses_named_external_split(tmp_path: Path):
     assert (tmp_path / "partitioned_report.md").is_file()
 
 
+def test_partitioned_model_can_preserve_named_split_without_external_claim(tmp_path: Path):
+    """Official partitions remain usable when provenance supports only holdout claims."""
+    import pandas as pd
+
+    from deerflow.community.nir.tools import nir_train_partitioned_model_tool
+
+    rng = np.random.RandomState(25)
+    n_wavelengths = 15
+    labels = np.array(["Cal"] * 18 + ["Val"] * 9 + ["Test"] * 9)
+    X = rng.normal(size=(labels.size, n_wavelengths))
+    y = 2.0 + X[:, 2] * 1.1 - X[:, 9] * 0.6 + rng.normal(scale=0.04, size=labels.size)
+    frame = pd.DataFrame(X, columns=[str(900 + 3 * index) for index in range(n_wavelengths)])
+    frame.insert(0, "DM", y)
+    frame.insert(0, "Set", labels)
+    source = tmp_path / "partitioned_holdout.csv"
+    frame.to_csv(source, index=False)
+    model_file = tmp_path / "partitioned_holdout.pkl"
+    metrics_file = tmp_path / "partitioned_holdout.json"
+
+    paths = {
+        "/mnt/user-data/uploads/partitioned_holdout.csv": str(source),
+        "/mnt/user-data/outputs/partitioned_holdout.pkl": str(model_file),
+        "/mnt/user-data/outputs/partitioned_holdout.json": str(metrics_file),
+    }
+    with patch(
+        "deerflow.community.nir.modeling._resolve",
+        side_effect=lambda _runtime, path, *, read_only: paths[path],
+    ):
+        result = nir_train_partitioned_model_tool.func(
+            runtime=MagicMock(),
+            file_path="/mnt/user-data/uploads/partitioned_holdout.csv",
+            split_col="Set",
+            train_label="Cal",
+            tuning_label="Val",
+            test_label="Test",
+            y_col=1,
+            x_cols="2:",
+            pipeline_steps='["snv", "autoscale"]',
+            max_components=3,
+            compare_cars=False,
+            validation_scope="independent_holdout_not_external",
+            model_output="/mnt/user-data/outputs/partitioned_holdout.pkl",
+            metrics_output="/mnt/user-data/outputs/partitioned_holdout.json",
+        )
+
+    payload = json.loads(result)
+    metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
+    report = (tmp_path / "partitioned_report.md").read_text(encoding="utf-8")
+    assert payload["status"] == "ok"
+    assert payload["protocol"] == "named_partition_independent_holdout"
+    assert payload["validation_scope"] == "independent_holdout_not_external"
+    assert "holdout" in payload and "external" not in payload
+    assert metrics["partitions"]["holdout"]["n_samples"] == 9
+    assert "external_test" not in metrics["partitions"]
+    assert "independent-holdout" in report
+    assert "External RMSE" not in report
+
+
 def test_auto_split_model_persists_deterministic_holdout_protocol(tmp_path: Path):
     """Unpartitioned CSV data receives a reproducible, leakage-safe 70/15/15 split."""
     import joblib

@@ -142,10 +142,14 @@ Local embedding deployments use `NIR_KNOWLEDGE_EMBEDDING_MODEL`,
 `python-dotenv` is installed. Model or dimension changes require a fresh,
 isolated index.
 
-The DeerFlow integration keeps orchestration in `community.nir.modeling` while
-data splitting, candidate policy, single-target fitting, multi-target helpers,
-artifact persistence, and registration live in six focused modules. Existing
-tool names remain stable through the modeling facade.
+The DeerFlow integration keeps regression orchestration in
+`community.nir.modeling`, while supervised qualitative modeling lives in
+`community.nir.classification`. The pure `model.classification` module provides
+string-label PLS-DA, logistic and calibrated-SVM candidates, stratified or
+group-isolated three-way splitting, and classification metrics without a
+DeerFlow dependency. Data splitting, candidate policy, single-target fitting,
+multi-target helpers, artifact persistence, and registration remain focused
+modules behind stable tool facades.
 
 ## Testing
 

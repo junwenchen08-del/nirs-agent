@@ -172,7 +172,7 @@ deer-flow/
 
 ## 工具清单
 
-通过 `backend/.../community/nir/tools.py` 注册的 15 个 `@tool` 函数：
+通过 `backend/.../community/nir/tools.py` 注册的 16 个 `@tool` 函数：
 
 | 工具名 | 功能 | 调用方式 |
 |--------|------|---------|
@@ -181,8 +181,9 @@ deer-flow/
 | `nir_inspect` | 预览文件结构（不完整加载） | `nir_inspect(file_path)` |
 | `nir_preprocess` | 单步预处理（11种方法） | `nir_preprocess(input_path, method, output_path)` |
 | `nir_train_model` | 建模（PLS/PCR/SVR/ML 等），含三集分离、CV、可选波长选择和质量门禁 | `nir_train_model(input_path, method, domain, wavelength_selection)` |
+| `nir_train_classifier` | 定性分类（PLS-DA/逻辑回归/校准 SVM），含分层或分组三集划分和逐类别门禁；支持样本在行的 `label_col` 和样本在列的 `label_row` | `nir_train_classifier(file_path, label_col, x_cols, group_col)` 或 `nir_train_classifier(file_path, label_row, sample_cols)` |
 | `nir_train_auto_split_model` | 无官方划分 CSV 的自主划分、波长选择和模型家族选择 | `nir_train_auto_split_model(file_path, y_col, x_cols, split_strategy="auto")` |
-| `nir_train_partitioned_model` | 使用 CSV 官方 Cal/Tuning/外部测试分区自主选择模型并完成无泄漏评估 | `nir_train_partitioned_model(file_path, split_col, train_label, tuning_label, test_label, y_col, x_cols)` |
+| `nir_train_partitioned_model` | 使用 CSV 官方 Cal/Tuning/Test 分区自主选择模型并完成无泄漏评估；可标记为严格外部验证或非外部独立留出 | `nir_train_partitioned_model(file_path, split_col, train_label, tuning_label, test_label, y_col, x_cols, validation_scope)` |
 | `nir_train_multi_model` | 多成分同时建模，共享划分并逐成分选择波长、评估和保存 | `nir_train_multi_model(input_path, method, shared_preprocessing)` |
 | `nir_predict` | 使用已训练模型预测新样本（可选漂移检测） | `nir_predict(model_path, data_path)` |
 | `nir_analyze` | 一键端到端分析，默认自主选择波长方案和模型家族（不含反思闭环） | `nir_analyze(data_path, domain)` |
@@ -201,6 +202,21 @@ deer-flow/
 `protein,moisture,1100,1200,...`），加载器会保留名称并从光谱列提取波长轴；
 使用 `x_cols` 裁剪光谱时，`X` 与 `wv` 始终按同一组原始列索引同步裁剪。
 
+定性鉴别、真伪判别、品种或产地识别使用 `task_type="classification"` 和
+`nir_train_classifier`。类别标签可为字符串、整数或布尔值；运行时优先按样本/批次/产地等
+`group_col` 隔离相关光谱，否则执行可复现的类别分层校准/调优/留出划分。预处理仅在校准数据
+拟合；每个类别至少需要 5 个样本，实际应用应提供更多独立样本并覆盖预期变异。
+PLS-DA、逻辑回归和校准 SVM 只由调优集选择，内部留出集最终使用一次。报告包含
+balanced accuracy、macro-F1、MCC、混淆矩阵以及逐类别 recall/specificity。v4 分类产物保存
+类别顺序、预处理流水线、置信度/类别分数间隔决策策略和训练域漂移参考；`nir_predict` 对低置信度、
+低间隔或漂移样本返回 `needs_review`，不会把它们包装成可靠结论。该协议属于内部独立留出，
+不得称为外部验证。
+
+公开 FTIR/MIR/NIR 数据集常把样本放在列、波数放在行，并把类别写在前几行（例如
+`Wavenumbers,Arabica,...,Robusta`）。`nir_inspect` 会给出 `classification_label_rows`
+候选；此时可直接调用 `nir_train_classifier(label_row=2, sample_cols="1:", wavenumber_col=0)`，
+不需要手工转置或读取原始 CSV 全文。
+
 ---
 
 ## 波长选择
@@ -211,6 +227,9 @@ deer-flow/
 
 当数据集已提供官方分区（例如 Anderson 芒果数据集的 `Set=Cal/Tuning/Val Ext`）时，使用
 `nir_train_partitioned_model`，而不是随机分割工具。该工具只用 Cal 拟合预处理和 CARS，
+用 Tuning 选择模型，并只在最后使用一次 Test。若仪器或参考方法溯源不足，传入
+`validation_scope="independent_holdout_not_external"`，仍保留官方分区，但报告必须称为
+“预定义独立留出”，不能称为外部验证；溯源完整时使用默认的严格外部验证范围。
 只用 Tuning 选择潜变量、全波段/CARS 方案及模型家族，并在 Val Ext 上一次性报告外部指标；模型、指标
 JSON 和 Markdown 报告会一同保存。
 
@@ -586,7 +605,7 @@ cd backend && make eval-nir TRACES=../nir-traces.json
 确定性评分。页面展示通过率、平均分、策略违规、Token、耗时及逐项检查，并支持
 导出完整 JSON 证据；最近 12 次汇总仅保存在当前浏览器中用于观察质量趋势。
 
-版本化场景位于 `backend/evals/nir/scenarios.json`，当前包含 20 个场景，覆盖需求
+版本化场景位于 `backend/evals/nir/scenarios.json`，当前包含 25 个场景，覆盖需求
 收集、数据检查与阻断、校准注册、审批/拒绝、RAG 重试、重试预算耗尽、预测、
 知识无命中诚实性、模型比较，以及食品、土壤和制药领域。评分检查路由、工作流
 终态、工具序列、审批安全、检索证据、模型产物可追溯性以及耗时/Token。

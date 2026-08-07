@@ -156,6 +156,23 @@ selection: PLS is the baseline, while Ridge, SVR, and Extra Trees are added only
 when dimensionality, tuning quality, sample count, and runtime caps justify
 them. An alternative must materially improve tuning RMSE; the final holdout is
 never used to choose the model family.
+Supervised qualitative NIR analysis uses `nir_train_classifier` under the
+`classification` workflow task. It supports string labels, stratified or
+group-isolated calibration/tuning/holdout partitions, bounded PLS-DA,
+logistic, and calibrated-SVM selection, and a version-4 prediction artifact
+with class scores, confidence/margin review policy, and training-domain
+drift reference. The trainer accepts both ordinary samples-in-rows labelled
+CSV files and common public spectroscopy samples-in-columns CSV files via
+`label_row`/`sample_cols`; `nir_inspect` surfaces bounded
+`classification_label_rows` hints so agents do not read raw spectral tables
+into context or write conversion scripts. Classification final responses are grounded against balanced
+accuracy, macro-F1, MCC, confusion-matrix, and per-class evidence; the built-in
+protocol is an internal holdout and must not be presented as external validation.
+Named Cal/Tuning/Test regression partitions are supported under both assurance
+levels: `nir_train_partitioned_model(validation_scope="independent_external_validation")`
+for provenance-backed external validation, or
+`validation_scope="independent_holdout_not_external"` when the same fixed split
+must be preserved without an external-validation claim.
 The default backend dependency is `nir-core[deep,mat73]`, with `torch` pinned
 to PyTorch's explicit CPU wheel index so a CPU Gateway does not pull CUDA
 packages. Every advertised 1D-CNN path therefore has PyTorch in the Gateway

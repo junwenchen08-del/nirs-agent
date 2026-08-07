@@ -1,7 +1,7 @@
 ---
 name: nir-coordinator
 description: >-
-  完整的近红外光谱分析工作流。协调数据加载、预处理优化、模型建立和质量评估。
+  完整的近红外光谱定量与定性分析工作流。协调数据加载、分类/回归建模、预处理优化和质量评估。
   包含反思闭环机制——当模型质量不达标时自动尝试不同的预处理组合。
   支持自然语言自动路由，也可通过 /nir-coordinator 命令显式激活。
 allowed-tools:
@@ -16,6 +16,7 @@ allowed-tools:
   - nir_preprocess
   - nir_train_auto_split_model
   - nir_train_model
+  - nir_train_classifier
   - nir_train_partitioned_model
   - nir_train_multi_model
   - nir_predict
@@ -105,6 +106,13 @@ Cal/Tuning/Test 边界；`Pop` / 样本号 / 批次 / 季节 / 产地等才可�
 `nir_load_data(y_cols=..., output_path=...)` 生成二维 y 的 NPZ，再调用一次
 `nir_train_multi_model`；不要为每个成分分别调用 `nir_train_model`。
 
+定性鉴别、真伪判别、品种/产地识别等有监督分类请求使用 `task_type="classification"`。
+启动时写入 `label_column`、`domain` 和 `validation_goal`；分类不要求 `analyte` 或 `unit`。
+先用 `nir_inspect` 查看 `categorical_columns`，确认类别列及类别分布；存在重复测量、同一样本、
+批次或产地关联时确认 `group_col`，确保相关光谱不会跨越数据分区。内部留出目标完成审查和计划后
+调用一次 `nir_train_classifier`。外部验证或生产目标当前没有分类专用外部协议，必须请用户提供
+独立分区并说明暂不支持，不得把内部留出结果称为外部验证。
+
 单成分 CSV 如果包含官方命名的数据划分列（常见列名为 `Set`、`Partition`、`Split`，
 常见标签为 `Cal`、`Tuning`、`Val Ext`），使用 `task_type="analysis"`，完成数据审查与
 计划记录后直接调用一次 `nir_train_partitioned_model`。该工具会在 Cal 上拟合预处理和
@@ -131,7 +139,7 @@ MATLAB `.mat` 文件如果 `nir_inspect` 返回两个或更多 `available_subset
 
 以下节点由运行时中间件根据工具的结构化成功结果自动记录，**不要重复调用**：
 
-- `nir_train_auto_split_model` / `nir_train_model` / `nir_train_partitioned_model` / `nir_train_multi_model` / `nir_analyze` / `nir_analyze_collection` / `nir_compare`：自动 `record_attempt`
+- `nir_train_auto_split_model` / `nir_train_model` / `nir_train_classifier` / `nir_train_partitioned_model` / `nir_train_multi_model` / `nir_analyze` / `nir_analyze_collection` / `nir_compare`：自动 `record_attempt`
 - `nir_search_knowledge`：自动 `knowledge_retrieved`
 - `nir_register_model`：自动 `registered`
 
@@ -175,6 +183,7 @@ MATLAB `.mat` 文件如果 `nir_inspect` 返回两个或更多 `available_subset
 - 调用 `nir_analyze`：一键完成完整分析（推荐 90% 场景）
 - 调用 `nir_load_data` / `nir_inspect`：加载或预览数据
 - 调用 `nir_train_auto_split_model`：对无官方划分的单成分 CSV 快速生成可复现三集划分并完成留出测试
+- 调用 `nir_train_classifier`：用字符串或数值类别标签完成 PLS-DA、逻辑回归和校准 SVM 的受控选择；若 `nir_inspect` 返回 `classification_label_rows`，直接用 `label_row`/`sample_cols` 训练样本在列的公开光谱 CSV，不要读取 CSV 全文或写转换脚本
 - 调用 `nir_preprocess` / `nir_train_model`：分步执行（用于反思闭环）
 - 调用 `nir_train_partitioned_model`：按 CSV 内官方命名划分完成一次无泄漏建模和外部验证
 - 调用 `nir_train_multi_model`：一次训练多个成分，共享数据划分并逐成分评估
@@ -193,6 +202,48 @@ MATLAB `.mat` 文件如果 `nir_inspect` 返回两个或更多 `available_subset
 4. **测试集只在最终评估时使用一次**——不得参与任何参数选择
 5. ★ v3 **防泄露预处理**——使用 `nir_train_model(pipeline_steps=...)` 时预处理参数仅在训练集拟合
 
+## 模式 Q：定性分类
+
+确认 CSV 中的类别列和光谱列后调用：
+
+```text
+nir_train_classifier(
+  file_path="/mnt/user-data/uploads/qualitative.csv",
+  label_col="class",
+  x_cols="2:",
+  group_col="sample_id",
+  pipeline_steps='["snv", "autoscale"]',
+  methods='["pls_da", "logistic", "linear_svm"]',
+  model_output="/mnt/user-data/outputs/qualitative_model.pkl",
+  metrics_output="/mnt/user-data/outputs/qualitative_metrics.json",
+  report_output="/mnt/user-data/outputs/qualitative_report.md"
+)
+```
+
+公开 FTIR/MIR/NIR 数据集常把样本放在列、波数放在行，并把类别写在前几行。
+如果 `nir_inspect` 返回 `classification_label_rows`，直接使用候选行调用：
+
+```text
+nir_train_classifier(
+  file_path="/mnt/user-data/uploads/raw_spectra.csv",
+  label_row=2,
+  sample_cols="1:",
+  wavenumber_col=0,
+  pipeline_steps='["snv", "autoscale"]',
+  methods='["pls_da", "logistic", "linear_svm"]',
+  model_output="/mnt/user-data/outputs/qualitative_model.pkl",
+  metrics_output="/mnt/user-data/outputs/qualitative_metrics.json",
+  report_output="/mnt/user-data/outputs/qualitative_report.md"
+)
+```
+
+参数必须来自用户确认和数据审查；没有真实分组列时省略 `group_col`，不得用类别列充当分组列。
+每个类别至少需要 5 个样本；生产性结论应使用更多独立样本覆盖预期批次、产地和仪器变异。
+工具在校准集上拟合预处理、在调优集选择模型、仅用一次内部留出集评估。报告类别分布、实际划分、
+所选方法、balanced accuracy、macro-F1、MCC、混淆矩阵和逐类别 recall/specificity，并明确说明
+不是外部验证。预测时用 `nir_predict`，报告 `predicted_class`、confidence、margin 和
+`accepted`/`needs_review`；漂移、低置信度或低间隔样本必须进入人工复核，不能强行给出可靠类别。
+
 ## 模式 0：官方命名划分 CSV（最高优先级）
 
 当 `nir_inspect` 或用户描述表明单成分 CSV 已有官方划分列时，不进入下面的快速模式或
@@ -208,10 +259,17 @@ nir_train_partitioned_model(
   y_col=2,
   x_cols="30:",
   wv_row=0,
+  validation_scope="independent_external_validation",
   model_output="/mnt/user-data/outputs/partitioned_model.pkl",
   metrics_output="/mnt/user-data/outputs/partitioned_metrics.json"
 )
 ```
+
+Set `validation_scope="independent_holdout_not_external"` when the dataset has
+trusted Cal/Tuning/Test labels but lacks the instrument/reference-method
+provenance required for a strict external-validation claim. Preserve the named
+partitions and report the Test metrics as an independent holdout; do not switch
+to random auto-splitting and do not call the result external validation.
 
 参数必须来自数据审查结果，不得猜测。默认不要传 `method`，让工具在 Tuning 上自主比较受控的
 PLS/Ridge/SVR/Extra Trees 候选；只有用户明确指定算法时才传。工具成功后读取其 `report` 和

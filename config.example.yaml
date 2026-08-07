@@ -868,6 +868,10 @@ tools:
     group: bash
     use: deerflow.community.nir.modeling:nir_train_model_tool
 
+  - name: nir_train_classifier
+    group: bash
+    use: deerflow.community.nir.classification:nir_train_classifier_tool
+
   - name: nir_train_auto_split_model
     group: bash
     use: deerflow.community.nir.modeling:nir_train_auto_split_model_tool

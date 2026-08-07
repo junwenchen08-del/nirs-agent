@@ -44,9 +44,9 @@ class _ToolPolicy:
     task_types: frozenset[str]
 
 
-_MODEL_TASKS = frozenset({"analysis", "calibration", "multi_modeling", "compare"})
-_DATA_TASKS = frozenset({"analysis", "calibration", "multi_modeling", "compare", "prediction", "inspection"})
-_EXECUTION_TASKS = frozenset({"analysis", "calibration", "multi_modeling", "compare", "prediction"})
+_MODEL_TASKS = frozenset({"analysis", "calibration", "classification", "multi_modeling", "compare"})
+_DATA_TASKS = frozenset({"analysis", "calibration", "classification", "multi_modeling", "compare", "prediction", "inspection"})
+_EXECUTION_TASKS = frozenset({"analysis", "calibration", "classification", "multi_modeling", "compare", "prediction"})
 
 _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_load_data": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
@@ -54,6 +54,7 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_preprocess": _ToolPolicy(frozenset({"execution"}), _EXECUTION_TASKS),
     "nir_train_auto_split_model": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
     "nir_train_model": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
+    "nir_train_classifier": _ToolPolicy(frozenset({"execution"}), frozenset({"classification"})),
     "nir_train_partitioned_model": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
     "nir_train_multi_model": _ToolPolicy(frozenset({"execution"}), frozenset({"multi_modeling"})),
     "nir_analyze": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
@@ -66,17 +67,22 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
 }
 _OBSERVED_NIR_TOOLS = frozenset({*_TOOL_POLICIES, "nir_workflow"})
 
-_MODELING_TOOLS = frozenset({"nir_train_auto_split_model", "nir_train_model", "nir_train_partitioned_model", "nir_train_multi_model", "nir_analyze", "nir_analyze_collection", "nir_compare"})
-_INTERNAL_HOLDOUT_TOOLS = _MODELING_TOOLS - {"nir_train_partitioned_model"}
+_MODELING_TOOLS = frozenset({"nir_train_auto_split_model", "nir_train_model", "nir_train_classifier", "nir_train_partitioned_model", "nir_train_multi_model", "nir_analyze", "nir_analyze_collection", "nir_compare"})
+_INTERNAL_HOLDOUT_TOOLS = _MODELING_TOOLS
 _EXTERNAL_VALIDATION_TOOLS = frozenset({"nir_train_partitioned_model"})
 _TOOL_VALIDATION_PROTOCOL = {
     "nir_train_auto_split_model": ("deterministic_auto_split_holdout", "independent_holdout_not_external"),
     "nir_train_model": ("random_three_way_holdout", "independent_holdout_not_external"),
+    "nir_train_classifier": ("classification_three_way_holdout", "independent_holdout_not_external"),
     "nir_train_partitioned_model": ("named_partition_external_validation", "independent_external_validation"),
     "nir_train_multi_model": ("multi_target_random_three_way_holdout", "independent_holdout_not_external"),
     "nir_analyze": ("automated_analysis_three_way_holdout", "independent_holdout_not_external"),
     "nir_analyze_collection": ("mat_collection_sequential_compact", "independent_holdout_not_external"),
     "nir_compare": ("preprocessing_comparison_three_way_holdout", "independent_holdout_not_external"),
+}
+_PARTITIONED_PROTOCOLS = {
+    ("named_partition_external_validation", "independent_external_validation"),
+    ("named_partition_independent_holdout", "independent_holdout_not_external"),
 }
 _MAX_WORKFLOW_CONTINUATION_REMINDERS = 2
 _GROUPING_SPLIT_CONFLICT_CODE = "nir_grouping_split_column_conflict"
@@ -407,6 +413,27 @@ def _deny_validation_goal_conflict(
         )
     if tool_name == "nir_register_model":
         return None
+    if tool_name == "nir_train_partitioned_model":
+        args = request.tool_call.get("args")
+        args = args if isinstance(args, Mapping) else {}
+        requested_scope = str(args.get("validation_scope") or "independent_external_validation").strip().lower()
+        required_scope = "independent_external_validation" if validation_goal in {"external_validation", "production"} else "independent_holdout_not_external"
+        if requested_scope == required_scope:
+            return None
+        return _denied_message(
+            request,
+            code=_VALIDATION_GOAL_CONFLICT_CODE,
+            error=(f"Tool {tool_name!r} requested validation_scope={requested_scope!r}, but validation_goal={validation_goal!r} requires {required_scope!r}."),
+            workflow=workflow,
+            policy=policy,
+            details={
+                "validation_goal": validation_goal,
+                "requested_validation_scope": requested_scope,
+                "required_validation_scope": required_scope,
+                "allowed_modeling_tools": ["nir_train_partitioned_model"],
+                "action_required": "retry_partitioned_model_with_required_validation_scope",
+            },
+        )
     if validation_goal == "internal_holdout" and tool_name in _INTERNAL_HOLDOUT_TOOLS:
         return None
     if validation_goal in {"external_validation", "production"} and tool_name in _EXTERNAL_VALIDATION_TOOLS:
@@ -665,6 +692,11 @@ def _model_attempt_update(
     if tool_name == "nir_compare":
         metrics_path = payload.get("all_metrics")
     protocol, validation_scope = _TOOL_VALIDATION_PROTOCOL[tool_name]
+    if tool_name == "nir_train_partitioned_model":
+        emitted_protocol = str(result.get("protocol") or "")
+        emitted_scope = str(result.get("validation_scope") or "")
+        if (emitted_protocol, emitted_scope) in _PARTITIONED_PROTOCOLS:
+            protocol, validation_scope = emitted_protocol, emitted_scope
     emitted_evidence = payload.get("evidence")
     emitted_evidence = emitted_evidence if isinstance(emitted_evidence, Mapping) else {}
     digest_fields = {}
@@ -693,6 +725,10 @@ def _model_attempt_update(
         ]
         metrics_summary["component_count"] = len(result["per_component"])
     result_fact_keys = (
+        "task_kind",
+        "label_name",
+        "classes",
+        "class_distribution",
         "preprocessing",
         "wavelength_selection",
         "wavelength_selection_decision",
@@ -760,6 +796,8 @@ def _data_audit_update(
         "y_ranges",
         "y_separated",
         "wv_separated",
+        "categorical_columns",
+        "classification_hint",
     )
     evidence = {
         "source_tool": tool_name,

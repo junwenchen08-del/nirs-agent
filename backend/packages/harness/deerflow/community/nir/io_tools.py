@@ -54,6 +54,13 @@ def _runtime_audit_attribution(runtime: Runtime, tool_call_id: str) -> dict[str,
 def _prediction_summary_for_audit(payload: dict) -> dict | list[dict] | None:
     if isinstance(payload.get("predictions_summary"), list):
         return payload["predictions_summary"]
+    if payload.get("task_kind") == "classification":
+        return {
+            "class_counts": payload.get("class_counts"),
+            "accepted_count": payload.get("accepted_count"),
+            "needs_review_count": payload.get("needs_review_count"),
+            "mean_confidence": payload.get("mean_confidence"),
+        }
     keys = ("prediction_mean", "prediction_min", "prediction_max")
     if any(key in payload for key in keys):
         return {key.removeprefix("prediction_"): payload[key] for key in keys}
@@ -180,6 +187,79 @@ def _compact_inspection_sequence(value, *, limit: int = 32):
         result["min"] = min(numeric)
         result["max"] = max(numeric)
     return result
+
+
+def _categorical_column_profiles(path: str, *, row_limit: int = 1000) -> list[dict]:
+    """Return bounded label/group candidates without exposing sample rows."""
+
+    suffix = Path(path).suffix.lower()
+    if suffix not in {".csv", ".tsv"}:
+        return []
+    import pandas as pd
+
+    frame = pd.read_csv(path, sep="\t" if suffix == ".tsv" else ",", nrows=row_limit)
+    sampled_rows = int(frame.shape[0])
+    profiles: list[dict] = []
+    for index, column in enumerate(frame.columns):
+        values = frame[column].dropna()
+        n_observed = int(values.shape[0])
+        n_unique = int(values.nunique(dropna=True))
+        if n_unique < 2 or n_unique > 20 or n_unique >= n_observed:
+            continue
+        counts = values.astype(str).value_counts().head(12)
+        profiles.append(
+            {
+                "index": index,
+                "name": str(column),
+                "n_unique": n_unique,
+                "class_counts": {str(label)[:80]: int(count) for label, count in counts.items()},
+                "counts_truncated": n_unique > len(counts),
+                "sampled_rows": sampled_rows,
+                "profile_is_sampled": sampled_rows >= row_limit,
+            }
+        )
+    return profiles
+
+
+def _classification_label_row_profiles(path: str, *, row_limit: int = 25) -> list[dict]:
+    """Return bounded samples-in-columns label-row candidates."""
+
+    suffix = Path(path).suffix.lower()
+    if suffix not in {".csv", ".tsv"}:
+        return []
+    import pandas as pd
+
+    frame = pd.read_csv(path, sep="\t" if suffix == ".tsv" else ",", header=None, nrows=row_limit)
+    if frame.shape[1] < 3:
+        return []
+    sample_indices = list(range(1, frame.shape[1]))
+    profiles: list[dict] = []
+    for row_index in range(frame.shape[0]):
+        values = frame.iloc[row_index, sample_indices].dropna().astype(str).str.strip()
+        values = values[values != ""]
+        n_observed = int(values.shape[0])
+        n_unique = int(values.nunique(dropna=True))
+        if n_unique < 2 or n_unique > 20 or n_unique >= n_observed:
+            continue
+        counts = values.value_counts().head(12)
+        min_count = int(counts.min()) if not counts.empty else 0
+        if min_count < 5:
+            continue
+        numeric = pd.to_numeric(values, errors="coerce").notna().mean() if n_observed else 1.0
+        profiles.append(
+            {
+                "row_index": row_index,
+                "n_unique": n_unique,
+                "class_counts": {str(label)[:80]: int(count) for label, count in counts.items()},
+                "counts_truncated": n_unique > len(counts),
+                "sample_cols": "1:",
+                "wavenumber_col": 0,
+                "likely_label_row": bool(numeric < 0.5),
+                "sampled_columns": len(sample_indices),
+            }
+        )
+    profiles.sort(key=lambda item: (item["likely_label_row"], item["sampled_columns"], -item["row_index"]), reverse=True)
+    return profiles
 
 
 @tool("nir_load_data", parse_docstring=True)
@@ -405,6 +485,27 @@ def nir_inspect_tool(
             info = _json.loads(raw)
         except (TypeError, ValueError):
             return raw
+
+        try:
+            categorical_columns = _categorical_column_profiles(real_in)
+        except Exception:  # noqa: BLE001 - advisory profiling must not block inspection
+            categorical_columns = []
+        try:
+            label_rows = _classification_label_row_profiles(real_in)
+        except Exception:  # noqa: BLE001 - advisory profiling must not block inspection
+            label_rows = []
+        if categorical_columns:
+            info["categorical_columns"] = categorical_columns
+            info["classification_hint"] = (
+                "Candidate class-label or grouping columns were profiled from at most 1000 rows. Confirm label_col with the user, and use a batch/sample/origin column as group_col when related spectra must stay together."
+            )
+        if label_rows:
+            info["classification_label_rows"] = label_rows
+            info["classification_hint"] = (
+                "Samples-in-columns class-label rows were detected. For qualitative classification, "
+                'call nir_train_classifier with label_row=<row_index>, sample_cols="1:", '
+                "wavenumber_col=0, and optional group_row when replicate/sample groups must stay together."
+            )
 
         schema_mapping = info.get("schema_mapping") or {}
         for key in ("spectral_columns", "candidate_numeric_columns", "wavelengths"):
@@ -758,6 +859,114 @@ def nir_predict_tool(
                     writer.writerow(["sample_index", *names])
                     for index, values in enumerate(y_pred_multi):
                         writer.writerow([index, *(float(value) for value in values)])
+                result["output_path"] = output_path
+            return finish(result)
+
+        if isinstance(artifact, dict) and artifact.get("task_kind") == "classification":
+            model = artifact.get("model")
+            if model is None:
+                raise ValueError("Classification artifact is missing the fitted model object.")
+            preprocessing = artifact.get("preprocessing") or {}
+            wavelength_selection = artifact.get("wavelength_selection") or {}
+            monitoring_reference = artifact.get("monitoring_reference")
+            X, preprocessing_applied = _apply_artifact_preprocessing(
+                X,
+                wv,
+                preprocessing,
+                input_preprocessed=input_preprocessed,
+            )
+            X = _apply_artifact_wavelength_selection(X, wavelength_selection)
+            predicted = np.asarray(model.predict(X)).astype(str).ravel()
+            classes = [str(value) for value in artifact.get("classes") or getattr(model, "classes_", [])]
+            if not classes:
+                raise ValueError("Classification artifact has no class vocabulary.")
+            model_classes = [str(value) for value in getattr(model, "classes_", classes)]
+            if model_classes != classes:
+                raise ValueError("Classification artifact class vocabulary does not match the fitted model.")
+
+            probabilities: np.ndarray | None = None
+            predict_proba = getattr(model, "predict_proba", None)
+            if callable(predict_proba):
+                probabilities = np.asarray(predict_proba(X), dtype=float)
+            if probabilities is None or probabilities.shape != (X.shape[0], len(classes)):
+                raise ValueError("Classification model must provide one probability per persisted class.")
+            confidence = np.max(probabilities, axis=1)
+            if probabilities.shape[1] > 1:
+                ordered = np.sort(probabilities, axis=1)
+                margin = ordered[:, -1] - ordered[:, -2]
+            else:
+                margin = confidence.copy()
+
+            drift_payload: dict | None = None
+            drift_flagged: set[int] = set()
+            if detect_drift:
+                if monitoring_reference:
+                    from nir_core.utils.drift import compute_reference_drift
+
+                    drift = compute_reference_drift(monitoring_reference, X)
+                    flagged_indices = drift["flagged_indices"].tolist()
+                    drift_flagged = {int(index) for index in flagged_indices}
+                    drift_payload = {
+                        "available": True,
+                        "method": drift["method"],
+                        "drift_score": drift["drift_score"],
+                        "flagged_indices": flagged_indices,
+                        "t2_flagged_indices": drift["t2_flagged_indices"].tolist(),
+                        "q_flagged_indices": drift["q_flagged_indices"].tolist(),
+                        "t2_limit": drift["t2_limit"],
+                        "q_limit": drift["q_limit"],
+                    }
+                else:
+                    drift_payload = {"available": False, "reason": "legacy_artifact_has_no_training_reference"}
+
+            policy = artifact.get("decision_policy") or {}
+            confidence_threshold = float(policy.get("min_confidence", 0.5))
+            margin_threshold = float(policy.get("min_margin", 0.05))
+            accepted = np.asarray(
+                [bool(confidence[index] >= confidence_threshold and margin[index] >= margin_threshold and index not in drift_flagged) for index in range(X.shape[0])],
+                dtype=bool,
+            )
+            class_counts = {label: int(np.count_nonzero(predicted == label)) for label in classes if np.any(predicted == label)}
+            result = {
+                "status": "ok",
+                "task_kind": "classification",
+                "n_samples": int(X.shape[0]),
+                "classes": classes,
+                "class_counts": class_counts,
+                "accepted_count": int(np.count_nonzero(accepted)),
+                "needs_review_count": int(np.count_nonzero(~accepted)),
+                "mean_confidence": float(np.mean(confidence)),
+                "decision_policy": {
+                    "min_confidence": confidence_threshold,
+                    "min_margin": margin_threshold,
+                    "drifted_samples_require_review": True,
+                },
+                "preprocessing": {
+                    "description": preprocessing.get("description", "none"),
+                    "applied": preprocessing_applied,
+                },
+                "wavelength_selection": wavelength_selection or None,
+            }
+            if drift_payload is not None:
+                result["drift"] = drift_payload
+            if output_path:
+                real_out = _resolve(runtime, output_path, read_only=False)
+                os.makedirs(os.path.dirname(real_out), exist_ok=True)
+                import csv
+
+                with open(real_out, "w", newline="", encoding="utf-8") as file:
+                    writer = csv.writer(file)
+                    writer.writerow(["sample_index", "predicted_class", "confidence", "margin", "decision"])
+                    for index, label in enumerate(predicted):
+                        writer.writerow(
+                            [
+                                index,
+                                label,
+                                float(confidence[index]),
+                                float(margin[index]),
+                                "accepted" if accepted[index] else "needs_review",
+                            ]
+                        )
                 result["output_path"] = output_path
             return finish(result)
 

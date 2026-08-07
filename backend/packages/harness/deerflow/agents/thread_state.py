@@ -57,6 +57,7 @@ class NIRWorkflowState(TypedDict):
     domain: NotRequired[str | None]
     analyte: NotRequired[str | None]
     unit: NotRequired[str | None]
+    label_column: NotRequired[str | None]
     validation_goal: NotRequired[str | None]
     instrument: NotRequired[str | None]
     grouping_column: NotRequired[str | None]

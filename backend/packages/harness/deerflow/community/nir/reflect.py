@@ -12,6 +12,80 @@ from ._common import _err, _ok, _resolve
 from ._knowledge_hint import _build_knowledge_hint
 
 
+def _classification_reflection(
+    metrics: dict,
+    history_list: list,
+    *,
+    attempt: int,
+    max_retries: int,
+    get_next_pipeline,
+) -> str:
+    """Build retry evidence for a classification run without regression assumptions."""
+
+    quality = metrics.get("quality") if isinstance(metrics.get("quality"), dict) else {}
+    holdout = metrics.get("test") if isinstance(metrics.get("test"), dict) else {}
+    per_class = holdout.get("per_class") if isinstance(holdout.get("per_class"), dict) else {}
+    recalls = {str(label): float(values["recall"]) for label, values in per_class.items() if isinstance(values, dict) and isinstance(values.get("recall"), int | float)}
+    weakest_class = min(recalls, key=recalls.get) if recalls else None
+    diagnostics = {
+        "balanced_accuracy": holdout.get("balanced_accuracy"),
+        "macro_f1": holdout.get("macro_f1"),
+        "weakest_class": weakest_class,
+        "weakest_class_recall": recalls.get(weakest_class) if weakest_class else None,
+        "class_recalls": recalls,
+    }
+    current_pipeline = metrics.get("preprocessing_steps") or []
+    selection_history = [
+        *history_list,
+        {"pipeline": current_pipeline, "metrics": {"holdout": holdout}},
+    ]
+    steps = get_next_pipeline(attempt=attempt, history=selection_history)
+    can_retry = quality.get("passed") is not True and attempt < max_retries and steps is not None
+    next_steps = [{"method": step.method, "params": step.params} for step in steps] if can_retry and steps is not None else None
+    reason = "Classification quality gate passed; no retry is needed." if quality.get("passed") is True else "Classification holdout quality is below the configured gate."
+    if weakest_class:
+        reason += f" Weakest class is {weakest_class!r} with recall {recalls[weakest_class]:.4f}."
+    if can_retry:
+        reason += " Retry with a materially different leakage-safe preprocessing pipeline."
+    elif quality.get("passed") is not True:
+        reason += " Retry budget or approved preprocessing candidates are exhausted."
+
+    records = [*history_list, {"pipeline": current_pipeline, "metrics": {"holdout": holdout}}]
+    best = None
+    for record in records:
+        record_metrics = record.get("metrics", {}) if isinstance(record, dict) else {}
+        section = record_metrics.get("holdout") or record_metrics.get("test") or record_metrics
+        score = section.get("balanced_accuracy") if isinstance(section, dict) else None
+        if isinstance(score, int | float) and (best is None or score > best["balanced_accuracy"]):
+            best = {
+                "balanced_accuracy": float(score),
+                "macro_f1": section.get("macro_f1"),
+                "pipeline": record.get("pipeline", []),
+            }
+
+    return _ok(
+        {
+            "task_kind": "classification",
+            "should_retry": can_retry,
+            "reason": reason,
+            "diagnostics": diagnostics,
+            "fallback_suggestion": [step["method"] for step in next_steps] if next_steps else None,
+            "fallback_suggestion_steps": next_steps,
+            "lv_adjustment": {},
+            "current_quality": {
+                "grade": quality.get("grade", "unknown"),
+                "passed": quality.get("passed") is True,
+                "action": quality.get("action"),
+                "thresholds_used": quality.get("thresholds_used", {}),
+            },
+            "best_so_far": best,
+            "attempt": attempt,
+            "next_attempt": attempt + 1 if can_retry else None,
+            "knowledge_hint": None,
+        }
+    )
+
+
 @tool("nir_reflect", parse_docstring=True)
 def nir_reflect_tool(
     runtime: Runtime,
@@ -75,6 +149,15 @@ def nir_reflect_tool(
             history_list = _json.loads(history) if isinstance(history, str) else history
         except (ValueError, TypeError):
             history_list = []
+
+        if metrics.get("task_kind") == "classification":
+            return _classification_reflection(
+                metrics,
+                history_list if isinstance(history_list, list) else [],
+                attempt=attempt,
+                max_retries=max_retries,
+                get_next_pipeline=get_next_pipeline,
+            )
 
         n_samples = metrics.get("n_samples")
 

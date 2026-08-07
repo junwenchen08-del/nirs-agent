@@ -1,7 +1,7 @@
 """NIR community package — @tool functions bridging DeerFlow to nir_core.
 
 The actual implementations live in focused sub-modules (io_tools,
-preprocess, modeling, reflect, knowledge). This package init re-exports
+preprocess, classification, modeling, reflect, knowledge). This package init re-exports
 the public tool functions for convenience so callers can write::
 
     from deerflow.community.nir import nir_train_model_tool
@@ -10,6 +10,7 @@ For legacy reasons ``from deerflow.community.nir.tools import ...`` also
 continues to work (tools.py is a re-export facade).
 """
 
+from .classification import nir_train_classifier_tool
 from .io_tools import nir_inspect_tool, nir_load_data_tool, nir_predict_tool
 from .knowledge import nir_search_knowledge_tool
 from .modeling import (
@@ -32,6 +33,7 @@ __all__ = [
     "nir_preprocess_tool",
     "nir_train_auto_split_model_tool",
     "nir_train_model_tool",
+    "nir_train_classifier_tool",
     "nir_train_partitioned_model_tool",
     "nir_train_multi_model_tool",
     "nir_predict_tool",

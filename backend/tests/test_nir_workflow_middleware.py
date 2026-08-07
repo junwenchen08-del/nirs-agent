@@ -149,6 +149,107 @@ def test_tool_is_denied_for_incompatible_task_type() -> None:
     assert json.loads(result.update["messages"][0].content)["code"] == "nir_workflow_task_denied"
 
 
+def test_classification_tool_is_allowed_and_records_attempt_evidence() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="classification",
+        data_path="classes.csv",
+        domain="food_authenticity",
+        label_column="origin",
+        validation_goal="internal_holdout",
+    )
+    workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    workflow = transition_workflow(workflow, action="plan_ready")
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "nir_train_classifier",
+            {"nir_workflow": workflow},
+            args={
+                "file_path": "classes.csv",
+                "label_col": "origin",
+                "pipeline_steps": '["snv"]',
+                "methods": '["pls_da"]',
+            },
+        ),
+        lambda _: _result(
+            "nir_train_classifier",
+            {
+                "status": "ok",
+                "task_kind": "classification",
+                "passed": True,
+                "grade": "A",
+                "method": "pls_da",
+                "label_name": "origin",
+                "classes": ["north", "south"],
+                "class_distribution": {"north": 30, "south": 30},
+                "model_path": "/mnt/user-data/outputs/qualitative.pkl",
+                "metrics_path": "/mnt/user-data/outputs/qualitative.json",
+                "holdout": {"balanced_accuracy": 0.95, "macro_f1": 0.94, "mcc": 0.92},
+                "evidence": {
+                    "model_sha256": "a" * 64,
+                    "metrics_sha256": "b" * 64,
+                    "training_data_sha256": "c" * 64,
+                },
+            },
+        ),
+    )
+
+    assert isinstance(result, Command)
+    updated = result.update["nir_workflow"]
+    assert updated["stage"] == "review"
+    assert updated["attempt_evidence"]["tool_name"] == "nir_train_classifier"
+    assert updated["attempt_evidence"]["metrics_summary"]["holdout"]["balanced_accuracy"] == 0.95
+    assert updated["attempt_evidence"]["result_facts"]["classes"] == ["north", "south"]
+
+
+def test_regression_model_tool_is_denied_for_classification_workflow() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="classification",
+        data_path="classes.csv",
+        domain="food_authenticity",
+        label_column="origin",
+        validation_goal="internal_holdout",
+    )
+    workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    workflow = transition_workflow(workflow, action="plan_ready")
+
+    result = middleware.wrap_tool_call(
+        _request("nir_train_model", {"nir_workflow": workflow}),
+        lambda _: _result("nir_train_model", {"status": "ok"}),
+    )
+
+    assert isinstance(result, Command)
+    assert json.loads(result.update["messages"][0].content)["code"] == "nir_workflow_task_denied"
+
+
+def test_internal_classifier_is_denied_for_external_validation_goal() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="classification",
+        data_path="classes.csv",
+        domain="food_authenticity",
+        label_column="origin",
+        validation_goal="external_validation",
+        instrument="instrument-1",
+        grouping_column="batch",
+        reference_method="verified origin records",
+    )
+    workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    workflow = transition_workflow(workflow, action="plan_ready")
+
+    result = middleware.wrap_tool_call(
+        _request("nir_train_classifier", {"nir_workflow": workflow}),
+        lambda _: _result("nir_train_classifier", {"status": "ok"}),
+    )
+
+    assert isinstance(result, Command)
+    payload = json.loads(result.update["messages"][0].content)
+    assert payload["code"] == "nir_validation_goal_conflict"
+    assert payload["details"]["required_validation_scope"] == "independent_external_validation"
+
+
 @pytest.mark.parametrize(
     "tool_name",
     [
@@ -219,6 +320,35 @@ def test_internal_holdout_goal_rejects_external_partition_protocol() -> None:
     payload = json.loads(result.update["messages"][0].content)
     assert payload["code"] == "nir_validation_goal_conflict"
     assert payload["details"]["required_validation_scope"] == "independent_holdout_not_external"
+    assert payload["details"]["action_required"] == ("retry_partitioned_model_with_required_validation_scope")
+
+
+def test_internal_holdout_goal_allows_named_partition_holdout_protocol() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state(task_type="analysis")
+    original = _result(
+        "nir_train_partitioned_model",
+        {
+            "status": "ok",
+            "passed": True,
+            "protocol": "named_partition_independent_holdout",
+            "validation_scope": "independent_holdout_not_external",
+        },
+    )
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "nir_train_partitioned_model",
+            {"nir_workflow": workflow},
+            args={"validation_scope": "independent_holdout_not_external"},
+        ),
+        lambda _: original,
+    )
+
+    assert isinstance(result, Command)
+    attempt = result.update["nir_workflow"]["attempts"][-1]
+    assert attempt["protocol"] == "named_partition_independent_holdout"
+    assert attempt["validation_scope"] == "independent_holdout_not_external"
 
 
 @pytest.mark.parametrize("validation_goal", ["external_validation", "production"])

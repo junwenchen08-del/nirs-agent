@@ -8,6 +8,7 @@ implementations. It has been split into focused sub-modules:
 - ``_report``         — Markdown report generator
 - ``io_tools``        — nir_load_data / nir_inspect / nir_predict
 - ``preprocess``      — nir_preprocess
+- ``classification``  — nir_train_classifier
 - ``modeling``        — nir_train_model / nir_analyze / nir_compare /
                         nir_register_model
 - ``reflect``         — nir_reflect
@@ -38,6 +39,7 @@ from ._common import (
 )
 from ._knowledge_hint import _KNOWN_DOMAINS, _build_knowledge_hint
 from ._report import _build_report
+from .classification import nir_train_classifier_tool
 
 # Re-export every @tool function so ``deerflow.community.nir.tools:<name>``
 # paths in config.yaml keep working.
@@ -72,6 +74,7 @@ __all__ = [
     "nir_preprocess_tool",
     "nir_train_auto_split_model_tool",
     "nir_train_model_tool",
+    "nir_train_classifier_tool",
     "nir_train_partitioned_model_tool",
     "nir_train_multi_model_tool",
     "nir_predict_tool",

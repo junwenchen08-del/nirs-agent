@@ -302,13 +302,32 @@ from deerflow.config import get_app_config
   over the full wavelength pool, and retains the full-wavelength model whenever
   no selected subset improves its CV RMSE; SPA rejects `n_min` values larger
   than the available wavelength count.
+  Supervised qualitative analysis uses `task_type=classification` and the
+  separate `nir_train_classifier` CSV tool. `nir_inspect` emits bounded
+  categorical label/group candidates plus samples-in-columns
+  `classification_label_rows` hints for public FTIR/MIR/NIR CSV layouts.
+  The trainer accepts string, integer, or boolean labels from either rowwise
+  `label_col` tables or columnwise `label_row`/`sample_cols` tables and enforces at least five rows per class,
+  conflicting-duplicate rejection, stratified or group-isolated three-way
+  splits, calibration-only preprocessing, tuning-only PLS-DA/logistic/
+  calibrated-SVM selection, and one-time holdout evaluation. Its version-4
+  artifact stores class order, fitted preprocessing, confidence/margin review
+  thresholds, and the training-domain monitoring reference. `nir_predict`
+  returns class counts and aggregate confidence while optional CSV output
+  carries row-level class, confidence, margin, and accepted/needs-review
+  decisions. Classification attempts and final-response metrics use the same
+  workflow evidence ledger and remain internal-holdout evidence.
   `nir_train_partitioned_model` is the CSV protocol path for data with named
   official partitions: it fits preprocessing/CARS on Cal only, selects latent
   variables and the full-versus-CARS candidate on Tuning only, then reports
-  Val Ext (or another named external partition) once. It persists a standard
+  the named Test partition once. Its `validation_scope` distinguishes
+  provenance-backed `independent_external_validation` from a fixed
+  `independent_holdout_not_external`; both preserve the named split, while only
+  the former may be called external validation. It persists a standard
   prediction artifact plus metrics JSON and a compact Markdown report.
   Validation goals are runtime protocol constraints, not report labels:
-  `internal_holdout` permits only same-dataset holdout tools, while
+  `internal_holdout` permits same-dataset holdout tools and the partitioned tool
+  only with its non-external scope, while
   `external_validation` and `production` permit only the named-partition
   external-validation tool. Every successful model attempt stores bounded
   `attempt_evidence` with tool/run attribution, protocol, validation scope,
