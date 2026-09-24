@@ -19,6 +19,7 @@ from nir_core.io.schema import (
     load_inferred_mat_arrays,
     profile_csv,
 )
+from nir_core.utils.spectral_axis import summarize_spectral_axis
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -173,8 +174,7 @@ def _inspect_csv_like_legacy(filepath: str) -> dict:
         total_rows = sum(1 for line in fh if line.strip())
     if has_header:
         total_rows -= 1
-    if total_rows < 0:
-        total_rows = 0
+    total_rows = max(total_rows, 0)
 
     # Load at most 200 rows for shape/statistics preview.
     try:
@@ -365,7 +365,7 @@ def _inspect_csv_like(filepath: str) -> dict:
         if preview.shape[0]
         and np.sum(np.isfinite(preview[:, index])) / preview.shape[0] < 0.1
     ]
-    return {
+    result = {
         "shape": [int(profile.total_rows), int(profile.n_columns)],
         "estimated_samples": int(n_samples),
         "estimated_wavelengths": int(n_wavelengths),
@@ -379,6 +379,12 @@ def _inspect_csv_like(filepath: str) -> dict:
         "dialect": profile.dialect,
         "schema_mapping": mapping,
     }
+    mapped_wavelengths = mapping.get("wavelengths")
+    if isinstance(mapped_wavelengths, list) and len(mapped_wavelengths) == len(
+        spectral_columns
+    ):
+        result.update(summarize_spectral_axis(mapped_wavelengths))
+    return result
 
 
 def _inspect_mat(filepath: str) -> dict:
@@ -548,6 +554,7 @@ def _inspect_mat_v5(filepath: str) -> dict:
                 float(min(labeled["wavelengths"])),
                 float(max(labeled["wavelengths"])),
             ],
+            **summarize_spectral_axis(labeled["wavelengths"]),
             "has_sample_labels": bool(labeled["sample_names"]),
         }
 
@@ -562,6 +569,8 @@ def _inspect_mat_v5(filepath: str) -> dict:
             info["auto_load_supported"] = True
             info["has_reference"] = y is not None
             info["has_wavelength_axis"] = wv is not None
+            if wv is not None:
+                info.update(summarize_spectral_axis(wv))
         return info
 
     if schema_mapping["status"] == "auto":
@@ -571,6 +580,8 @@ def _inspect_mat_v5(filepath: str) -> dict:
         info["auto_load_supported"] = True
         info["has_reference"] = y is not None
         info["has_wavelength_axis"] = wv is not None
+        if wv is not None:
+            info.update(summarize_spectral_axis(wv))
         return info
 
     # Detect a top-level struct wrapper. scipy returns mat_struct objects
@@ -602,11 +613,11 @@ def _inspect_mat73(filepath: str) -> dict:
 
     def read_node(node):
         if isinstance(node, h5py.Group):
-            return {name: read_node(node[name]) for name in node.keys()}
+            return {name: read_node(node[name]) for name in node}
         return np.asarray(node[...])
 
     with h5py.File(filepath, "r") as fh:
-        root = {name: read_node(fh[name]) for name in fh.keys() if name != "#refs#"}
+        root = {name: read_node(fh[name]) for name in fh if name != "#refs#"}
 
     mapping = infer_mat_mapping(root)
     if mapping["status"] == "auto":
@@ -620,6 +631,8 @@ def _inspect_mat73(filepath: str) -> dict:
                 "has_wavelength_axis": wv is not None,
             }
         )
+        if wv is not None:
+            info.update(summarize_spectral_axis(wv))
         return info
 
     leaves = {
@@ -645,12 +658,9 @@ def _find_top_struct(candidates: dict[str, object]) -> object | None:
     """
     for value in candidates.values():
         # Unwrap (1,1) object arrays.
-        if isinstance(value, np.ndarray) and value.dtype == object:
-            if value.size == 1:
-                value = value.flat[0]
-        if hasattr(value, "_fieldnames") and isinstance(
-            getattr(value, "_fieldnames"), list
-        ):
+        if isinstance(value, np.ndarray) and value.dtype == object and value.size == 1:
+            value = value.flat[0]
+        if hasattr(value, "_fieldnames") and isinstance(value._fieldnames, list):
             return value
     return None
 
@@ -709,7 +719,7 @@ def _summarize_struct(struct: object) -> dict:
     if sub_structs:
         info["available_subsets"] = sorted(sub_structs.keys())
         # Inspect the first sub-struct to report its shape.
-        first_name = sorted(sub_structs.keys())[0]
+        first_name = min(sub_structs)
         first = sub_structs[first_name]
         first_fields = dict(_iter_struct_fields(first))
         first_arrays = {

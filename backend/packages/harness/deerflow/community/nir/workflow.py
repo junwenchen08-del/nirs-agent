@@ -1197,8 +1197,9 @@ def transition_workflow(
         )
 
     if action == "complete":
-        if state["stage"] not in {"approved", "registered", "execution"}:
-            raise NIRWorkflowError("complete requires approved, registered, or execution stage")
+        inspection_ready = state["task_type"] == "inspection" and state["stage"] == "data_audit" and isinstance(state.get("audit_evidence"), Mapping) and state["audit_evidence"].get("source_tool") == "nir_inspect"
+        if state["stage"] not in {"approved", "registered", "execution"} and not inspection_ready:
+            raise NIRWorkflowError("complete requires approved, registered, or execution stage, or a successful inspection audit")
         return _with_update(
             state,
             action=action,

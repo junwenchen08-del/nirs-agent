@@ -6,12 +6,16 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from nir_core.models import PreprocessingStep
+from nir_core.preprocess.pipeline import PreprocessingPipeline
 
 from deerflow.community.nir._common import (
     _load_npz_safely,
     _load_trusted_model_artifact,
     _write_trusted_model_artifact,
 )
+from deerflow.community.nir.artifacts import _build_model_artifact
+from deerflow.community.nir.io_tools import _apply_artifact_preprocessing
 
 
 def test_safe_npz_loads_numeric_and_unicode_arrays(tmp_path: Path) -> None:
@@ -57,3 +61,50 @@ def test_model_loader_round_trips_verified_output(tmp_path: Path) -> None:
     loaded = _load_trusted_model_artifact(str(path), "/mnt/user-data/outputs/model.pkl")
 
     assert loaded == expected
+
+
+def test_build_artifact_rejects_unfitted_stateful_pipeline() -> None:
+    pipe = PreprocessingPipeline([PreprocessingStep(method="mean_center", params={})])
+    with pytest.raises(ValueError, match="Refusing to persist an unfitted preprocessing pipeline"):
+        _build_model_artifact(
+            model=None,
+            method="pls",
+            preprocessing_pipeline=pipe,
+            preprocessing_desc="mean_center",
+            wavelength_selection={"method": "none"},
+        )
+
+
+def test_build_artifact_records_preprocessing_provider_provenance() -> None:
+    pipe = PreprocessingPipeline([PreprocessingStep(method="snv", params={})])
+
+    artifact = _build_model_artifact(
+        model={"kind": "stub"},
+        method="pls",
+        preprocessing_pipeline=pipe,
+        preprocessing_desc="SNV",
+        preprocessing_selection={"best_candidate_id": "snv-default"},
+        wavelength_selection={"method": "none"},
+    )
+
+    preprocessing = artifact["preprocessing"]
+    assert preprocessing["catalog_version"] == "2.0"
+    assert len(preprocessing["catalog_sha256"]) == 64
+    assert preprocessing["provider_policy"] == "catalog_default"
+    assert preprocessing["steps"] == [{"method": "snv", "params": {}}]
+    assert preprocessing["providers"][0]["provider"] == "chemotools"
+    assert preprocessing["providers"][0]["provider_version"] == "0.4.4"
+    assert preprocessing["providers"][0]["implementation_version"] == "chemotools-adapter-v1"
+    assert preprocessing["selection"]["best_candidate_id"] == "snv-default"
+
+
+def test_apply_artifact_preprocessing_rejects_unfitted_stateful_pipeline() -> None:
+    pipe = PreprocessingPipeline([PreprocessingStep(method="autoscale", params={})])
+    X = np.ones((5, 10))
+    with pytest.raises(ValueError, match="unfitted stateful preprocessing pipeline"):
+        _apply_artifact_preprocessing(
+            X,
+            None,
+            {"pipeline": pipe, "apply_on_predict": True},
+            input_preprocessed=False,
+        )

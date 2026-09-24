@@ -1,7 +1,7 @@
 """NIR knowledge base RAG system.
 
 Provides document parsing, smart chunking, entity extraction, and vector
-retrieval for the NIR Agent. See IMPLEMENTATION_PLAN.md for architecture.
+retrieval for the NIR Agent.
 
 Quick start:
     from nir_core.knowledge.config import get_retriever

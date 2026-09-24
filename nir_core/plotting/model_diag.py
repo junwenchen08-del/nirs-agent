@@ -114,7 +114,7 @@ def plot_predicted_vs_reference(
         transform=ax.transAxes,
         fontsize=10,
         verticalalignment="top",
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.8},
     )
 
     ax.set_xlim(lim)

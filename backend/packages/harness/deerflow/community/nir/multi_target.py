@@ -34,6 +34,7 @@ from ._science_gate import (
     science_gate_error,
     split_science_gate,
 )
+from .artifacts import _build_preprocessing_artifact
 from .single_target import (
     _apply_wavelength_selection,
     _extract_rmsecv,
@@ -103,12 +104,7 @@ def _fit_multi_pipeline(steps: list, X_train: np.ndarray, wv: np.ndarray | None)
 
 
 def _multi_preprocessing_artifact(pipeline, description: str, *, shared: bool) -> dict:
-    return {
-        "shared": shared,
-        "description": description,
-        "pipeline": pipeline,
-        "apply_on_predict": pipeline is not None,
-    }
+    return _build_preprocessing_artifact(pipeline, description, shared=shared)
 
 
 def _write_multi_report(out_dir: str, metrics: dict) -> str:

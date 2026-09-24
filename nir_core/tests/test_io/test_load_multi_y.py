@@ -108,4 +108,25 @@ def test_summary_distinguishes_raw_and_usable_wavelength_ranges() -> None:
     assert summary["usable_wavelength_range"] == [309.0, 1149.0]
     assert summary["constant_wavelength_count"] == 4
     assert summary["usable_wavelength_count"] == 2
-    assert summary["wavelength_range_semantics"] == ("raw includes all measured columns; usable spans non-constant columns only and does not imply those columns were removed")
+    assert summary["axis_first"] == 285.0
+    assert summary["axis_last"] == 1200.0
+    assert summary["axis_direction"] == "ascending"
+    assert summary["wavelength_range_semantics"] == (
+        "raw includes all measured columns; usable spans non-constant columns only and does not imply those columns were removed"
+    )
+
+
+def test_summary_preserves_descending_axis_order() -> None:
+    from nir_core.models import SpectralData
+
+    data = SpectralData(
+        X=np.array([[0.1, 0.2, 0.3], [0.2, 0.3, 0.4]]),
+        wv=np.array([3600.0, 1900.0, 200.0]),
+    )
+
+    summary = data.summary()
+
+    assert summary["wavelength_range"] == [200.0, 3600.0]
+    assert summary["axis_first"] == 3600.0
+    assert summary["axis_last"] == 200.0
+    assert summary["axis_direction"] == "descending"

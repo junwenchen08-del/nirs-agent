@@ -6,12 +6,13 @@ import numpy as np
 import pytest
 
 from nir_core.model.evaluation import (
+    _select_preprocessing_winner,
     auto_select_components,
     nested_cv_preprocessing,
 )
 from nir_core.model.pls import train_pls
-from nir_core.preprocess.pipeline import PreprocessingPipeline
 from nir_core.models import PreprocessingStep
+from nir_core.preprocess.pipeline import PreprocessingPipeline
 
 
 @pytest.fixture(scope="module")
@@ -19,12 +20,19 @@ def nested_cv_result(synthetic_data):
     """Build one representative nested-CV result for contract assertions."""
     X, y = synthetic_data.X, synthetic_data.y
     from nir_core.model.evaluation import split_dataset
+
     (X_tr, y_tr), (X_val, y_val), _ = split_dataset(
         X, y, test_ratio=0.20, val_ratio=0.15, random_state=42
     )
     best_pipe, results = nested_cv_preprocessing(
-        X_tr, y_tr, X_val, y_val,
-        inner_folds=3, model_method="pls", max_components=6, random_state=42,
+        X_tr,
+        y_tr,
+        X_val,
+        y_val,
+        inner_folds=3,
+        model_method="pls",
+        max_components=6,
+        random_state=42,
     )
     return X_tr, y_tr, X_val, y_val, best_pipe, results
 
@@ -37,7 +45,7 @@ def test_nested_cv_returns_pipeline_and_results(nested_cv_result):
     assert "candidates" in results
     assert "best" in results
     # Each candidate has the expected keys.
-    for desc, info in results["candidates"].items():
+    for info in results["candidates"].values():
         assert "score" in info
         assert "cv_r2" in info
         assert "val_r2" in info
@@ -62,8 +70,13 @@ def test_nested_cv_validation_not_in_inner_search(nested_cv_result):
     X_val2 = X_val[perm]
     y_val2 = y_val[perm]
     _, r2 = nested_cv_preprocessing(
-        X_tr, y_tr, X_val2, y_val2,
-        inner_folds=3, max_components=6, random_state=42,
+        X_tr,
+        y_tr,
+        X_val2,
+        y_val2,
+        inner_folds=3,
+        max_components=6,
+        random_state=42,
     )
     # cv_r2 for each candidate should be identical (depends on X_train only).
     for desc in r1["candidates"]:
@@ -83,6 +96,7 @@ def test_nested_cv_custom_pipelines(synthetic_data):
     """Passing custom candidate pipelines works."""
     X, y = synthetic_data.X, synthetic_data.y
     from nir_core.model.evaluation import split_dataset
+
     (X_tr, y_tr), (X_val, y_val), _ = split_dataset(
         X, y, test_ratio=0.20, val_ratio=0.15, random_state=42
     )
@@ -91,9 +105,14 @@ def test_nested_cv_custom_pipelines(synthetic_data):
         PreprocessingPipeline([PreprocessingStep(method="mean_center")]),
     ]
     best_pipe, results = nested_cv_preprocessing(
-        X_tr, y_tr, X_val, y_val,
+        X_tr,
+        y_tr,
+        X_val,
+        y_val,
         candidate_pipelines=custom,
-        inner_folds=3, max_components=6, random_state=42,
+        inner_folds=3,
+        max_components=6,
+        random_state=42,
     )
     assert best_pipe in custom
     assert len(results["candidates"]) == 2
@@ -103,6 +122,52 @@ def test_nested_cv_unsupported_method_raises(synthetic_data):
     X, y = synthetic_data.X, synthetic_data.y
     with pytest.raises(ValueError):
         nested_cv_preprocessing(X, y, X, y, model_method="random_forest")
+
+
+def test_rmsecv_one_percent_rule_prefers_simpler_candidate():
+    pipelines = [
+        PreprocessingPipeline(
+            [
+                PreprocessingStep(method="snv"),
+                PreprocessingStep(method="sg_smooth", params={"window": 11}),
+            ]
+        ),
+        PreprocessingPipeline([]),
+    ]
+    evaluations = [
+        {"candidate_id": "complex", "cv_rmse": 1.0},
+        {"candidate_id": "raw", "cv_rmse": 1.005},
+    ]
+
+    winner, decision = _select_preprocessing_winner(
+        pipelines,
+        evaluations,
+        selection_rule="rmsecv_1pct",
+    )
+
+    assert winner == 1
+    assert decision["reason_code"] == "simplest_within_one_percent_rmsecv"
+    assert decision["eligible_candidate_ids"] == ["complex", "raw"]
+
+
+def test_rmsecv_rule_keeps_materially_better_complex_candidate():
+    pipelines = [
+        PreprocessingPipeline([PreprocessingStep(method="snv")]),
+        PreprocessingPipeline([]),
+    ]
+    evaluations = [
+        {"candidate_id": "snv", "cv_rmse": 1.0},
+        {"candidate_id": "raw", "cv_rmse": 1.02},
+    ]
+
+    winner, decision = _select_preprocessing_winner(
+        pipelines,
+        evaluations,
+        selection_rule="rmsecv_1pct",
+    )
+
+    assert winner == 0
+    assert decision["selected_candidate_id"] == "snv"
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +254,7 @@ def test_auto_select_missing_keys_raises():
 def test_auto_select_on_real_pls_results(synthetic_data):
     """auto_select_components works with a real train_pls cv_results dict."""
     X, y = synthetic_data.X, synthetic_data.y
-    _, best_n, cv_results = train_pls(
+    _, _best_n, cv_results = train_pls(
         X, y, n_components=None, max_components=6, cv_folds=5, random_state=42
     )
     for method in ("min_rmsECV", "first_minimum", "haaland_thomas"):

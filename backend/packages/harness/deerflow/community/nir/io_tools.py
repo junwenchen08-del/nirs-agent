@@ -131,6 +131,8 @@ def _apply_artifact_preprocessing(
     pipeline = preprocessing.get("pipeline") if preprocessing else None
     if input_preprocessed or pipeline is None or not preprocessing.get("apply_on_predict"):
         return X, False
+    if pipeline.has_stateful_steps and not pipeline.fitted():
+        raise ValueError("Model artifact contains an unfitted stateful preprocessing pipeline; cannot safely apply it to prediction spectra.")
     return np.asarray(pipeline.transform(X, wv), dtype=float), True
 
 
@@ -463,9 +465,12 @@ def nir_inspect_tool(
 ) -> str:
     """Inspect a spectral file's structure without fully loading it.
 
-    Returns format, shape, estimated sample/wavelength counts, value range
-    and NaN presence as a JSON report. Useful for previewing data before
-    committing to a full load.
+    Returns format, shape, estimated sample/wavelength counts, value range,
+    NaN presence, and (when available) ``axis_first``, ``axis_last``, and
+    ``axis_direction`` as a JSON report. Start the NIR workflow first and wait
+    for that tool result before calling this tool; do not issue both calls in
+    parallel. For an inspection-only workflow, a successful call completes the
+    workflow automatically and no planning or modeling step should follow.
 
     Args:
         file_path: Virtual path to the file to inspect.

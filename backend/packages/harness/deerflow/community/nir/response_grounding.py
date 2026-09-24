@@ -64,6 +64,20 @@ _NO_CONSTANT_WAVELENGTH_RE = re.compile(
     r"(?:无|没有|不存在)\s*(?:恒定|常量|无变异)\s*(?:波长|光谱列)",
     re.IGNORECASE,
 )
+_AXIS_DIRECTION_RE = re.compile(
+    r"(?:(?:光谱|波长|波数)?轴(?:方向|顺序)|axis(?:[_\s-]*direction)?)"
+    r"[^。\n]{0,64}?(?P<direction>非单调|升序|降序|递增|递减|"
+    r"ascending|descending|non[_\s-]*monotonic)",
+    re.IGNORECASE,
+)
+_WORKFLOW_STAGE_RE = re.compile(
+    r"\bstage\s*(?:[:=]|：|为|是)\s*`?(?P<value>[a-z_]+)",
+    re.IGNORECASE,
+)
+_WORKFLOW_NEXT_ACTION_RE = re.compile(
+    r"\bnext_action\s*(?:[:=]|：|为|是)\s*`?(?P<value>[a-z_]+)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -388,6 +402,17 @@ def _numeric_pair(value: Any) -> tuple[float, float] | None:
     return float(value[0]), float(value[1])
 
 
+def _normalized_axis_direction(value: Any) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized in {"升序", "递增", "ascending"}:
+        return "ascending"
+    if normalized in {"降序", "递减", "descending"}:
+        return "descending"
+    if normalized in {"非单调", "non_monotonic", "nonmonotonic"}:
+        return "non_monotonic"
+    return normalized
+
+
 def _scope_disclosed(text: str, validation_scope: str) -> bool:
     if validation_scope == "independent_external_validation":
         return bool(_EXTERNAL_VALIDATION_RE.search(text))
@@ -523,6 +548,23 @@ def validate_nir_response(
         elif claimed_count != int(expected_count):
             violations.append(f"wavelength_count_mismatch:{category}")
 
+    expected_direction = _normalized_axis_direction(audit_evidence.get("axis_direction"))
+    for claim in _AXIS_DIRECTION_RE.finditer(response_text):
+        claimed_direction = _normalized_axis_direction(claim.group("direction"))
+        if not expected_direction:
+            violations.append("axis_direction_not_in_audit_evidence")
+        elif claimed_direction != expected_direction:
+            violations.append("axis_direction_mismatch")
+
+    expected_stage = str(workflow.get("stage") or "")
+    for claim in _WORKFLOW_STAGE_RE.finditer(response_text):
+        if claim.group("value").lower() != expected_stage.lower():
+            violations.append("workflow_stage_mismatch")
+    expected_next_action = str(workflow.get("next_action") or "")
+    for claim in _WORKFLOW_NEXT_ACTION_RE.finditer(response_text):
+        if claim.group("value").lower() != expected_next_action.lower():
+            violations.append("workflow_next_action_mismatch")
+
     deduplicated = tuple(dict.fromkeys(violations))
     return NIRResponseGroundingResult(
         passed=not deduplicated,
@@ -564,6 +606,43 @@ def render_grounded_nir_response(
 ) -> str:
     """Build a bounded, deterministic response from the attempt ledger."""
 
+    audit_evidence = workflow.get("audit_evidence")
+    audit_evidence = audit_evidence if isinstance(audit_evidence, Mapping) else {}
+    if workflow.get("task_type") == "inspection" and audit_evidence:
+        lines = ["数据检查已完成（未执行预处理或建模）。"]
+        lines.append(f"- 工作流状态：`{workflow.get('stage') or 'unknown'}` / `{workflow.get('next_action') or 'unknown'}`")
+        data_path = str(audit_evidence.get("data_path") or workflow.get("data_path") or "")
+        if data_path:
+            lines.append(f"- 文件：`{data_path}`")
+        format_name = audit_evidence.get("format")
+        layout = audit_evidence.get("layout_pattern")
+        if format_name or layout:
+            lines.append(f"- 格式与布局：{format_name or 'unknown'} / {layout or 'unknown'}")
+        n_samples = audit_evidence.get("n_samples")
+        n_wavelengths = audit_evidence.get("n_wavelengths")
+        if isinstance(n_samples, int) and isinstance(n_wavelengths, int):
+            lines.append(f"- 数据规模：{n_samples} 个样本，{n_wavelengths} 个光谱变量")
+        axis_first = audit_evidence.get("axis_first")
+        axis_last = audit_evidence.get("axis_last")
+        axis_direction = _normalized_axis_direction(audit_evidence.get("axis_direction"))
+        direction_labels = {
+            "ascending": "升序",
+            "descending": "降序",
+            "non_monotonic": "非单调",
+            "duplicate_values": "含重复值",
+            "single_point": "单点",
+            "invalid": "无效",
+        }
+        if isinstance(axis_first, int | float) and not isinstance(axis_first, bool) and isinstance(axis_last, int | float) and not isinstance(axis_last, bool):
+            direction_label = direction_labels.get(axis_direction, axis_direction)
+            lines.append(f"- 光谱轴方向：{float(axis_first)} → {float(axis_last)}（{direction_label}）")
+        raw_range = _numeric_pair(audit_evidence.get("raw_wavelength_range"))
+        if raw_range:
+            lines.append(f"- 光谱轴数值范围：{raw_range[0]}–{raw_range[1]}")
+        if isinstance(audit_evidence.get("has_nan"), bool):
+            lines.append(f"- 缺失值：{'检测到' if audit_evidence['has_nan'] else '未检测到'}")
+        return "\n".join(lines)
+
     evidence = workflow.get("attempt_evidence")
     if not isinstance(evidence, Mapping):
         return "当前工作流尚无可引用的建模证据，因此不能报告模型指标、外部验证或部署结论。请先完成与验证目标一致的建模步骤。"
@@ -585,8 +664,6 @@ def render_grounded_nir_response(
         f"- 验证范围：{scope_text}",
         f"- 质量门禁：{'通过' if summary.get('passed') is True else '未通过'}",
     ]
-    audit_evidence = workflow.get("audit_evidence")
-    audit_evidence = audit_evidence if isinstance(audit_evidence, Mapping) else {}
     raw_range = _numeric_pair(audit_evidence.get("raw_wavelength_range"))
     usable_range = _numeric_pair(audit_evidence.get("usable_wavelength_range"))
     if raw_range:

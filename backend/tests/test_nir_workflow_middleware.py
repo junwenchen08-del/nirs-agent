@@ -944,6 +944,9 @@ def test_load_data_persists_bounded_wavelength_audit_evidence() -> None:
             "n_wavelengths": 306,
             "raw_wavelength_range": [285.0, 1200.0],
             "usable_wavelength_range": [309.0, 1149.0],
+            "axis_first": 285.0,
+            "axis_last": 1200.0,
+            "axis_direction": "ascending",
             "constant_wavelength_count": 25,
             "usable_wavelength_count": 281,
             "wavelength_range_semantics": ("raw includes all measured columns; usable spans non-constant columns only and does not imply those columns were removed"),
@@ -978,6 +981,9 @@ def test_load_data_persists_bounded_wavelength_audit_evidence() -> None:
         "n_wavelengths": 306,
         "raw_wavelength_range": [285.0, 1200.0],
         "usable_wavelength_range": [309.0, 1149.0],
+        "axis_first": 285.0,
+        "axis_last": 1200.0,
+        "axis_direction": "ascending",
         "constant_wavelength_count": 25,
         "usable_wavelength_count": 281,
         "wavelength_range_semantics": ("raw includes all measured columns; usable spans non-constant columns only and does not imply those columns were removed"),
@@ -988,6 +994,59 @@ def test_load_data_persists_bounded_wavelength_audit_evidence() -> None:
         "x_cols": "9:",
         "wv_row": 0,
     }
+
+
+def test_successful_inspection_persists_axis_order_and_completes_workflow() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="inspection",
+        data_path="/mnt/user-data/uploads/Ramandata_tablets.MAT",
+    )
+    message = _result(
+        "nir_inspect",
+        {
+            "status": "ok",
+            "format": "mat",
+            "layout_pattern": "schema_inferred",
+            "estimated_samples": 120,
+            "estimated_wavelengths": 3401,
+            "wavelength_range": [200.0, 3600.0],
+            "axis_first": 3600.0,
+            "axis_last": 200.0,
+            "axis_direction": "descending",
+            "has_nan": False,
+            "auto_load_supported": True,
+        },
+    )
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "nir_inspect",
+            {"nir_workflow": workflow},
+            args={"file_path": "/mnt/user-data/uploads/Ramandata_tablets.MAT"},
+        ),
+        lambda _: message,
+    )
+
+    assert isinstance(result, Command)
+    updated = result.update["nir_workflow"]
+    assert updated["stage"] == "completed"
+    assert updated["next_action"] == "none"
+    assert updated["audit_evidence"] == {
+        "source_tool": "nir_inspect",
+        "data_path": "/mnt/user-data/uploads/Ramandata_tablets.MAT",
+        "n_samples": 120,
+        "n_wavelengths": 3401,
+        "raw_wavelength_range": [200.0, 3600.0],
+        "axis_first": 3600.0,
+        "axis_last": 200.0,
+        "axis_direction": "descending",
+        "format": "mat",
+        "layout_pattern": "schema_inferred",
+        "has_nan": False,
+        "auto_load_supported": True,
+    }
+    assert updated["tool_observations"][-1]["stage_after"] == "completed"
 
 
 def test_failed_model_requires_bound_reflection_then_search_returns_to_retry_planning() -> None:

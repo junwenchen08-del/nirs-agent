@@ -5,6 +5,38 @@ All notable changes to DeerFlow are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **NIR preprocessing:** Add robust SNV, leakage-safe fitted EMSC, isolated-spike
+  removal, and first/second Norris-Williams derivatives as explicit pipeline
+  methods.
+- **NIR wavelength axes:** Add a separate alignment tool that updates spectra
+  and wavelengths together, validates monotonic axes, records axis hashes, and
+  disables extrapolation by default.
+- **NIR preprocessing catalog:** Add an authoritative runtime catalog, read-only
+  list/detail/recommendation tools, and bounded calibration-only candidate
+  generation with a mandatory raw baseline.
+- **Chemotools provider:** Pin Chemotools 0.4.4 and add verified adapters for
+  SNV/RNV, MSC/EMSC, SG and Whittaker smoothing, median filtering, SG and
+  Norris-Williams derivatives, airPLS/ArPLS/asLS, detrending, rubber-band
+  correction, and supported scaling. New artifacts record exact provider
+  versions; legacy artifacts remain native.
+- **NIR calibration transfer:** Add a separate paired-sample DS/PDS/SST tool
+  family with explicit target-to-source direction, instrument and axis binding,
+  internal holdout evidence, optional reference-model RMSEP validation, and
+  tamper-evident joblib manifests. Production approval requires both a
+  non-overlapping independent paired validation set and improved reference-model
+  RMSEP.
+
+### Changed
+
+- **NIR tool contract:** Reuse core pipeline validation in `nir_preprocess`,
+  expose provider evidence, and document the catalog across tools, workflow
+  policy, skills, and package metadata. One-shot automatic regression selection
+  now uses bounded candidates and a calibration-only RMSECV/1% simplicity rule.
+
 ## [2.0.0] — 2026-06-15
 
 DeerFlow 2.0 is a ground-up rewrite around a "super agent" harness with

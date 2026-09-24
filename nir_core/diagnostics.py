@@ -50,7 +50,9 @@ def compute_residual_diagnostics(y_true: np.ndarray, y_pred: np.ndarray) -> dict
     y_true = np.asarray(y_true, dtype=float).ravel()
     y_pred = np.asarray(y_pred, dtype=float).ravel()
     if y_true.shape != y_pred.shape:
-        raise ValueError(f"Shape mismatch: y_true {y_true.shape} vs y_pred {y_pred.shape}")
+        raise ValueError(
+            f"Shape mismatch: y_true {y_true.shape} vs y_pred {y_pred.shape}"
+        )
     n = y_true.shape[0]
     if n < 2:
         return {

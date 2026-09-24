@@ -52,6 +52,7 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_load_data": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
     "nir_inspect": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
     "nir_preprocess": _ToolPolicy(frozenset({"execution"}), _EXECUTION_TASKS),
+    "nir_align_wavelengths": _ToolPolicy(frozenset({"execution"}), _EXECUTION_TASKS),
     "nir_train_auto_split_model": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
     "nir_train_model": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
     "nir_train_classifier": _ToolPolicy(frozenset({"execution"}), frozenset({"classification"})),
@@ -562,7 +563,7 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
             return _denied_message(
                 request,
                 code="nir_code_execution_forbidden",
-                error=("Python/R/MATLAB analysis scripts are forbidden during an active NIR workflow. Use nir_inspect, nir_load_data, nir_preprocess, and NIR modeling tools only."),
+                error=("Python/R/MATLAB analysis scripts are forbidden during an active NIR workflow. Use nir_inspect, nir_load_data, nir_preprocess, nir_align_wavelengths, and NIR modeling tools only."),
                 workflow=workflow,
             )
 
@@ -788,6 +789,9 @@ def _data_audit_update(
         "n_wavelengths",
         "raw_wavelength_range",
         "usable_wavelength_range",
+        "axis_first",
+        "axis_last",
+        "axis_direction",
         "constant_wavelength_count",
         "usable_wavelength_count",
         "wavelength_range_semantics",
@@ -798,6 +802,17 @@ def _data_audit_update(
         "wv_separated",
         "categorical_columns",
         "classification_hint",
+        "format",
+        "structure",
+        "value_range",
+        "has_nan",
+        "labeled_matrix",
+        "layout_pattern",
+        "auto_load_supported",
+        "target_columns",
+        "metadata_columns",
+        "has_reference",
+        "has_wavelength_axis",
     )
     evidence = {
         "source_tool": tool_name,
@@ -806,15 +821,26 @@ def _data_audit_update(
     }
     if "raw_wavelength_range" not in evidence and payload.get("wavelength_range") is not None:
         evidence["raw_wavelength_range"] = payload["wavelength_range"]
+    if "n_samples" not in evidence and payload.get("estimated_samples") is not None:
+        evidence["n_samples"] = payload["estimated_samples"]
+    if "n_wavelengths" not in evidence and payload.get("estimated_wavelengths") is not None:
+        evidence["n_wavelengths"] = payload["estimated_wavelengths"]
     for key in ("y_col", "y_cols", "x_cols", "wv_row", "x_var", "y_var", "wv_var", "subset", "transpose"):
         if args.get(key) is not None:
             evidence[key] = args[key]
-    return transition_workflow(
+    updated = transition_workflow(
         workflow,
         action="record_audit_evidence",
         audit_evidence=evidence,
         notes=f"Automatically recorded bounded {tool_name} evidence.",
     )
+    if workflow.get("task_type") == "inspection" and tool_name == "nir_inspect":
+        return transition_workflow(
+            updated,
+            action="complete",
+            notes="Inspection completed successfully; no modeling was requested.",
+        )
+    return updated
 
 
 def _next_workflow(

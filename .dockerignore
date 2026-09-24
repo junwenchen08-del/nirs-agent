@@ -11,6 +11,13 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.pytest_cache/
+**/.pytest_cache
+backend/.pytest_cache
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
 env/
 build/
 develop-eggs/
@@ -28,6 +35,10 @@ wheels/
 .installed.cfg
 *.egg
 .venv/
+.venv-backend/
+.venv-nir/
+backend/.venv/
+nir_core/.venv/
 
 # Web
 node_modules
@@ -52,6 +63,19 @@ examples/
 assets/
 tests/
 *.log
+
+# Local-only NIR data, reference projects, and internal notes
+参考/
+药品2-310条/
+local-data/
+local-reference/
+test-output/
+NIR项目面试准备.md
+*.MAT
+*.mat
+*.npz
+*.joblib
+*.pkl
 
 # Exclude directories not needed in Docker context
 # Frontend build only needs frontend/

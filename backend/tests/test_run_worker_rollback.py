@@ -162,11 +162,7 @@ async def test_run_agent_nir_stream_publishes_only_grounded_answer():
     assert "0.99" not in payload_text
     assert "production-ready" not in payload_text
     assert "0.91234" in payload_text
-    grounded_messages = [
-        invocation.args[2]
-        for invocation in published
-        if invocation.args[1] == "messages"
-    ]
+    grounded_messages = [invocation.args[2] for invocation in published if invocation.args[1] == "messages"]
     assert len(grounded_messages) == 1
     assert grounded_messages[0][0]["content"].startswith("Internal holdout")
 

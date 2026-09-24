@@ -82,7 +82,7 @@ def test_replay_write_read_file_ultra_matches_golden(tmp_path: Path, monkeypatch
     assert events[-1]["event"] == "end", f"last event should be end (run completed), got {events[-1]!r}"
 
     misses = replay_provider.replay_misses()
-    assert not misses, f"replay miss ({len(misses)}): the fixture is stale vs the current system prompt or agent graph. Re-record it (see backend/docs/REPLAY_E2E.md). Missed hashes: {misses}"
+    assert not misses, f"replay miss ({len(misses)}): the fixture is stale vs the current system prompt or agent graph. Re-record the replay fixture. Missed hashes: {misses}"
 
     # Regenerate the committed golden after re-recording the fixture:
     #   DEERFLOW_WRITE_GOLDEN=1 uv run pytest tests/test_replay_golden.py

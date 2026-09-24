@@ -63,7 +63,7 @@ def _pls_cv_rmse(
             m.fit(X_tr, y_tr)
             pred = m.predict(X_val).ravel()
             rmses.append(rmse(y_val, pred))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             warnings.warn(
                 f"CARS CV fold skipped (n_components={nc}): {exc}",
                 stacklevel=2,
@@ -136,7 +136,7 @@ def cars_wavelength_selection(
         init_pls = PLSRegression(n_components=init_nc, scale=False)
         init_pls.fit(X, y)
         init_coef = np.abs(np.asarray(init_pls.coef_).ravel())
-    except Exception:
+    except Exception:  # noqa: BLE001
         # Fallback: use correlation with y as importance.
         init_coef = np.abs(
             np.array([np.corrcoef(X[:, j], y)[0, 1] for j in range(n_wavelengths)])
@@ -145,7 +145,7 @@ def cars_wavelength_selection(
 
     # Step 2: Monte Carlo sampling to accumulate weights.
     weights = np.zeros(n_wavelengths, dtype=float)
-    n_sub = min(n_samples, max(2, int(round(0.8 * n_samples))))
+    n_sub = min(n_samples, max(2, round(0.8 * n_samples)))
     mc_nc = _safe_n_components(
         X[:n_sub], y[:n_sub], max_components=min(10, n_wavelengths)
     )
@@ -156,7 +156,7 @@ def cars_wavelength_selection(
             m = PLSRegression(n_components=mc_nc, scale=False)
             m.fit(Xs, ys)
             coef = np.abs(np.asarray(m.coef_).ravel())
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             warnings.warn(
                 f"CARS MC sample skipped (n_components={mc_nc}): {exc}",
                 stacklevel=2,
@@ -243,7 +243,7 @@ def cars_wavelength_selection(
     if full_rmse < best_rmse:
         best_indices = list(range(n_wavelengths))
 
-    best_indices = sorted(set(int(i) for i in best_indices))
+    best_indices = sorted({int(i) for i in best_indices})
     X_selected = X[:, best_indices].copy()
     return X_selected, best_indices
 
@@ -346,8 +346,7 @@ def spa_wavelength_selection(
         n_max = min(10, max(3, n_wavelengths // 3))
     n_max = int(n_max)
     n_min = int(n_min)
-    if n_max < n_min:
-        n_max = n_min
+    n_max = max(n_max, n_min)
     n_max = min(n_max, n_wavelengths)
 
     if n_samples < 2:
@@ -388,7 +387,7 @@ def spa_wavelength_selection(
                 denom = np.where(np.abs(1.0 - H_diag) < 1e-10, 1e-10, 1.0 - H_diag)
                 press = np.sum((resid / denom) ** 2)
                 rmse_loo = float(np.sqrt(press / n_samples))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 warnings.warn(
                     f"SPA evaluation skipped (n_sel={n_sel}): {exc}",
                     stacklevel=2,
@@ -398,7 +397,7 @@ def spa_wavelength_selection(
                 best_rmse = rmse_loo
                 best_indices = [int(i) for i in indices]
 
-    best_indices = sorted(set(int(i) for i in best_indices))
+    best_indices = sorted({int(i) for i in best_indices})
     X_selected = X[:, best_indices].copy()
     return X_selected, best_indices
 

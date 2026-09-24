@@ -49,7 +49,9 @@ def _second_difference_matrix(n: int) -> sparse.csc_matrix:
     return D
 
 
-def _asls_baseline(y: np.ndarray, lambda_: float, p: float, max_iters: int) -> np.ndarray:
+def _asls_baseline(
+    y: np.ndarray, lambda_: float, p: float, max_iters: int
+) -> np.ndarray:
     """Compute asLS baseline of a 1D signal ``y``.
 
     Args:
@@ -133,7 +135,7 @@ def _airpls_baseline(
         # Normalising by |sum_neg| (not max|r|) follows the original paper
         # and keeps the weight scale stable across iterations.
         sum_neg_abs = abs(float(sum_neg))
-        safe_denom = sum_neg_abs if sum_neg_abs > 1e-12 else 1e-12
+        safe_denom = max(1e-12, sum_neg_abs)
         new_w = np.zeros(n)
         rn = -residual[neg_mask] / safe_denom
         new_w[neg_mask] = np.exp(it * rn)
@@ -186,9 +188,7 @@ def airpls(
     return out[0] if was_1d else out
 
 
-def asls(
-    X: np.ndarray, lambda_: float = 1e5, p: float = 0.001
-) -> np.ndarray:
+def asls(X: np.ndarray, lambda_: float = 1e5, p: float = 0.001) -> np.ndarray:
     """Asymmetric Least Squares baseline (Eilers & Boelens 2005).
 
     Iteratively fits a smooth baseline where points above the current
@@ -230,20 +230,19 @@ def detrend(X: np.ndarray, wv: np.ndarray | None = None) -> np.ndarray:
         Detrended spectra with the same shape as ``X``.
     """
     arr, was_1d = _ensure_2d(X)
-    n_samples, n_wavelengths = arr.shape
+    n_wavelengths = arr.shape[1]
     if wv is None:
         t = np.arange(n_wavelengths, dtype=float)
     else:
         t = np.asarray(wv, dtype=float).ravel()
         if t.shape[0] != n_wavelengths:
             raise ValueError(
-                f"wv length {t.shape[0]} does not match n_wavelengths "
-                f"{n_wavelengths}."
+                f"wv length {t.shape[0]} does not match n_wavelengths {n_wavelengths}."
             )
     # Build design matrix with columns [1, t, t**2].
     # Normalize t to avoid ill-conditioning for large wavelength values.
     t_norm = (t - t.mean()) / (t.std() if t.std() > 0 else 1.0)
-    A = np.column_stack([np.ones(n_wavelengths), t_norm, t_norm ** 2])
+    A = np.column_stack([np.ones(n_wavelengths), t_norm, t_norm**2])
     # Least-squares fit for all rows at once: coeffs shape (3, n_samples).
     coeffs, *_ = np.linalg.lstsq(A, arr.T, rcond=None)
     fit = (A @ coeffs).T  # (n_samples, n_wavelengths)

@@ -306,6 +306,40 @@ def test_response_validates_raw_and_usable_wavelength_audit_evidence() -> None:
     assert "wavelength_count_mismatch:usable" in unsupported.violations
 
 
+def test_response_validates_spectral_axis_direction_against_audit_evidence() -> None:
+    workflow = _review_workflow()
+    workflow["audit_evidence"] = {
+        "axis_first": 3600.0,
+        "axis_last": 200.0,
+        "axis_direction": "descending",
+    }
+
+    supported = validate_nir_response("光谱轴方向为降序。", workflow)
+    unsupported = validate_nir_response("光谱轴方向为升序。", workflow)
+
+    assert supported.passed is True
+    assert "axis_direction_mismatch" in unsupported.violations
+
+
+def test_response_rejects_stale_workflow_stage_and_next_action_claims() -> None:
+    workflow = start_workflow(task_type="inspection", data_path="raman.mat")
+    workflow["stage"] = "completed"
+    workflow["next_action"] = "none"
+    workflow["audit_evidence"] = {
+        "axis_first": 3600.0,
+        "axis_last": 200.0,
+        "axis_direction": "descending",
+    }
+
+    verdict = validate_nir_response(
+        "光谱轴方向为降序。工作流 stage: data_audit，next_action: inspect_data。",
+        workflow,
+    )
+
+    assert "workflow_stage_mismatch" in verdict.violations
+    assert "workflow_next_action_mismatch" in verdict.violations
+
+
 def test_internal_holdout_response_rejects_external_validation_overclaim() -> None:
     verdict = validate_nir_response(
         "该模型已经完成独立外部验证，可以用于外部样品。",
@@ -509,6 +543,73 @@ def test_grounded_replacement_includes_durable_wavelength_ranges() -> None:
     assert "实际可用光谱范围：309.0–1149.0 nm" in rendered
     assert "恒定波长列 25 个；可用波长 281 个" in rendered
     assert validate_nir_response(rendered, workflow).passed is True
+
+
+def test_grounded_replacement_renders_completed_inspection_without_modeling() -> None:
+    workflow = start_workflow(
+        task_type="inspection",
+        data_path="/mnt/user-data/uploads/Ramandata_tablets.MAT",
+    )
+    workflow["stage"] = "completed"
+    workflow["next_action"] = "none"
+    workflow["audit_evidence"] = {
+        "source_tool": "nir_inspect",
+        "data_path": "/mnt/user-data/uploads/Ramandata_tablets.MAT",
+        "format": "mat",
+        "layout_pattern": "schema_inferred",
+        "n_samples": 120,
+        "n_wavelengths": 3401,
+        "raw_wavelength_range": [200.0, 3600.0],
+        "axis_first": 3600.0,
+        "axis_last": 200.0,
+        "axis_direction": "descending",
+        "has_nan": False,
+    }
+
+    rendered = render_grounded_nir_response(workflow)
+
+    assert "数据检查已完成" in rendered
+    assert "工作流状态：`completed` / `none`" in rendered
+    assert "120" in rendered
+    assert "3401" in rendered
+    assert "3600.0 → 200.0（降序）" in rendered
+    assert "建模证据" not in rendered
+    assert validate_nir_response(rendered, workflow).passed is True
+
+
+def test_middleware_replaces_stale_inspection_state_with_completed_report() -> None:
+    workflow = start_workflow(
+        task_type="inspection",
+        data_path="/mnt/user-data/uploads/Ramandata_tablets.MAT",
+    )
+    workflow["stage"] = "completed"
+    workflow["next_action"] = "none"
+    workflow["audit_evidence"] = {
+        "source_tool": "nir_inspect",
+        "n_samples": 120,
+        "n_wavelengths": 3401,
+        "raw_wavelength_range": [200.0, 3600.0],
+        "axis_first": 3600.0,
+        "axis_last": 200.0,
+        "axis_direction": "descending",
+    }
+    original = AIMessage(
+        content=("检查完成，光谱轴为降序。工作流 stage: data_audit，next_action: inspect_data。"),
+        id="stale-inspection-answer",
+    )
+
+    update = NIRWorkflowMiddleware().after_model(
+        {"messages": [original], "nir_workflow": workflow},
+        SimpleNamespace(context={}),
+    )
+
+    assert update is not None
+    replacement = update["messages"][0]
+    assert replacement.id == "stale-inspection-answer"
+    assert "工作流状态：`completed` / `none`" in replacement.content
+    assert "3600.0 → 200.0（降序）" in replacement.content
+    assert "data_audit" not in replacement.content
+    assert replacement.additional_kwargs["nir_response_grounding"]["passed"] is False
 
 
 def test_middleware_replaces_unsupported_final_answer_and_records_guard_event() -> None:

@@ -181,6 +181,38 @@ preprocessing. After any explicitly selected model fails,
 `NIRWorkflowMiddleware` blocks a different model family until the latest user
 message explicitly approves that replacement.
 
+NIR preprocessing exposes 21 ordinary pipeline methods. The added explicit-only
+methods are robust SNV, EMSC, isolated-spike removal, and first/second
+Norris-Williams derivatives; they do not enter the default candidate pipelines.
+EMSC is fitted on the training boundary and its reference spectrum is persisted
+with the existing preprocessing artifact for prediction replay. Wavelength-axis
+resampling is deliberately separate as `nir_align_wavelengths`: it validates
+strictly monotonic axes, updates `X` and `wv` together, records both axis hashes,
+and rejects extrapolation by default. This is axis normalization, not calibration
+transfer.
+`nir_core.preprocess.registry` is the single source for public method IDs,
+parameter schemas, auto-selection levels, and provider metadata. New pipelines
+prefer pinned Chemotools 0.4.4 implementations for every numerically verified
+overlap, including RNV, EMSC, AirPLS/ArPLS, Whittaker, median filtering,
+Norris-Williams, detrending, rubber-band correction, and supported scaling.
+Native robust SNV, isolated despiking, and max-norm behavior remain project
+fallbacks; `NIR_PREPROCESSING_PROVIDER_POLICY=native` rolls back methods with a
+native binding. Provider bindings survive serialization, while legacy artifacts
+without bindings are pinned to native behavior. Bounded automatic candidates are built
+from the calibration partition only, always include raw spectra, honor
+explicit-only methods, and use RMSECV with a 1% simplicity rule. The catalog
+list/detail and bounded-recommendation tools are read-only agent interfaces.
+
+Calibration transfer is a separate capability, never an ordinary preprocessing
+step. `nir_core.calibration_transfer` wraps Chemotools DS/PDS/SST and enforces
+paired sample identities, target-to-source direction, instrument/axis hashes,
+and no extrapolation. Gateway fit/apply/evaluate tools persist signed-or-hashed
+transfer artifacts under `/mnt/user-data/outputs`. Spectral-only improvement is
+`spectrally_validated`; an internal holdout plus a trusted model remains
+`model_validated_internal`. Production approval additionally requires a
+non-overlapping independent paired validation set, a bound trusted reference
+model, and improved validation RMSEP.
+
 The NIR retrieval knowledge base keeps vectors in ChromaDB and document
 governance in a lightweight SQLite catalog. Governed ingestion derives stable
 document IDs from DOI, normalized bibliography, or source SHA-256; content
@@ -199,10 +231,9 @@ CPU parsing and embedding of large PDFs can exceed the default proxy timeout.
 The knowledge settings UI can publish documents and edit descriptive metadata;
 metadata changes are synchronized to both the SQLite catalog and existing
 ChromaDB chunks without changing document identity or content version.
-The current four-document BGE-M3 retrieval benchmark is versioned in
-`nir_core/knowledge/retrieval_eval_cases.bge-m3.v1.json` with its measured
-raw and policy-v1 baselines beside it; keep negative and cross-document cases
-when extending it.
+The BGE-M3 retrieval benchmark cases are versioned in
+`nir_core/knowledge/retrieval_eval_cases.bge-m3.v1.json`; keep negative and
+cross-document cases when extending it.
 Production search over-fetches candidates, caps chunks per document, and
 applies the calibrated strong/weak score plus cross-document-margin policy in
 `nir_core.knowledge.retrieval_policy`. The `/search` response exposes the
@@ -214,10 +245,9 @@ but must preserve dense cosine scores as the calibrated answerability signal,
 expose both dense and reranker scores plus the active ranking strategy, and
 fail open to dense ordering when model loading or inference fails. Reranker
 changes do not require an index rebuild, but must be evaluated against the
-same versioned cases. The current 24-document calibration uses 12
-document-diversified rerank candidates, a 512-token cross-encoder limit, and
-0.63/0.60 dense strong/weak thresholds; its report is
-`nir_core/knowledge/retrieval_eval_baseline.bge-m3.rerank-v1.md`.
+same versioned cases. The current calibration uses 12 document-diversified
+rerank candidates, a 512-token cross-encoder limit, and 0.63/0.60 dense
+strong/weak thresholds.
 The agent-side HTTP fallback uses
 `NIR_KNOWLEDGE_SEARCH_TIMEOUT_SECONDS` (60 seconds by default); keep it aligned
 with or above measured CPU reranker latency so a failed modeling attempt can
@@ -248,9 +278,8 @@ Rule of thumb: **root `make` = the full application**; **`backend/Makefile` and 
 
 - Backend work → **[backend/AGENTS.md](backend/AGENTS.md)**
 - Frontend work → **[frontend/AGENTS.md](frontend/AGENTS.md)**
-- Setup & install → **[Install.md](Install.md)**, **[CONTRIBUTING.md](CONTRIBUTING.md)**
-- Project overview & usage → **[README.md](README.md)** (translations: `README_zh.md`,
-  `README_ja.md`, `README_fr.md`, `README_ru.md`)
+- Setup & install → **[README.md](README.md)**, **[CONTRIBUTING.md](CONTRIBUTING.md)**
+- Project overview & usage → **[README.md](README.md)**
 - Security policy → **[SECURITY.md](SECURITY.md)**
 - Changes → **[CHANGELOG.md](CHANGELOG.md)**
 

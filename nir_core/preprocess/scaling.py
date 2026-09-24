@@ -82,13 +82,11 @@ def normalize(X: np.ndarray, norm: str = "l2") -> np.ndarray:
     if norm == "l1":
         scale = np.abs(arr).sum(axis=1, keepdims=True)
     elif norm == "l2":
-        scale = np.sqrt((arr ** 2).sum(axis=1, keepdims=True))
+        scale = np.sqrt((arr**2).sum(axis=1, keepdims=True))
     elif norm == "max":
         scale = np.abs(arr).max(axis=1, keepdims=True)
     else:
-        raise ValueError(
-            f"norm must be one of 'l1', 'l2', 'max'; got {norm!r}."
-        )
+        raise ValueError(f"norm must be one of 'l1', 'l2', 'max'; got {norm!r}.")
     safe_scale = np.where(scale == 0.0, 1.0, scale)
     out = arr / safe_scale
     out = np.where(scale == 0.0, 0.0, out)

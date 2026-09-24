@@ -19,7 +19,7 @@ def _build_report(
     cv_curve_b64: str = "",
 ) -> str:
     """Build a compact Chinese Markdown analysis report with plot references."""
-    pp = best_pipe.description() if best_pipe else "无（使用原始光谱）"
+    pp = (best_pipe.description() or "无（使用原始光谱）") if best_pipe else "无（使用原始光谱）"
     model_decision = metrics.get("model_selection_decision")
     model_decision_lines: list[str] = []
     if isinstance(model_decision, dict):

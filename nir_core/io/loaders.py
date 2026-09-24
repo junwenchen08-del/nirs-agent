@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import Callable, TypeVar, cast
+from typing import TypeVar, cast
 
 import numpy as np
 
@@ -652,12 +653,12 @@ def _load_mat_v73(
 
     def read_node(node):
         if isinstance(node, h5py.Group):
-            return {name: read_node(node[name]) for name in node.keys()}
+            return {name: read_node(node[name]) for name in node}
         return np.asarray(node[...])
 
     with h5py.File(filepath, "r") as fh:
         root: dict[str, object] = {
-            name: read_node(fh[name]) for name in fh.keys() if name != "#refs#"
+            name: read_node(fh[name]) for name in fh if name != "#refs#"
         }
 
     if (
@@ -703,9 +704,7 @@ def _is_struct_like(value: object) -> bool:
     # scipy.io.loadmat with struct_as_record=False produces mat_struct
     # instances (or object ndarrays containing them). We check by attribute
     # name rather than importing mat_struct to keep the dependency lazy.
-    if hasattr(value, "_fieldnames") and isinstance(
-        getattr(value, "_fieldnames"), list
-    ):
+    if hasattr(value, "_fieldnames") and isinstance(value._fieldnames, list):
         return True
     # h5py groups are already converted to dicts by _load_mat_v73; a dict
     # of mixed dict/ndarray values is also treated as a struct.
@@ -941,7 +940,7 @@ def _resolve_mat_variables(
     # Check if any value is struct-like; if so, flatten first.
     has_struct = any(_is_struct_like(v) for v in variables.values())
     if has_struct:
-        flat, chosen_subset = _flatten_mat_struct(variables, subset)
+        flat, _chosen_subset = _flatten_mat_struct(variables, subset)
         # Replace variables with the flattened dict for the rest of the
         # resolution. (chosen_subset is reported via the SpectralData
         # source_file, not returned here — callers can inspect it.)
@@ -1256,11 +1255,8 @@ def _split_csv_block(
     y: np.ndarray | None = None
     wv: np.ndarray | None = None
 
-    if wv_row is not None and X_full.shape[0] > 0:
-        if not (0 <= wv_row < X_full.shape[0]):
-            raise ValueError(
-                f"wv_row={wv_row} out of range for {X_full.shape[0]} rows."
-            )
+    if wv_row is not None and X_full.shape[0] > 0 and not 0 <= wv_row < X_full.shape[0]:
+        raise ValueError(f"wv_row={wv_row} out of range for {X_full.shape[0]} rows.")
 
     if y_cols is not None and X_full.shape[1] > 0:
         target_cols = [int(index) for index in y_cols]

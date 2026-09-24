@@ -115,8 +115,13 @@ def train_ridge(
         Tuple ``(best_model, grid_results)``.
     """
     return _train_regularized_linear(
-        Ridge, X_train, y_train, {"alpha": DEFAULT_ALPHA_GRID},
-        cv_folds, cv_strategy, random_state,
+        Ridge,
+        X_train,
+        y_train,
+        {"alpha": DEFAULT_ALPHA_GRID},
+        cv_folds,
+        cv_strategy,
+        random_state,
     )
 
 
@@ -158,8 +163,13 @@ def train_lasso(
         Tuple ``(best_model, grid_results)``.
     """
     return _train_regularized_linear(
-        Lasso, X_train, y_train, {"alpha": DEFAULT_ALPHA_GRID},
-        cv_folds, cv_strategy, random_state,
+        Lasso,
+        X_train,
+        y_train,
+        {"alpha": DEFAULT_ALPHA_GRID},
+        cv_folds,
+        cv_strategy,
+        random_state,
     )
 
 
@@ -202,9 +212,13 @@ def train_elasticnet(
         Tuple ``(best_model, grid_results)``.
     """
     return _train_regularized_linear(
-        ElasticNet, X_train, y_train,
+        ElasticNet,
+        X_train,
+        y_train,
         {"alpha": DEFAULT_ALPHA_GRID, "l1_ratio": DEFAULT_L1_RATIO_GRID},
-        cv_folds, cv_strategy, random_state,
+        cv_folds,
+        cv_strategy,
+        random_state,
     )
 
 
@@ -224,12 +238,12 @@ def predict_elasticnet(model: object, X: np.ndarray) -> np.ndarray:
 
 
 __all__ = [
-    "train_ridge",
-    "predict_ridge",
-    "train_lasso",
-    "predict_lasso",
-    "train_elasticnet",
-    "predict_elasticnet",
     "DEFAULT_ALPHA_GRID",
     "DEFAULT_L1_RATIO_GRID",
+    "predict_elasticnet",
+    "predict_lasso",
+    "predict_ridge",
+    "train_elasticnet",
+    "train_lasso",
+    "train_ridge",
 ]

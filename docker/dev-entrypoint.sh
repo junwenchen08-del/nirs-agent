@@ -68,10 +68,12 @@ fi
 # must exist before uvicorn starts so watchfiles treats it as an excluded
 # directory, not as a plain glob pattern — on Python 3.12, globbing an absolute
 # pattern raises NotImplementedError and crashes startup (#3459 / #3454). That
-# means `sandbox` must be created here too, not just `.deer-flow`.
+# means `sandbox` and pytest's cache must be created here too, not just
+# `.deer-flow`. The host-created cache can be unreadable to watchfiles inside
+# Docker Desktop even though pytest itself completed successfully.
 : "${DEER_FLOW_HOME:=/app/backend/.deer-flow}"
 export DEER_FLOW_HOME
-mkdir -p "$DEER_FLOW_HOME" /app/backend/.deer-flow /app/backend/sandbox
+mkdir -p "$DEER_FLOW_HOME" /app/backend/.deer-flow /app/backend/sandbox /app/backend/.pytest_cache
 
 # ── Sync dependencies (with self-heal) ──────────────────────────────────────
 
@@ -96,4 +98,5 @@ PYTHONPATH=. exec uv run uvicorn app.gateway.app:app \
     --reload-include='.env' \
     --reload-exclude=/app/backend/sandbox \
     --reload-exclude="$DEER_FLOW_HOME" \
-    --reload-exclude=/app/backend/.deer-flow
+    --reload-exclude=/app/backend/.deer-flow \
+    --reload-exclude=/app/backend/.pytest_cache

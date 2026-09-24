@@ -7,7 +7,7 @@ implementations. It has been split into focused sub-modules:
 - ``_knowledge_hint`` — structured knowledge-base retrieval hint builder
 - ``_report``         — Markdown report generator
 - ``io_tools``        — nir_load_data / nir_inspect / nir_predict
-- ``preprocess``      — nir_preprocess
+- ``preprocess``      — nir_preprocess / nir_align_wavelengths
 - ``classification``  — nir_train_classifier
 - ``modeling``        — nir_train_model / nir_analyze / nir_compare /
                         nir_register_model
@@ -39,6 +39,12 @@ from ._common import (
 )
 from ._knowledge_hint import _KNOWN_DOMAINS, _build_knowledge_hint
 from ._report import _build_report
+from .calibration_transfer import (
+    nir_apply_calibration_transfer_tool,
+    nir_evaluate_calibration_transfer_tool,
+    nir_fit_calibration_transfer_tool,
+    nir_list_calibration_transfer_methods_tool,
+)
 from .classification import nir_train_classifier_tool
 
 # Re-export every @tool function so ``deerflow.community.nir.tools:<name>``
@@ -63,15 +69,29 @@ from .modeling import (
     nir_train_multi_model_tool,
     nir_train_partitioned_model_tool,
 )
-from .preprocess import nir_preprocess_tool
+from .preprocess import (
+    nir_align_wavelengths_tool,
+    nir_describe_preprocessing_method_tool,
+    nir_list_preprocessing_methods_tool,
+    nir_preprocess_tool,
+    nir_recommend_preprocessing_tool,
+)
 from .reflect import nir_reflect_tool
 from .workflow import nir_workflow_tool
 
 __all__ = [
     # Tools
+    "nir_apply_calibration_transfer_tool",
+    "nir_evaluate_calibration_transfer_tool",
+    "nir_fit_calibration_transfer_tool",
+    "nir_list_calibration_transfer_methods_tool",
     "nir_load_data_tool",
     "nir_inspect_tool",
     "nir_preprocess_tool",
+    "nir_align_wavelengths_tool",
+    "nir_list_preprocessing_methods_tool",
+    "nir_describe_preprocessing_method_tool",
+    "nir_recommend_preprocessing_tool",
     "nir_train_auto_split_model_tool",
     "nir_train_model_tool",
     "nir_train_classifier_tool",

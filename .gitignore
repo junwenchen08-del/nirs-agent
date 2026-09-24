@@ -19,6 +19,10 @@ Thumbs.db
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
 
 # Build artifacts
 artifacts/
@@ -39,9 +43,73 @@ container_loaders.py
 CODE_REVIEW_REPORT.md
 SYSTEM.md
 
+# Local-only NIR materials (never publish)
+/参考/
+/药品2-310条/
+/NIR项目面试准备.md
+/docs/nir-preprocessing-implementation-log.md
+/docs/nir-preprocessing-toolkit-and-calibration-transfer-roadmap.md
+/docs/chemotools-algorithm-catalog-and-selection-plan.md
+/docs/chemotools-algorithm-catalog-and-selection-implementation-log.md
+
+# Internal plans, change notes, and manual test evidence (never publish)
+/docs/plans/
+/docs/superpowers/
+/docs/pr-evidence/
+/docs/agents/
+/docs/CODE_CHANGE_SUMMARY_BY_FILE.md
+/docs/SKILL_NAME_CONFLICT_FIX.md
+/backend/docs/AUTH_TEST_DOCKER_GAP.md
+/backend/docs/AUTH_TEST_PLAN.md
+/backend/docs/MEMORY_IMPROVEMENTS.md
+/backend/docs/MEMORY_IMPROVEMENTS_SUMMARY.md
+/backend/docs/MEMORY_SETTINGS_REVIEW.md
+/backend/docs/REPLAY_E2E.md
+/backend/docs/SANDBOX_MEMORY_PROFILING.md
+/backend/docs/TITLE_GENERATION_IMPLEMENTATION.md
+/backend/docs/TODO.md
+/backend/docs/task_tool_improvements.md
+/backend/docs/rfc-*.md
+/nir_core/knowledge/IMPLEMENTATION_PLAN.md
+/nir_core/knowledge/KNOWLEDGE_IMPLEMENTATION.md
+/nir_core/knowledge/retrieval_eval_baseline*.md
+/Install.md
+/README_fr.md
+/README_ja.md
+/README_ru.md
+/README_zh.md
+
+# Local NIR datasets and generated scientific artifacts
+/local-data/
+/local-reference/
+/test-output/
+*.MAT
+*.mat
+*.npz
+*.joblib
+*.pkl
+*.npy
+*.pt
+*.pth
+*.onnx
+*.sqlite
+*.sqlite3
+*.db
+*.jsonl
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
+*.pdf
+
 # Virtual environments
 .venv
 venv/
+/.venv-backend/
+/.venv-nir/
+/.uv-cache/
+/.uv-python/
 
 # Environment variables
 .env
@@ -58,6 +126,7 @@ extensions_config.json
 # Coverage report
 coverage.xml
 coverage/
+.coverage
 .deer-flow/
 .claude/
 skills/custom/*
@@ -82,5 +151,6 @@ config.yaml.bak
 .playwright-mcp
 /frontend/test-results/
 /frontend/playwright-report/
+/pr-build/
 .gstack/
 .worktrees

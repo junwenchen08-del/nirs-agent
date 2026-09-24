@@ -18,7 +18,7 @@ try:  # sklearn is the preferred backend but may be binary-incompatible
     from sklearn.decomposition import PCA as _SklearnPCA
 
     _HAS_SKLEARN = True
-except Exception:  # pragma: no cover - environment-dependent
+except Exception:  # noqa: BLE001  # pragma: no cover - environment-dependent
     _SklearnPCA = None
     _HAS_SKLEARN = False
 
@@ -37,9 +37,9 @@ def _pca_fit_transform(X: np.ndarray, n_components: int):
     # ---- NumPy fallback (compact SVD on centered data) ----
     Xc = X - np.mean(X, axis=0, keepdims=True)
     # economy SVD: Xc = U S V^T
-    U, s, Vt = np.linalg.svd(Xc, full_matrices=False)
+    U, s, _Vt = np.linalg.svd(Xc, full_matrices=False)
     n_samples = Xc.shape[0]
-    explained_variance = (s ** 2) / max(1, n_samples - 1)
+    explained_variance = (s**2) / max(1, n_samples - 1)
     k = min(n_components, s.shape[0])
     scores = U[:, :k] * s[:k]
     return scores, explained_variance[:k]
@@ -75,7 +75,7 @@ def detect_outliers_pca_t2(
     # Guard against zero/negative eigenvalues from numerical noise.
     lambdas = np.where(lambdas > 1e-12, lambdas, 1e-12)
 
-    t2 = np.sum((scores ** 2) / lambdas, axis=1)
+    t2 = np.sum((scores**2) / lambdas, axis=1)
 
     # Critical value: F(alpha, p, n-p-1) * p * (n-1) / (n-p).
     p = k
@@ -88,9 +88,7 @@ def detect_outliers_pca_t2(
     return flagged.astype(int)
 
 
-def detect_outliers_mahalanobis(
-    X: np.ndarray, threshold: float = 3.0
-) -> np.ndarray:
+def detect_outliers_mahalanobis(X: np.ndarray, threshold: float = 3.0) -> np.ndarray:
     """Detect outliers via Mahalanobis distance from the column mean.
 
     Uses the pseudo-inverse of the covariance matrix (``np.linalg.pinv``)
@@ -128,9 +126,7 @@ def detect_outliers_mahalanobis(
     return flagged.astype(int)
 
 
-def check_train_test_split_leakage(
-    X_train: np.ndarray, X_test: np.ndarray
-) -> bool:
+def check_train_test_split_leakage(X_train: np.ndarray, X_test: np.ndarray) -> bool:
     """Check whether any test row exactly duplicates a training row.
 
     Uses a row-hash set for efficiency; exact equality is required (a
@@ -207,9 +203,8 @@ def should_retry(
 
         r2_a = _r2(last_two[-2])
         r2_b = _r2(last_two[-1])
-        if r2_a is not None and r2_b is not None:
-            if abs(r2_b - r2_a) < 0.02:
-                return False
+        if r2_a is not None and r2_b is not None and abs(r2_b - r2_a) < 0.02:
+            return False
     return True
 
 

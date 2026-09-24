@@ -26,6 +26,7 @@ from ._common import (
 )
 from ._resources import budget_for_runtime, resource_error
 from ._science_gate import reproducibility_evidence, science_gate_error, split_science_gate
+from .artifacts import _build_preprocessing_artifact
 
 
 def _resolve_column(frame, selector: str, *, role: str) -> tuple[int, str]:
@@ -641,11 +642,10 @@ def nir_train_classifier_tool(
             "method": selection.method,
             "classes": classes,
             "label_name": label_name,
-            "preprocessing": {
-                "description": final_pipeline.description(),
-                "pipeline": final_pipeline,
-                "apply_on_predict": True,
-            },
+            "preprocessing": _build_preprocessing_artifact(
+                final_pipeline,
+                final_pipeline.description(),
+            ),
             "wavelength_selection": {
                 "method": "none",
                 "n_original": int(X.shape[1]),

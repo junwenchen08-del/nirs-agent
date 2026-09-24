@@ -51,9 +51,7 @@ def ensemble_predict(
     n = arrays[0].size
     for i, a in enumerate(arrays):
         if a.size != n:
-            raise ValueError(
-                f"prediction {i} has length {a.size}, expected {n}"
-            )
+            raise ValueError(f"prediction {i} has length {a.size}, expected {n}")
     stacked = np.vstack(arrays)  # shape (n_models, n_samples)
 
     if method == "mean":
@@ -73,16 +71,14 @@ def ensemble_predict(
         total = float(np.sum(w))
         if not np.isfinite(total) or total <= 0:
             raise ValueError(
-                "weights must be finite and have a positive sum; "
-                f"got sum={total}"
+                f"weights must be finite and have a positive sum; got sum={total}"
             )
         w_norm = w / total
         # Weighted sum over the model axis.
         return (stacked * w_norm[:, None]).sum(axis=0)
 
     raise ValueError(
-        f"Unknown method {method!r}; expected one of "
-        f"['mean', 'weighted', 'median']"
+        f"Unknown method {method!r}; expected one of ['mean', 'weighted', 'median']"
     )
 
 

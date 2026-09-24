@@ -105,4 +105,4 @@ def predict_knn(model: object, X: np.ndarray) -> np.ndarray:
     return np.asarray(pred).ravel()
 
 
-__all__ = ["train_knn", "predict_knn", "DEFAULT_N_NEIGHBORS", "DEFAULT_WEIGHTS"]
+__all__ = ["DEFAULT_N_NEIGHBORS", "DEFAULT_WEIGHTS", "predict_knn", "train_knn"]

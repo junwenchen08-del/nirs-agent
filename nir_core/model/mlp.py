@@ -62,17 +62,22 @@ def train_mlp(
         )
     n_samples = X_train.shape[0]
 
-    pipe = Pipeline([
-        ("scaler", StandardScaler()),
-        ("mlp", MLPRegressor(
-            activation="relu",
-            solver="adam",
-            max_iter=500,
-            early_stopping=True,
-            n_iter_no_change=15,
-            random_state=random_state,
-        )),
-    ])
+    pipe = Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            (
+                "mlp",
+                MLPRegressor(
+                    activation="relu",
+                    solver="adam",
+                    max_iter=500,
+                    early_stopping=True,
+                    n_iter_no_change=15,
+                    random_state=random_state,
+                ),
+            ),
+        ]
+    )
 
     param_grid = {
         "mlp__hidden_layer_sizes": DEFAULT_HIDDEN_LAYERS,
@@ -127,4 +132,4 @@ def predict_mlp(model: object, X: np.ndarray) -> np.ndarray:
     return np.asarray(pred).ravel()
 
 
-__all__ = ["train_mlp", "predict_mlp", "DEFAULT_HIDDEN_LAYERS", "DEFAULT_ALPHA_GRID"]
+__all__ = ["DEFAULT_ALPHA_GRID", "DEFAULT_HIDDEN_LAYERS", "predict_mlp", "train_mlp"]

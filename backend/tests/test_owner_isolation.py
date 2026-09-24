@@ -1,7 +1,6 @@
 """Cross-user isolation tests — non-negotiable safety gate.
 
-Mirrors TC-API-17..20 from backend/docs/AUTH_TEST_PLAN.md. A failure
-here means users can see each other's data; PR must not merge.
+A failure here means users can see each other's data; PR must not merge.
 
 Architecture note
 -----------------

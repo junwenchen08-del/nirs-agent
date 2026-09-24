@@ -147,7 +147,8 @@ def nir_search_knowledge_tool(
     - ``nir_reflect`` returned ``grade ∈ {C, D, F}`` AND ``attempt >= 2``.
     - ``nir_train_model`` returned ``R2_val < 0.7`` — need domain-typical
       R²/RPD reference to judge whether the result is reasonable.
-    - Choosing between SNV vs MSC, airPLS vs asLS, derivative1 vs derivative2
+    - Choosing among SNV / robust SNV / MSC / EMSC, despiking, airPLS vs
+      asLS, SG derivatives, and Norris-Williams derivatives
       and the inline docs do not cover this domain.
     - User asks "is this R²/RPD normal?" or "why so low?" — query the
       domain-typical range.

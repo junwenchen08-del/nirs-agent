@@ -100,7 +100,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         elif access_token:
             # Strict JWT validation: reject junk/expired tokens with 401
             # right here instead of silently passing through. This closes
-            # the "junk cookie bypass" gap (AUTH_TEST_PLAN test 7.5.8):
+            # the "junk cookie bypass" gap:
             # without this, non-isolation routes like /api/models would
             # accept any cookie-shaped string as authentication.
             #

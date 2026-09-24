@@ -661,6 +661,31 @@ def test_tool_reports_invalid_transition_without_mutating_state():
     assert json.loads(message.content)["status"] == "error"
 
 
+def test_inspection_can_complete_directly_after_bounded_audit_evidence():
+    state = start_workflow(task_type="inspection", data_path="raman.mat")
+    state = transition_workflow(
+        state,
+        action="record_audit_evidence",
+        audit_evidence={
+            "source_tool": "nir_inspect",
+            "n_samples": 120,
+            "n_wavelengths": 3401,
+            "axis_first": 3600.0,
+            "axis_last": 200.0,
+            "axis_direction": "descending",
+        },
+    )
+
+    completed = transition_workflow(
+        state,
+        action="complete",
+        notes="Inspection completed successfully.",
+    )
+
+    assert completed["stage"] == "completed"
+    assert completed["next_action"] == "none"
+
+
 def test_workflow_state_is_rendered_into_durable_context():
     state = start_workflow(task_type="calibration", data_path="data.npz")
     state = transition_workflow(

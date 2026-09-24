@@ -144,10 +144,10 @@ def test_inspect_mat_labeled_matrix_bundle_reports_auto_load_layout(
                     "active (%w/w)",
                     "Type",
                     "Scale",
-                    "7398.337",
-                    "7406.051",
-                    "7413.766",
                     "7421.481",
+                    "7413.766",
+                    "7406.051",
+                    "7398.337",
                 ],
                 dtype=object,
             ),
@@ -165,6 +165,9 @@ def test_inspect_mat_labeled_matrix_bundle_reports_auto_load_layout(
     ]
     assert info["spectral_column_indices"] == [3, 4, 5, 6]
     assert info["wavelength_range"] == [7398.337, 7421.481]
+    assert info["axis_first"] == 7421.481
+    assert info["axis_last"] == 7398.337
+    assert info["axis_direction"] == "descending"
 
 
 def test_load_mat_recursively_infers_unknown_fields_and_transposes(
@@ -206,6 +209,9 @@ def test_load_mat_recursively_infers_unknown_fields_and_transposes(
     assert mapping["x_variable"].endswith("Signal")
     assert mapping["y_variable"].endswith("Chemistry")
     assert mapping["wv_variable"].endswith("Axis")
+    assert info["axis_first"] == 900.0
+    assert info["axis_last"] == 1700.0
+    assert info["axis_direction"] == "ascending"
 
 
 def test_inspect_mat_reports_ambiguous_equal_matrix_candidates(tmp_path: Path) -> None:

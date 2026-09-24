@@ -12,9 +12,9 @@ from nir_core.preprocess.pipeline import (
     PreprocessingPipeline,
     validate_pipeline,
 )
+from nir_core.preprocess.scaling import mean_center
 from nir_core.preprocess.scatter import snv
 from nir_core.preprocess.smoothing import sg_smooth
-from nir_core.preprocess.scaling import mean_center
 
 
 def test_pipeline_apply_executes_steps_in_order(rng):
@@ -133,10 +133,15 @@ def test_prestep_methods_mapping_complete():
     """PRESTEP_METHODS should contain all expected method keys."""
     expected = {
         "snv",
+        "robust_snv",
         "msc",
+        "emsc",
+        "despike",
         "sg_smooth",
         "derivative1",
         "derivative2",
+        "norris_derivative1",
+        "norris_derivative2",
         "airpls",
         "asls",
         "detrend",
@@ -150,8 +155,12 @@ def test_prestep_methods_mapping_complete():
 def test_pipeline_derivative_steps_callable(rng):
     """derivative1 and derivative2 dispatchers should produce expected shapes."""
     X = rng.normal(size=(4, 100))
-    steps1 = [PreprocessingStep(method="derivative1", params={"window": 11, "order": 2})]
-    steps2 = [PreprocessingStep(method="derivative2", params={"window": 11, "order": 3})]
+    steps1 = [
+        PreprocessingStep(method="derivative1", params={"window": 11, "order": 2})
+    ]
+    steps2 = [
+        PreprocessingStep(method="derivative2", params={"window": 11, "order": 3})
+    ]
     out1 = PreprocessingPipeline(steps1).apply(X)
     out2 = PreprocessingPipeline(steps2).apply(X)
     assert out1.shape == X.shape
@@ -178,7 +187,7 @@ class TestValidatePipeline:
 
     def test_empty_steps_passes(self):
         """An empty pipeline is valid (no preprocessing)."""
-        is_valid, reason = validate_pipeline([])
+        is_valid, _reason = validate_pipeline([])
         assert is_valid is True
 
     def test_unknown_method_fails(self):
@@ -198,6 +207,15 @@ class TestValidatePipeline:
         assert is_valid is False
         assert "互斥方法" in reason
 
+    def test_all_scatter_corrections_are_mutually_exclusive(self):
+        steps = [
+            PreprocessingStep(method="robust_snv", params={}),
+            PreprocessingStep(method="emsc", params={}),
+        ]
+        is_valid, reason = validate_pipeline(steps)
+        assert is_valid is False
+        assert "互斥方法" in reason
+
     def test_derivative1_and_derivative2_mutually_exclusive(self):
         """derivative1 and derivative2 cannot coexist."""
         steps = [
@@ -207,6 +225,26 @@ class TestValidatePipeline:
         is_valid, reason = validate_pipeline(steps)
         assert is_valid is False
         assert "互斥方法" in reason
+
+    def test_sg_and_norris_derivatives_are_mutually_exclusive(self):
+        steps = [
+            PreprocessingStep(method="derivative1", params={"window": 11, "order": 2}),
+            PreprocessingStep(
+                method="norris_derivative1", params={"gap": 3, "segment": 5}
+            ),
+        ]
+        is_valid, reason = validate_pipeline(steps)
+        assert is_valid is False
+        assert "互斥方法" in reason
+
+    def test_despike_must_precede_scatter_correction(self):
+        steps = [
+            PreprocessingStep(method="snv", params={}),
+            PreprocessingStep(method="despike", params={}),
+        ]
+        is_valid, reason = validate_pipeline(steps)
+        assert is_valid is False
+        assert "顺序不当" in reason
 
     def test_scaling_methods_mutually_exclusive(self):
         """mean_center, autoscale, and normalize cannot coexist."""
@@ -268,5 +306,5 @@ class TestValidatePipeline:
             PreprocessingStep(method="detrend", params={}),
             PreprocessingStep(method="snv", params={}),
         ]
-        is_valid, reason = validate_pipeline(steps)
+        is_valid, _reason = validate_pipeline(steps)
         assert is_valid is True

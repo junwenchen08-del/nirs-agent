@@ -36,7 +36,6 @@ from nir_core.knowledge.migration import (
 )
 from nir_core.knowledge.parser import SUPPORTED_EXTENSIONS
 
-
 # ---------------------------------------------------------------------------
 # commands
 # ---------------------------------------------------------------------------

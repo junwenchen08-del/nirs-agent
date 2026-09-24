@@ -75,7 +75,7 @@ def generate_comparison_gallery(results: list[ModelResult]) -> str:
                     f'alt="{method} predicted vs reference" '
                     f'style="max-width:100%;border:1px solid #ccc;"/>'
                 )
-            except Exception as exc:  # defensive: never break gallery render
+            except Exception as exc:  # noqa: BLE001 - gallery must fail open
                 plot_html = f"<p>无法生成预测图 / Plot unavailable: {exc}</p>"
         else:
             plot_html = (

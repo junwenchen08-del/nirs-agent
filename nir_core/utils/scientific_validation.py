@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import platform
+from collections.abc import Mapping
 from importlib import metadata
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
+
+from nir_core.utils.spectral_axis import summarize_spectral_axis
 
 
 def _package_version(distribution: str) -> str:
@@ -94,8 +97,7 @@ def validate_calibration_dataset(
             {
                 "code": "sample_target_misalignment",
                 "message": (
-                    f"Spectra contain {n_samples} samples but reference values "
-                    f"contain {y_matrix.shape[0]} rows."
+                    f"Spectra contain {n_samples} samples but reference values contain {y_matrix.shape[0]} rows."
                 ),
             }
         )
@@ -104,8 +106,7 @@ def validate_calibration_dataset(
             {
                 "code": "insufficient_samples",
                 "message": (
-                    f"At least {int(minimum_samples)} samples are required; "
-                    f"observed {n_samples}."
+                    f"At least {int(minimum_samples)} samples are required; observed {n_samples}."
                 ),
             }
         )
@@ -147,8 +148,7 @@ def validate_calibration_dataset(
                 {
                     "code": "constant_targets",
                     "message": (
-                        "Reference values have zero usable variation for target "
-                        f"columns {constant_targets}."
+                        f"Reference values have zero usable variation for target columns {constant_targets}."
                     ),
                     "target_indices": constant_targets,
                 }
@@ -164,8 +164,7 @@ def validate_calibration_dataset(
             {
                 "code": "constant_wavelength_columns",
                 "message": (
-                    f"{len(dead_columns)} spectral columns have no variation and "
-                    "carry no calibration information."
+                    f"{len(dead_columns)} spectral columns have no variation and carry no calibration information."
                 ),
                 "indices": dead_columns[:50],
             }
@@ -174,13 +173,13 @@ def validate_calibration_dataset(
     wavelength_direction = "missing"
     if wv is not None:
         wv = np.asarray(wv, dtype=float).ravel()
+        axis_direction = str(summarize_spectral_axis(wv)["axis_direction"])
         if wv.size != n_wavelengths:
             errors.append(
                 {
                     "code": "wavelength_length_mismatch",
                     "message": (
-                        f"Wavelength axis has {wv.size} values but spectra have "
-                        f"{n_wavelengths} columns."
+                        f"Wavelength axis has {wv.size} values but spectra have {n_wavelengths} columns."
                     ),
                 }
             )
@@ -201,17 +200,16 @@ def validate_calibration_dataset(
                     }
                 )
                 wavelength_direction = "invalid"
-            elif np.all(differences > 0):
+            elif axis_direction == "ascending":
                 wavelength_direction = "ascending"
-            elif np.all(differences < 0):
+            elif axis_direction == "descending":
                 wavelength_direction = "descending"
             else:
                 errors.append(
                     {
                         "code": "nonmonotonic_wavelengths",
                         "message": (
-                            "Wavelength axis must be strictly ascending or "
-                            "strictly descending to preserve spectral alignment."
+                            "Wavelength axis must be strictly ascending or strictly descending to preserve spectral alignment."
                         ),
                     }
                 )
@@ -238,8 +236,7 @@ def validate_calibration_dataset(
             {
                 "code": "conflicting_duplicate_spectra",
                 "message": (
-                    f"{len(conflicting_groups)} exact duplicate spectral groups "
-                    "have conflicting reference values."
+                    f"{len(conflicting_groups)} exact duplicate spectral groups have conflicting reference values."
                 ),
                 "groups": conflicting_groups[:20],
             }
@@ -249,8 +246,7 @@ def validate_calibration_dataset(
             {
                 "code": "duplicate_spectra",
                 "message": (
-                    f"{len(consistent_groups)} exact duplicate spectral groups "
-                    "were found; keep them together during splitting if they are replicates."
+                    f"{len(consistent_groups)} exact duplicate spectral groups were found; keep them together during splitting if they are replicates."
                 ),
                 "groups": consistent_groups[:20],
             }
@@ -328,8 +324,7 @@ def validate_partition_separation(
             {
                 "code": "cross_partition_duplicate_spectra",
                 "message": (
-                    "Exact duplicate spectra occur across data partitions; "
-                    "evaluation would be optimistically biased."
+                    "Exact duplicate spectra occur across data partitions; evaluation would be optimistically biased."
                 ),
                 "overlaps": overlaps,
             }

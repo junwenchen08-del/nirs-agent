@@ -249,15 +249,45 @@ from deerflow.config import get_app_config
   autonomous `auto` policy for PLS. `SpectralData.summary()` reports the raw
   measured wavelength range separately from the usable span of non-constant
   columns, plus constant/usable counts; the usable span is informational and
-  does not claim that constant columns were removed. Successful `nir_inspect`
-  and `nir_load_data` calls persist a bounded `audit_evidence` snapshot in the
+  does not claim that constant columns were removed. Spectral summaries and
+  high-confidence inspections also preserve `axis_first`, `axis_last`, and
+  `axis_direction`, because a min/max range cannot establish whether the
+  stored axis is ascending or descending. Successful `nir_inspect` and
+  `nir_load_data` calls persist a bounded `audit_evidence` snapshot in the
   workflow; the compact agent view retains it through retries and response
-  grounding rejects range/count claims that disagree with it. Selected original-column indices are
+  grounding rejects range/count/direction claims that disagree with it. An
+  inspection-only workflow completes atomically after successful
+  `nir_inspect`; it must not advance through audit planning or execution.
+  Selected original-column indices are
   persisted in metrics and,
   when selection is enabled, in the saved model artifact. Version-2 artifacts
   also persist the fitted preprocessing pipeline, so `nir_predict` can apply
   train-time preprocessing and then the same spectral columns to raw samples;
   `input_preprocessed=true` explicitly bypasses the preprocessing step.
+  `nir_preprocess` now exposes 21 methods, including robust SNV/RNV, EMSC,
+  isolated-spike removal, and first/second Norris-Williams derivatives. EMSC is
+  a fitted method: training owns its reference spectrum and prediction replays
+  that saved state. These additions are explicit-only and are not inserted into
+  automatic candidate pipelines. The authoritative catalog lives in
+  `nir_core.preprocess.registry`; the agent reads it through list/detail tools
+  and can request a bounded diagnostic recommendation. New pipelines use the
+  verified Chemotools 0.4.4 implementations wherever upstream semantics match,
+  with native robust SNV, isolated despiking, and max normalization retained as
+  project fallbacks and an environment-controlled native rollback. Artifacts persist
+  provider and selection evidence; missing legacy bindings always mean native.
+  One-shot automatic selection profiles calibration rows only, includes raw as
+  a candidate, and uses RMSECV plus a 1% simplicity decision.
+  `nir_align_wavelengths` is a separate
+  execution-stage tool because alignment changes both `X` and `wv`; it requires
+  strict monotonic axes, reports source/target axis hashes, and rejects
+  extrapolation unless explicitly enabled. It does not itself implement
+  calibration transfer. Cross-instrument work uses the separate
+  `calibration_transfer` tools: DS/PDS/SST require paired sample identities,
+  bind target-to-source direction plus both axes and instruments, and persist a
+  trusted transfer artifact. Spectral validation and reference-model RMSEP
+  validation remain distinct. Internal model validation is not production
+  approval; approval requires a non-overlapping independent paired validation
+  set plus improved reference-model RMSEP.
   Model artifacts are written atomically with a SHA-256 manifest and prediction
   rejects pickle files outside `/mnt/user-data/outputs` or without a valid
   manifest. Optional HMAC signing can be required in production. NPZ reads use

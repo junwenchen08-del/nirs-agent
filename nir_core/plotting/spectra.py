@@ -57,7 +57,7 @@ def plot_raw_spectra(data: SpectralData, n_highlight: int = 5) -> str:
         Base64-encoded PNG string of the figure.
     """
     X = np.asarray(data.X)
-    n_samples, n_wv = X.shape
+    n_samples = X.shape[0]
     x = _wavelength_axis(data)
 
     fig, ax = plt.subplots(figsize=(10, 5))

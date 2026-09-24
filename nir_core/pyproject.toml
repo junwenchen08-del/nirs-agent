@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "NIR-Agent" }]
 dependencies = [
+    "chemotools==0.4.4",
     "numpy>=1.24.0",
     "scipy>=1.10.0",
     "scikit-learn>=1.2.0",

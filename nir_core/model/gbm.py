@@ -135,8 +135,7 @@ def train_xgboost(
         from xgboost import XGBRegressor
     except ImportError as exc:
         raise ImportError(
-            "xgboost is required for train_xgboost. "
-            "Install with: pip install xgboost"
+            "xgboost is required for train_xgboost. Install with: pip install xgboost"
         ) from exc
 
     X_train = np.asarray(X_train, dtype=float)
@@ -201,11 +200,11 @@ def predict_xgboost(model: object, X: np.ndarray) -> np.ndarray:
 
 
 __all__ = [
-    "train_gbm",
-    "predict_gbm",
-    "train_xgboost",
-    "predict_xgboost",
-    "DEFAULT_N_ESTIMATORS",
     "DEFAULT_LEARNING_RATE",
     "DEFAULT_MAX_DEPTH",
+    "DEFAULT_N_ESTIMATORS",
+    "predict_gbm",
+    "predict_xgboost",
+    "train_gbm",
+    "train_xgboost",
 ]

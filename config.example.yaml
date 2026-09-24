@@ -2,6 +2,11 @@
 #
 # Guidelines:
 # - Copy this file to `config.yaml` and customize it for your environment
+# - This template is safe to publish; never commit the generated `config.yaml`
+#   or a real `.env` file.
+# - Chat requires at least one uncommented entry under `models:` and its
+#   referenced credential in `.env`. Keep credentials in environment variables;
+#   never paste a real API key directly into this YAML file.
 # - The default path of this configuration file is `config.yaml` in the project root.
 #   You can set `DEER_FLOW_PROJECT_ROOT` to define that root explicitly, or use
 #   `DEER_FLOW_CONFIG_PATH` to point at a specific config file.
@@ -15,7 +20,7 @@
 # ============================================================================
 # Bump this number when the config schema changes.
 # Run `make config-upgrade` to merge new fields into your local config.yaml.
-config_version: 17
+config_version: 18
 
 # ============================================================================
 # Logging
@@ -69,7 +74,11 @@ max_recursion_limit: 1000
 # ============================================================================
 # Models Configuration
 # ============================================================================
-# Configure available LLM models for the agent to use
+# REQUIRED FOR CHAT: uncomment and configure at least one model below. The
+# bundled Docker stack can start without a model, but agent conversations will
+# fail until a usable model and matching environment variable are configured.
+# Local OpenAI-compatible services can use their documented dummy key only when
+# that service explicitly does not authenticate requests.
 
 models:
   # Example: Volcengine (Doubao) model
@@ -860,9 +869,41 @@ tools:
     group: bash
     use: deerflow.community.nir.io_tools:nir_inspect_tool
 
+  - name: nir_list_preprocessing_methods
+    group: bash
+    use: deerflow.community.nir.preprocess:nir_list_preprocessing_methods_tool
+
+  - name: nir_describe_preprocessing_method
+    group: bash
+    use: deerflow.community.nir.preprocess:nir_describe_preprocessing_method_tool
+
+  - name: nir_recommend_preprocessing
+    group: bash
+    use: deerflow.community.nir.preprocess:nir_recommend_preprocessing_tool
+
   - name: nir_preprocess
     group: bash
     use: deerflow.community.nir.preprocess:nir_preprocess_tool
+
+  - name: nir_align_wavelengths
+    group: bash
+    use: deerflow.community.nir.preprocess:nir_align_wavelengths_tool
+
+  - name: nir_list_calibration_transfer_methods
+    group: bash
+    use: deerflow.community.nir.calibration_transfer:nir_list_calibration_transfer_methods_tool
+
+  - name: nir_fit_calibration_transfer
+    group: bash
+    use: deerflow.community.nir.calibration_transfer:nir_fit_calibration_transfer_tool
+
+  - name: nir_apply_calibration_transfer
+    group: bash
+    use: deerflow.community.nir.calibration_transfer:nir_apply_calibration_transfer_tool
+
+  - name: nir_evaluate_calibration_transfer
+    group: bash
+    use: deerflow.community.nir.calibration_transfer:nir_evaluate_calibration_transfer_tool
 
   - name: nir_train_model
     group: bash
@@ -1030,6 +1071,9 @@ safety_finish_reason:
 uploads:
   # Application-level upload limits enforced by the gateway and exposed to the
   # frontend before file selection.
+  # These limits are intentionally lower than the nir_core parser ceiling
+  # (NIR_MAX_FILE_BYTES in .env). Raising NIR_MAX_FILE_BYTES alone does not raise
+  # the web upload limit; review both limits and available memory together.
   max_files: 10
   max_file_size: 52428800    # 50 MiB
   max_total_size: 104857600  # 100 MiB
@@ -1052,6 +1096,8 @@ sandbox:
   # Host bash execution is disabled by default because LocalSandboxProvider is
   # not a secure isolation boundary for shell access. Enable only for fully
   # trusted, single-user local workflows.
+  # The default open-source deployment is therefore intended for one trusted
+  # operator on a local machine, not for untrusted public multi-user hosting.
   allow_host_bash: false
   # Optional: Mount additional host directories into the sandbox.
   # Each mount maps a host path to a virtual container path accessible by the agent.

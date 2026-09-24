@@ -4,7 +4,8 @@ Deterministic near-infrared (NIR) spectroscopy algorithms for the NIR Agent.
 
 ## Design Principles
 
-- **Zero framework dependency**: only numpy, scipy, scikit-learn, matplotlib, pydantic.
+- **Scientific-stack only**: numpy, scipy, scikit-learn, matplotlib, pydantic,
+  plus the pinned Chemotools preprocessing provider.
 - **Pure-function first**: numpy in, numpy out, no side effects.
 - **Pydantic data contracts**: all I/O uses strongly-typed models.
 - **Fully type-annotated** and independently testable without DeerFlow.
@@ -27,13 +28,48 @@ nir_core/
 ├── __init__.py          # Re-exports core models and config
 ├── models.py            # SpectralData, PreprocessingStep, ModelResult, ...
 ├── config.py            # NirConfig, QualityThresholds (package-managed config)
+├── calibration_transfer.py # paired DS/PDS/SST instrument transfer
 ├── io/                  # Data I/O: loaders, sniffers, validators, writers
-├── preprocess/          # SNV, MSC, SG, airPLS, ASLS, scaling, pipeline
+├── preprocess/          # scatter, despike, axis alignment, derivatives, baselines, scaling
 ├── model/               # PLS, PCR, SVR, ensemble, evaluation, CARS/SPA
 ├── utils/               # metrics, validation, drift, registry
 ├── plotting/            # spectra, model diagnostics, gallery
 └── tests/               # Unit + integration tests
 ```
+
+The preprocessing package exposes classical and robust SNV/RNV, MSC/EMSC,
+isolated-spike and median filtering, Savitzky-Golay, Whittaker and
+Norris-Williams methods, baseline correction, scaling, and validated
+wavelength-axis resampling.
+EMSC is stateful in `PreprocessingPipeline`: its reference spectrum is fitted
+on training data and reused during transform. Axis resampling is kept outside
+the ordinary `X -> X` pipeline because it must update both `X` and `wv`;
+extrapolation is disabled by default. The new methods are explicit-only and do
+not change the default candidate pipelines.
+
+`preprocess.registry` is the authoritative method and parameter catalog. New
+pipelines prefer numerically verified Chemotools 0.4.4 implementations wherever
+the upstream library has matching semantics. Native robust SNV, isolated-spike
+removal, and max-norm behavior remain project fallbacks. Provider bindings are
+serialized with the fitted pipeline, and
+legacy pipelines without bindings are pinned to native behavior. Set
+`NIR_PREPROCESSING_PROVIDER_POLICY=native` to hold newly constructed pipelines
+on native implementations during rollback.
+
+`preprocess.recommendation` profiles calibration spectra only and creates a
+deterministic, bounded candidate set with a mandatory raw baseline. It honors
+catalog `auto_level` values, so explicit-only methods are reported for manual
+confirmation rather than silently added. The bounded regression selector uses
+calibration-only RMSECV and chooses the simpler pipeline when candidates are
+within one percent.
+
+`calibration_transfer` is deliberately outside the preprocessing pipeline. It
+wraps Chemotools DS, PDS, and SST with strict paired-sample identity checks,
+target-to-source direction binding, monotonic wavelength validation, no
+extrapolation, deterministic paired holdout evaluation, and versioned manifest
+metadata. Spectral agreement alone is reported separately from reference-model
+RMSEP validation; the Gateway requires a non-overlapping independent paired
+validation set before granting production approval.
 
 ## Quick Start
 
@@ -78,11 +114,8 @@ separately indexed retrievers using labeled Chinese/multilingual cases and
 reports Recall@K, MRR, nDCG@K, no-hit accuracy, latency, and language slices.
 Start from `knowledge/retrieval_eval_cases.example.json`; the current four-paper
 BGE-M3 corpus has a versioned 28-case set at
-`knowledge/retrieval_eval_cases.bge-m3.v1.json` and its measured baseline at
-`knowledge/retrieval_eval_baseline.bge-m3.v1.md`. The post-retrieval policy
-comparison is recorded at
-`knowledge/retrieval_eval_baseline.bge-m3.policy-v1.md`. Do not compare two
-embedding models against one shared vector index.
+`knowledge/retrieval_eval_cases.bge-m3.v1.json`. Do not compare two embedding
+models against one shared vector index.
 
 `knowledge.retrieval_policy` over-fetches vector candidates, caps chunks per
 document, and applies calibrated abstention before returning evidence. The
@@ -98,10 +131,9 @@ the matching `NIR_KNOWLEDGE_RERANK_*` variables. Cross-encoder scores determine
 result order, while dense cosine scores remain authoritative for the calibrated
 answerability gate. Results expose both scores and the active ranking strategy;
 reranker failures fail open to dense ordering. Reranking never requires
-re-embedding or re-uploading documents. The 24-document calibration caps the
+re-embedding or re-uploading documents. The calibrated defaults cap the
 reranker at 12 document-diversified candidates and 512 tokens, with dense
-strong/weak thresholds of 0.63/0.60. Its measured report is
-`knowledge/retrieval_eval_baseline.bge-m3.rerank-v1.md`.
+strong/weak thresholds of 0.63/0.60.
 
 `utils.scientific_validation` is the shared release contract for calibration
 data. It validates matrix/target alignment, finite values, target variation,
@@ -176,6 +208,7 @@ fields). Override defaults by loading a JSON file:
 
 ```python
 from nir_core.config import NirConfig, set_nir_config
+
 set_nir_config(NirConfig.load("nir_config.json"))
 ```
 

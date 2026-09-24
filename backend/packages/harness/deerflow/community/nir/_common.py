@@ -155,6 +155,40 @@ def _write_trusted_model_artifact(artifact, real_model_path: str) -> None:
     os.replace(manifest_tmp, manifest_path)
 
 
+def _write_trusted_transfer_artifact(artifact, real_artifact_path: str) -> None:
+    """Atomically persist a calibration-transfer artifact and integrity manifest."""
+    import joblib
+
+    destination = Path(real_artifact_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".tmp")
+    joblib.dump(artifact, temporary)
+    os.replace(temporary, destination)
+
+    digest = _artifact_digest(destination)
+    manifest: dict[str, object] = {
+        "schema_version": 1,
+        "artifact_type": "nir_calibration_transfer_artifact",
+        "sha256": digest,
+        "size_bytes": destination.stat().st_size,
+    }
+    signing_key = os.environ.get("NIR_ARTIFACT_SIGNING_KEY")
+    if signing_key:
+        manifest["hmac_sha256"] = hmac.new(
+            signing_key.encode("utf-8"),
+            digest.encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest()
+
+    manifest_path = _model_manifest_path(real_artifact_path)
+    manifest_tmp = manifest_path.with_name(manifest_path.name + ".tmp")
+    manifest_tmp.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(manifest_tmp, manifest_path)
+
+
 def _bind_model_metrics(
     real_model_path: str,
     real_metrics_path: str,
@@ -262,6 +296,66 @@ def _load_trusted_model_artifact(real_model_path: str, virtual_model_path: str):
             raise ValueError("Model artifact signature verification failed.")
 
     return joblib.load(model_path)
+
+
+def _load_trusted_transfer_artifact(
+    real_artifact_path: str,
+    virtual_artifact_path: str,
+):
+    """Verify a generated transfer artifact before any joblib deserialization."""
+    import joblib
+
+    virtual = PurePosixPath(virtual_artifact_path.replace("\\", "/"))
+    if virtual.parts[:4] != _MODEL_OUTPUT_PREFIX:
+        raise ValueError("Untrusted transfer path: artifacts must be generated under /mnt/user-data/outputs.")
+
+    artifact_path = Path(real_artifact_path)
+    manifest_path = _model_manifest_path(real_artifact_path)
+    if not manifest_path.is_file():
+        raise ValueError("Unverified calibration-transfer artifact: manifest is missing.")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid calibration-transfer integrity manifest.") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1 or manifest.get("artifact_type") != "nir_calibration_transfer_artifact":
+        raise ValueError("Unsupported calibration-transfer integrity manifest.")
+
+    expected_digest = manifest.get("sha256")
+    actual_digest = _artifact_digest(artifact_path)
+    if not isinstance(expected_digest, str) or not hmac.compare_digest(
+        expected_digest,
+        actual_digest,
+    ):
+        raise ValueError("Calibration-transfer artifact integrity check failed.")
+    if manifest.get("size_bytes") != artifact_path.stat().st_size:
+        raise ValueError("Calibration-transfer artifact size does not match its manifest.")
+
+    signing_key = os.environ.get("NIR_ARTIFACT_SIGNING_KEY")
+    require_signed = os.environ.get(
+        "NIR_REQUIRE_SIGNED_ARTIFACTS",
+        "",
+    ).strip().lower() in {"1", "true", "yes"}
+    signature = manifest.get("hmac_sha256")
+    if require_signed and (not signing_key or not isinstance(signature, str)):
+        raise ValueError("A signed calibration-transfer artifact is required.")
+    if signature is not None:
+        if not signing_key:
+            raise ValueError("Calibration-transfer artifact is signed, but the signing key is missing.")
+        expected_signature = hmac.new(
+            signing_key.encode("utf-8"),
+            actual_digest.encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not isinstance(signature, str) or not hmac.compare_digest(
+            signature,
+            expected_signature,
+        ):
+            raise ValueError("Calibration-transfer artifact signature verification failed.")
+
+    artifact = joblib.load(artifact_path)
+    if not isinstance(artifact, dict) or artifact.get("format") != ("nir_calibration_transfer_artifact"):
+        raise ValueError("Invalid calibration-transfer artifact payload.")
+    return artifact
 
 
 # ---------------------------------------------------------------------------

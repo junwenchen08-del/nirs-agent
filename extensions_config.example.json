@@ -1,7 +1,5 @@
 {
-  "mcpInterceptors": [
-    "my_package.mcp.auth:build_auth_interceptor"
-  ],
+  "mcpInterceptors": [],
   "mcpServers": {
     "github": {
       "enabled": false,
@@ -23,10 +21,10 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-postgres",
-        "postgresql://localhost/mydb"
+        "$DATABASE_URL"
       ],
       "env": {},
-      "description": "PostgreSQL database access"
+      "description": "Optional PostgreSQL access; set DATABASE_URL before enabling"
     }
   },
   "skills": {}

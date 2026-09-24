@@ -80,6 +80,19 @@ else:
 # ---------------------------------------------------------------------------
 
 
+def _metadata_list(metadata: dict, key: str) -> list:
+    value = metadata.get(key, "")
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            decoded = json.loads(value)
+            return decoded if isinstance(decoded, list) else [value]
+        except (ValueError, TypeError):
+            return [value]
+    return []
+
+
 def _do_search(
     query: str,
     top_k: int = 5,
@@ -104,18 +117,6 @@ def _do_search(
     for r in results:
         meta = r.chunk.metadata or {}
 
-        def _load(key: str) -> list:
-            val = meta.get(key, "")
-            if isinstance(val, list):
-                return val
-            if isinstance(val, str) and val:
-                try:
-                    decoded = json.loads(val)
-                    return decoded if isinstance(decoded, list) else [val]
-                except (ValueError, TypeError):
-                    return [val]
-            return []
-
         output.append(
             {
                 "evidence_id": r.chunk.id,
@@ -135,20 +136,20 @@ def _do_search(
                     else None
                 ),
                 "title": meta.get("title", ""),
-                "authors": _load("authors"),
+                "authors": _metadata_list(meta, "authors"),
                 "year": meta.get("year"),
                 "doi": meta.get("doi", ""),
-                "section_path": _load("section_path"),
+                "section_path": _metadata_list(meta, "section_path"),
                 "page_start": meta.get("page_start"),
                 "page_end": meta.get("page_end"),
                 "quality_tier": meta.get("quality_tier", ""),
                 "review_status": meta.get("review_status", ""),
                 "content_trust": meta.get("content_trust", "untrusted_evidence"),
                 "entities": {
-                    "methods": _load("methods"),
-                    "models": _load("models"),
-                    "datasets": _load("datasets"),
-                    "metrics": _load("metrics"),
+                    "methods": _metadata_list(meta, "methods"),
+                    "models": _metadata_list(meta, "models"),
+                    "datasets": _metadata_list(meta, "datasets"),
+                    "metrics": _metadata_list(meta, "metrics"),
                 },
                 "related_entities": r.related_entities,
             }

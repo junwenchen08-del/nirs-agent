@@ -174,10 +174,10 @@ def predict_et(model: object, X: np.ndarray) -> np.ndarray:
 
 
 __all__ = [
-    "train_rf",
+    "DEFAULT_MAX_DEPTH",
+    "DEFAULT_N_ESTIMATORS",
+    "predict_et",
     "predict_rf",
     "train_et",
-    "predict_et",
-    "DEFAULT_N_ESTIMATORS",
-    "DEFAULT_MAX_DEPTH",
+    "train_rf",
 ]

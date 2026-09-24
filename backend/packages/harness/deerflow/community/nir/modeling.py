@@ -904,6 +904,44 @@ def nir_train_partitioned_model_tool(
 # ---------------------------------------------------------------------------
 
 
+def _preprocessing_selection_summary(selection: dict | None) -> dict | None:
+    """Keep decision-grade preprocessing evidence within the tool context budget."""
+    if not selection:
+        return None
+    recommendation = selection["recommendation"]
+    evaluation = selection["evaluation"]
+    evidence_by_id = {item.get("candidate_id"): item for item in evaluation.get("candidates", {}).values() if isinstance(item, dict)}
+    candidates = []
+    for candidate in recommendation.get("candidates", []):
+        candidate_id = candidate.get("candidate_id")
+        evidence = evidence_by_id.get(candidate_id, {})
+        candidates.append(
+            {
+                "candidate_id": candidate_id,
+                "steps": candidate.get("steps", []),
+                "reasons": candidate.get("reasons", []),
+                "cv_rmse": evidence.get("cv_rmse"),
+                "val_r2": evidence.get("val_r2"),
+                "error": evidence.get("error"),
+                "selected": candidate_id == evaluation.get("best_candidate_id"),
+            }
+        )
+    decision = evaluation.get("selection_decision", {})
+    return {
+        "budget": recommendation.get("budget"),
+        "calibration_samples": recommendation.get("profile", {}).get("n_samples"),
+        "profile_tags": recommendation.get("profile", {}).get("tags", []),
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+        "manual_recommendations": recommendation.get("manual_recommendations", []),
+        "exclusions": recommendation.get("exclusions", []),
+        "selection_rule": evaluation.get("selection_rule"),
+        "selected_candidate_id": evaluation.get("best_candidate_id"),
+        "selected_pipeline": evaluation.get("best"),
+        "reason_code": decision.get("reason_code"),
+    }
+
+
 @tool("nir_analyze", parse_docstring=True)
 def nir_analyze_tool(
     runtime: Runtime,
@@ -1026,23 +1064,38 @@ def nir_analyze_tool(
 
         # Preprocessing selection (leakage-safe fit/transform).
         best_pipe = None
+        preprocessing_selection = None
         if auto_preprocess:
-            best_pipe, _ = nested_cv_preprocessing(
+            from nir_core.preprocess.recommendation import recommend_preprocessing
+
+            preprocessing_recommendation = recommend_preprocessing(
+                X_tr,
+                data_wv,
+                budget="standard",
+            )
+            best_pipe, selection_results = nested_cv_preprocessing(
                 X_tr,
                 y_tr,
                 X_val,
                 y_val,
+                candidate_pipelines=preprocessing_recommendation.pipelines(),
                 inner_folds=3,
                 max_components=10,
                 random_state=42,
-                wv=data.wv,
+                wv=data_wv,
+                selection_rule="rmsecv_1pct",
+                candidate_ids=[candidate.candidate_id for candidate in preprocessing_recommendation.candidates],
             )
-            best_pipe = best_pipe.__class__(best_pipe.steps).fit(X_tr, data.wv)
-            X_tr = best_pipe.transform(X_tr, data.wv)
-            X_val = best_pipe.transform(X_val, data.wv)
-            X_te = best_pipe.transform(X_te, data.wv)
+            preprocessing_selection = {
+                "recommendation": preprocessing_recommendation.as_dict(),
+                "evaluation": selection_results,
+            }
+            best_pipe = best_pipe.unfitted_copy().fit(X_tr, data_wv)
+            X_tr = best_pipe.transform(X_tr, data_wv)
+            X_val = best_pipe.transform(X_val, data_wv)
+            X_te = best_pipe.transform(X_te, data_wv)
 
-        preprocessing_desc = best_pipe.description() if best_pipe else "none"
+        preprocessing_desc = (best_pipe.description() or "raw") if best_pipe else "none"
         requested_model = (method or "auto").strip().lower()
         requested_selection = (wavelength_selection or "auto").strip().lower()
         wavelength_selection_candidates: list[dict] = []
@@ -1153,6 +1206,7 @@ def nir_analyze_tool(
             "n_wavelengths_model": int(wavelength_selection_meta["n_selected"]),
             "auto_preprocess": auto_preprocess,
             "preprocessing": preprocessing_desc,
+            "preprocessing_selection": preprocessing_selection,
             "wavelength_selection": wavelength_selection_meta,
             "wavelength_selection_decision": wavelength_selection_decision,
             "wavelength_selection_candidates": wavelength_selection_candidates,
@@ -1191,6 +1245,7 @@ def nir_analyze_tool(
                 method=selected_method,
                 preprocessing_pipeline=best_pipe,
                 preprocessing_desc=preprocessing_desc,
+                preprocessing_selection=preprocessing_selection,
                 wavelength_selection=wavelength_selection_meta,
                 X_reference=X_tr,
             ),
@@ -1268,6 +1323,7 @@ def nir_analyze_tool(
                 "method": selected_method,
                 "n_components": best_n,
                 "preprocessing": preprocessing_desc,
+                "preprocessing_selection": _preprocessing_selection_summary(preprocessing_selection),
                 "wavelength_selection": wavelength_selection_meta,
                 "wavelength_selection_decision": wavelength_selection_decision,
                 "wavelength_selection_candidates": _wavelength_candidate_summary(wavelength_selection_candidates),

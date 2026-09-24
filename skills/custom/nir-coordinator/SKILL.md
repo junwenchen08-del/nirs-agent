@@ -13,7 +13,15 @@ allowed-tools:
   - nir_workflow
   - nir_load_data
   - nir_inspect
+  - nir_list_preprocessing_methods
+  - nir_describe_preprocessing_method
+  - nir_recommend_preprocessing
   - nir_preprocess
+  - nir_align_wavelengths
+  - nir_list_calibration_transfer_methods
+  - nir_fit_calibration_transfer
+  - nir_apply_calibration_transfer
+  - nir_evaluate_calibration_transfer
   - nir_train_auto_split_model
   - nir_train_model
   - nir_train_classifier
@@ -62,10 +70,19 @@ nir_workflow(
 )
 ```
 
-启动后严格执行 `next_action="inspect_data"`，先调用 `nir_inspect`。结合检查结果和用户原始
-请求提取能够可靠确定的领域、目标成分、单位和数据划分线索，然后调用
+启动工具成功返回后，严格执行 `next_action="inspect_data"`，再调用 `nir_inspect`。不得把
+`nir_workflow(action="start")` 与 `nir_inspect` 放在同一批并行工具调用中；后者只有在前者
+已建立工作流后才会获准。结合检查结果和用户原始请求提取能够可靠确定的领域、目标成分、
+单位和数据划分线索。不确定的信息不要猜测。
+
+若 `task_type="inspection"`，一次成功的 `nir_inspect` 会由运行时原子地保存审查证据并把
+工作流置为 `completed / none`。此时直接用结构化检查结果回答，禁止再调用 `record_audit`、
+`plan_ready`、`complete`、`nir_load_data`、预处理或建模工具。光谱轴方向只能引用工具返回的
+`axis_first`、`axis_last` 和 `axis_direction`；`wavelength_range=[min,max]` 只表示数值范围，
+不能据此推断升序或降序。
+
+其他数据任务在检查后调用
 `record_audit(audit_passed=true, domain=..., analyte=..., unit=..., ...)` 写回持久工作流。
-不确定的信息不要猜测。
 
 审查通过后若进入 `stage="clarification"`：
 
@@ -132,7 +149,7 @@ MATLAB `.mat` 文件如果 `nir_inspect` 返回两个或更多 `available_subset
 
 严格按照返回的 `next_action` 推进。以下决策节点由你显式记录：
 
-- 数据检查后：`record_audit`
+- 数据检查后：除 `task_type="inspection"` 外调用 `record_audit`；仅检查任务已由运行时完成
 - 分析计划确定后：`plan_ready`
 - 用户明确同意采用模型后：`approve`
 - 工作交付完毕后：`complete`
@@ -142,6 +159,7 @@ MATLAB `.mat` 文件如果 `nir_inspect` 返回两个或更多 `available_subset
 - `nir_train_auto_split_model` / `nir_train_model` / `nir_train_classifier` / `nir_train_partitioned_model` / `nir_train_multi_model` / `nir_analyze` / `nir_analyze_collection` / `nir_compare`：自动 `record_attempt`
 - `nir_search_knowledge`：自动 `knowledge_retrieved`
 - `nir_register_model`：自动 `registered`
+- `task_type="inspection"` 下成功的 `nir_inspect`：自动保存 `audit_evidence` 并完成工作流
 
 如果返回 `missing_inputs`，按 `next_action` 处理：`collect_prerequisites` 只收集缺失的文件
 路径；`ask_targeted_clarification` 使用结构化问题收集真正会改变分析决策的信息。模型通过
@@ -158,7 +176,17 @@ MATLAB `.mat` 文件如果 `nir_inspect` 返回两个或更多 `available_subset
 **❌ 禁止手动 import `scipy.io.loadmat`、`sklearn.cross_decomposition.PLSRegression` 等**——由 `nir_*` 工具内部处理。
 **❌ 禁止自己用 matplotlib 画图**——建模工具会自动生成所需产物。
 **✅ V3.6: 允许根据残差诊断自主构造 `pipeline_steps`（含超参数）**——`nir_train_model` 内置 `validate_pipeline` 守护，非法组合会被拦截并返回原因。
-**❌ 禁止自己实现 snv/sg_smooth/derivative1 等算法**——`nir_preprocess` 已提供。
+构造新预处理组合前，先用 `nir_list_preprocessing_methods` 获取当前运行时可用的紧凑清单；只有准备使用某个参数化方法时，才调用 `nir_describe_preprocessing_method` 读取它的完整参数 Schema。运行时目录优先于本 Skill 中的静态示例，禁止猜测 Chemotools 或原生实现的参数名。
+需要向用户解释自动候选时调用 `nir_recommend_preprocessing`；该工具是只读探索，正式训练必须在校准分区内重新诊断和选择。
+**❌ 禁止自己实现 snv/emsc/despike/sg_smooth/norris_derivative1 等算法**——`nir_preprocess` 已提供。波长轴对齐必须调用 `nir_align_wavelengths`，禁止按列位置拼接、截短或自行插值。
+
+跨仪器模型复用必须走独立校准迁移工具，不能把 DS/PDS/SST 塞进普通 `pipeline_steps`。
+先调用 `nir_list_calibration_transfer_methods` 读取运行时参数；默认只接受两份 NPZ 中
+唯一且集合一致的 `sample_names` 做配对，方向必须明确为目标仪器到参考仪器。先用
+`nir_fit_calibration_transfer` 的内部配对留出验证光谱改善；若提供可信参考模型和参考 y，
+还必须看到迁移后 RMSEP 改善并返回 `production_validated` 才能称为生产批准。只有
+`spectrally_validated` 时必须说明仍缺参考模型预测验证。NIR 与 Raman 等不同模态不得
+当作同类仪器校准迁移。
 
 ### 🚨 CSV / .mat / .txt 文件布局：禁止自己解析
 

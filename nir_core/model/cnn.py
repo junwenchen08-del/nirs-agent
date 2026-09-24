@@ -14,6 +14,8 @@ with other nir_core model trainers.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
@@ -29,11 +31,13 @@ def _check_torch():
     """Import torch or raise a helpful ImportError."""
     try:
         import torch
-        import torch.nn as nn
+        from torch import nn
 
         return torch, nn
     except ImportError as exc:
-        raise ImportError("PyTorch is required for 1D-CNN models. Install the nir-core 'deep' extra and rebuild the Gateway runtime.") from exc
+        raise ImportError(
+            "PyTorch is required for 1D-CNN models. Install the nir-core 'deep' extra and rebuild the Gateway runtime."
+        ) from exc
 
 
 def require_cnn_runtime() -> None:
@@ -205,11 +209,15 @@ def train_cnn(
     X_train = np.asarray(X_train, dtype=float)
     y_train = np.asarray(y_train, dtype=float).ravel()
     if X_train.shape[0] != y_train.shape[0]:
-        raise ValueError(f"X_train rows ({X_train.shape[0]}) != y_train length ({y_train.shape[0]})")
+        raise ValueError(
+            f"X_train rows ({X_train.shape[0]}) != y_train length ({y_train.shape[0]})"
+        )
     n_samples, n_wavelengths = X_train.shape
 
     # K-fold CV to estimate RMSECV.
-    splitter, strategy_label = _resolve_cv_splitter(cv_strategy, cv_folds, n_samples, random_state)
+    splitter, strategy_label = _resolve_cv_splitter(
+        cv_strategy, cv_folds, n_samples, random_state
+    )
 
     fold_rmse: list[float] = []
     for train_idx, val_idx in splitter.split(X_train):
@@ -226,7 +234,11 @@ def train_cnn(
             wrapper.fit(X_tr, y_tr)
             pred = wrapper.predict(X_val)
             fold_rmse.append(rmse(y_val, pred))
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(
+                f"CNN CV fold skipped after numerical/runtime failure: {exc}",
+                stacklevel=2,
+            )
             continue
 
     mean_rmse_cv = float(np.mean(fold_rmse)) if fold_rmse else float("inf")
@@ -268,11 +280,11 @@ def predict_cnn(model: object, X: np.ndarray) -> np.ndarray:
 
 
 __all__ = [
+    "DEFAULT_BATCH_SIZE",
+    "DEFAULT_EPOCHS",
+    "DEFAULT_LEARNING_RATE",
     "CNNWrapper",
-    "train_cnn",
     "predict_cnn",
     "require_cnn_runtime",
-    "DEFAULT_EPOCHS",
-    "DEFAULT_BATCH_SIZE",
-    "DEFAULT_LEARNING_RATE",
+    "train_cnn",
 ]

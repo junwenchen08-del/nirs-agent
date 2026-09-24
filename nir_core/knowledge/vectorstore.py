@@ -22,12 +22,12 @@ from typing import Any
 os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 from nir_core.knowledge.base import Chunk, SearchResult
+from nir_core.knowledge.reranker import KnowledgeReranker
 from nir_core.knowledge.retrieval_policy import (
     RetrievalDecision,
     RetrievalPolicy,
     apply_retrieval_policy,
 )
-from nir_core.knowledge.reranker import KnowledgeReranker
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ class ChromaDBRetriever:
                     rerank_pool,
                 )
                 ranking_strategy = "cross_encoder"
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 rerank_error = type(exc).__name__
                 logger.exception(
                     "Knowledge reranker %s failed; using dense order",

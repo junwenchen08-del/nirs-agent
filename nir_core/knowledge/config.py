@@ -12,7 +12,6 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
 _KNOWLEDGE_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _KNOWLEDGE_DIR.parent.parent
 
@@ -219,9 +218,9 @@ def get_retriever(config: KnowledgeConfig | None = None):
     """
     cfg = config or get_config()
 
-    from nir_core.knowledge.vectorstore import ChromaDBRetriever
-    from nir_core.knowledge.retrieval_policy import RetrievalPolicy
     from nir_core.knowledge.reranker import CrossEncoderReranker
+    from nir_core.knowledge.retrieval_policy import RetrievalPolicy
+    from nir_core.knowledge.vectorstore import ChromaDBRetriever
 
     reranker = (
         CrossEncoderReranker(
@@ -253,14 +252,11 @@ def get_retriever(config: KnowledgeConfig | None = None):
     )
 
     if cfg.graph_backend == "neo4j" and cfg.neo4j_uri:
-        # Future extension — see IMPLEMENTATION_PLAN.md §7.
+        # Reserved for a future graph-enhanced retriever implementation.
         # from nir_core.knowledge.graph_retriever import GraphEnhancedRetriever
         # from nir_core.knowledge.neo4j_client import Neo4jClient
         # neo4j = Neo4jClient(cfg.neo4j_uri, cfg.neo4j_user, cfg.neo4j_password)
         # return GraphEnhancedRetriever(chroma, neo4j)
-        raise NotImplementedError(
-            "Graph backend is reserved but not yet implemented. "
-            "See IMPLEMENTATION_PLAN.md §7."
-        )
+        raise NotImplementedError("Graph backend is reserved but not yet implemented.")
 
     return chroma

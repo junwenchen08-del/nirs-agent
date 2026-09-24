@@ -124,4 +124,4 @@ def predict_svr(model: object, X: np.ndarray) -> np.ndarray:
     return np.asarray(pred).ravel()
 
 
-__all__ = ["train_svr", "predict_svr", "DEFAULT_C_GRID", "DEFAULT_GAMMA_GRID"]
+__all__ = ["DEFAULT_C_GRID", "DEFAULT_GAMMA_GRID", "predict_svr", "train_svr"]

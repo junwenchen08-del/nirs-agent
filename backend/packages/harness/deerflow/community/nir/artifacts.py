@@ -10,16 +10,46 @@ import numpy as np
 from ._report import _build_report
 
 
+def _build_preprocessing_artifact(
+    preprocessing_pipeline,
+    preprocessing_desc: str,
+    *,
+    shared: bool | None = None,
+    selection: dict | None = None,
+) -> dict:
+    """Build replay metadata with an explicit, versioned provider binding."""
+    from nir_core.preprocess.registry import CATALOG_VERSION, catalog_hash
+
+    result = {
+        "description": preprocessing_desc,
+        "pipeline": preprocessing_pipeline,
+        "apply_on_predict": preprocessing_pipeline is not None,
+        "catalog_version": CATALOG_VERSION,
+        "catalog_sha256": catalog_hash(),
+        "provider_policy": (getattr(preprocessing_pipeline, "_provider_policy", "legacy_native") if preprocessing_pipeline is not None else None),
+        "steps": ([{"method": step.method, "params": dict(step.params)} for step in preprocessing_pipeline.steps] if preprocessing_pipeline is not None else []),
+        "providers": (preprocessing_pipeline.provider_manifest() if preprocessing_pipeline is not None else []),
+    }
+    if shared is not None:
+        result["shared"] = shared
+    if selection is not None:
+        result["selection"] = selection
+    return result
+
+
 def _build_model_artifact(
     model,
     *,
     method: str,
     preprocessing_pipeline,
     preprocessing_desc: str,
+    preprocessing_selection: dict | None = None,
     wavelength_selection: dict,
     X_reference: np.ndarray | None = None,
 ):
     """Return a deployable model artifact with a compact monitoring reference."""
+    if preprocessing_pipeline is not None and preprocessing_pipeline.has_stateful_steps and not preprocessing_pipeline.fitted():
+        raise ValueError("Refusing to persist an unfitted preprocessing pipeline with stateful steps (mean_center/autoscale/msc/emsc); call fit() on training data first.")
     monitoring_reference = None
     if X_reference is not None:
         reference_array = np.asarray(X_reference)
@@ -34,11 +64,11 @@ def _build_model_artifact(
         "version": 3 if monitoring_reference is not None else 2,
         "model": model,
         "method": method,
-        "preprocessing": {
-            "description": preprocessing_desc,
-            "pipeline": preprocessing_pipeline,
-            "apply_on_predict": preprocessing_pipeline is not None,
-        },
+        "preprocessing": _build_preprocessing_artifact(
+            preprocessing_pipeline,
+            preprocessing_desc,
+            selection=preprocessing_selection,
+        ),
         "wavelength_selection": wavelength_selection,
         "monitoring_reference": monitoring_reference,
     }

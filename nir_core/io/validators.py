@@ -29,13 +29,9 @@ def validate_spectra(X: np.ndarray) -> list[str]:
         ValueError: If ``X`` is not a 2D array.
     """
     if X.ndim != 2:
-        raise ValueError(
-            f"validate_spectra expects a 2D array, got shape {X.shape!r}"
-        )
+        raise ValueError(f"validate_spectra expects a 2D array, got shape {X.shape!r}")
 
     problems: list[str] = []
-    n_rows, n_cols = X.shape
-
     nan_mask = np.isnan(X)
     if nan_mask.any():
         n_nan = int(nan_mask.sum())
@@ -63,8 +59,7 @@ def validate_spectra(X: np.ndarray) -> list[str]:
         sample = ", ".join(str(int(i)) for i in zero_rows[:5])
         more = "" if zero_rows.size <= 5 else f" ... (+{zero_rows.size - 5} more)"
         problems.append(
-            f"{int(zero_rows.size)} all-zero row(s) detected "
-            f"(indices: {sample}{more})."
+            f"{int(zero_rows.size)} all-zero row(s) detected (indices: {sample}{more})."
         )
 
     # All-zero columns.
@@ -115,9 +110,7 @@ def validate_reference_values(y: np.ndarray) -> list[str]:
     inf_mask = np.isinf(y)
     if inf_mask.any():
         n_inf = int(inf_mask.sum())
-        problems.append(
-            f"Reference vector contains {n_inf} infinite value(s)."
-        )
+        problems.append(f"Reference vector contains {n_inf} infinite value(s).")
 
     finite = y[np.isfinite(y)]
     if finite.size == 0:

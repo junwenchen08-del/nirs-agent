@@ -48,7 +48,9 @@ class PCRModel:
         return self.lr.predict(scores)
 
 
-def _safe_max_components(n_samples: int, n_wavelengths: int, max_components: int) -> int:
+def _safe_max_components(
+    n_samples: int, n_wavelengths: int, max_components: int
+) -> int:
     """Clamp ``max_components`` for PCA stability."""
     return max(1, min(int(max_components), int(n_samples) - 1, int(n_wavelengths)))
 
@@ -91,7 +93,9 @@ def train_pcr(
     X_train = np.asarray(X_train, dtype=float)
     y_train = np.asarray(y_train, dtype=float).ravel()
     if X_train.shape[0] != y_train.shape[0]:
-        raise ValueError(f"X_train rows ({X_train.shape[0]}) != y_train length ({y_train.shape[0]})")
+        raise ValueError(
+            f"X_train rows ({X_train.shape[0]}) != y_train length ({y_train.shape[0]})"
+        )
     n_samples, n_wavelengths = X_train.shape
 
     # ---- Fixed component count: train directly. -----------------------
@@ -117,7 +121,9 @@ def train_pcr(
     upper = _safe_max_components(n_samples, n_wavelengths, max_components)
     n_comp_list = list(range(1, upper + 1))
 
-    splitter, strategy_label = _resolve_cv_splitter(cv_strategy, cv_folds, n_samples, random_state)
+    splitter, strategy_label = _resolve_cv_splitter(
+        cv_strategy, cv_folds, n_samples, random_state
+    )
 
     mean_rmse: list[float] = []
     std_rmse: list[float] = []
@@ -137,7 +143,7 @@ def train_pcr(
                 sc_val = pca.transform(X_val)
                 pred = lr.predict(sc_val).ravel()
                 fold_rmse.append(rmse(y_val, pred))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 warnings.warn(
                     f"PCR CV fold skipped (n_components={nc}): {exc}",
                     stacklevel=2,
@@ -148,7 +154,9 @@ def train_pcr(
             std_rmse.append(0.0)
         else:
             mean_rmse.append(float(np.mean(fold_rmse)))
-            std_rmse.append(float(np.std(fold_rmse, ddof=1)) if len(fold_rmse) > 1 else 0.0)
+            std_rmse.append(
+                float(np.std(fold_rmse, ddof=1)) if len(fold_rmse) > 1 else 0.0
+            )
 
     mean_arr = np.asarray(mean_rmse)
     finite_mask = np.isfinite(mean_arr)
@@ -191,4 +199,4 @@ def predict_pcr(model: object, X: np.ndarray) -> np.ndarray:
     return np.asarray(pred).ravel()
 
 
-__all__ = ["PCRModel", "train_pcr", "predict_pcr"]
+__all__ = ["PCRModel", "predict_pcr", "train_pcr"]

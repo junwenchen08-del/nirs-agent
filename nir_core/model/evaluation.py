@@ -20,7 +20,7 @@ Key design rules enforced by this module:
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 from sklearn.cross_decomposition import PLSRegression
@@ -33,11 +33,11 @@ from nir_core.preprocess.pipeline import (
 from nir_core.utils.metrics import compute_metrics, r2_score, rmse
 
 __all__ = [
+    "auto_select_components",
     "compute_metrics",
-    "split_dataset",
     "cross_validate",
     "nested_cv_preprocessing",
-    "auto_select_components",
+    "split_dataset",
 ]
 
 
@@ -157,9 +157,7 @@ def cross_validate(
     if y.ndim not in (1, 2):
         raise ValueError(f"y must be 1D or 2D, got shape {y.shape}")
     if X.shape[0] != y.shape[0]:
-        raise ValueError(
-            f"X rows ({X.shape[0]}) != y length ({y.shape[0]})"
-        )
+        raise ValueError(f"X rows ({X.shape[0]}) != y length ({y.shape[0]})")
     n_samples = X.shape[0]
     is_multi = y.ndim == 2
     n_targets = y.shape[1] if is_multi else 1
@@ -239,7 +237,8 @@ def _pls_cv_best_components(
     max_components: int,
     random_state: int,
     wv: np.ndarray | None = None,
-) -> tuple[int, float]:
+    primary_metric: str = "r2",
+) -> tuple[int, float, float]:
     """Run inner K-fold CV to pick the PLS component count on *train only*.
 
     **Leakage-safe**: for each inner fold the preprocessing pipeline is
@@ -258,8 +257,9 @@ def _pls_cv_best_components(
         wv: Optional wavelength axis forwarded to ``detrend``.
 
     Returns:
-        ``(best_n_comp, mean_cv_r2)`` where ``mean_cv_r2`` is the mean
-        R^2 across folds at the best component count.
+        ``(best_n_comp, mean_cv_r2, mean_cv_rmse)`` at the selected component
+        count. ``primary_metric`` controls whether the component count is
+        selected by maximum R² (legacy) or minimum RMSE.
     """
     n_samples, n_wavelengths = X_train.shape
     upper = max(1, min(int(max_components), n_samples - 1, n_wavelengths))
@@ -268,9 +268,11 @@ def _pls_cv_best_components(
 
     n_comp_list = list(range(1, upper + 1))
     mean_r2_per_nc: list[float] = []
+    mean_rmse_per_nc: list[float] = []
 
     for nc in n_comp_list:
         fold_r2: list[float] = []
+        fold_rmse: list[float] = []
         for tr_idx, val_idx in kf.split(X_train):
             X_tr, X_val = X_train[tr_idx], X_train[val_idx]
             y_tr, y_val = y_train[tr_idx], y_train[val_idx]
@@ -279,26 +281,116 @@ def _pls_cv_best_components(
             try:
                 # Refit pipeline on inner-train ONLY, then transform both
                 # subsets with the inner-train statistics.
-                p = PreprocessingPipeline(pipeline.steps).fit(X_tr, wv)
+                p = pipeline.unfitted_copy().fit(X_tr, wv)
                 X_tr_pp = p.transform(X_tr, wv)
                 X_val_pp = p.transform(X_val, wv)
                 m = PLSRegression(n_components=nc, scale=False)
                 m.fit(X_tr_pp, y_tr)
                 pred = m.predict(X_val_pp).ravel()
                 fold_r2.append(r2_score(y_val, pred))
-            except Exception:
+                fold_rmse.append(rmse(y_val, pred))
+            except Exception:  # noqa: BLE001, S112 - one failed fold is isolated
                 continue
         if not fold_r2:
             mean_r2_per_nc.append(float("-inf"))
+            mean_rmse_per_nc.append(float("inf"))
         else:
             mean_r2_per_nc.append(float(np.mean(fold_r2)))
+            mean_rmse_per_nc.append(float(np.mean(fold_rmse)))
 
-    best_idx = int(np.argmax(mean_r2_per_nc))
+    if primary_metric == "r2":
+        best_idx = int(np.argmax(mean_r2_per_nc))
+    elif primary_metric == "rmse":
+        best_idx = int(np.argmin(mean_rmse_per_nc))
+    else:
+        raise ValueError(
+            f"primary_metric must be 'r2' or 'rmse', got {primary_metric!r}."
+        )
     best_nc = int(n_comp_list[best_idx])
     best_mean_r2 = float(mean_r2_per_nc[best_idx])
+    best_mean_rmse = float(mean_rmse_per_nc[best_idx])
     if not np.isfinite(best_mean_r2):
         best_mean_r2 = 0.0
-    return best_nc, best_mean_r2
+    return best_nc, best_mean_r2, best_mean_rmse
+
+
+def _pipeline_simplicity_key(
+    pipeline: PreprocessingPipeline,
+    candidate_id: str,
+) -> tuple[int, int, int, str]:
+    """Return a deterministic simplicity ordering for near-tied candidates."""
+    n_steps = len(pipeline.steps)
+    n_parameters = sum(len(step.params) for step in pipeline.steps)
+    n_stateful = sum(
+        1
+        for step in pipeline.steps
+        if step.method in {"mean_center", "autoscale", "msc", "emsc"}
+    )
+    return n_steps, n_parameters, n_stateful, candidate_id
+
+
+def _select_preprocessing_winner(
+    pipelines: list[PreprocessingPipeline],
+    evaluations: list[dict],
+    *,
+    selection_rule: str,
+) -> tuple[int, dict]:
+    """Select a valid candidate using a deterministic documented rule."""
+    valid = [
+        index
+        for index, evidence in enumerate(evaluations)
+        if "error" not in evidence
+        and np.isfinite(float(evidence.get("cv_rmse", float("inf"))))
+    ]
+    if not valid:
+        raise ValueError(
+            "No candidate pipeline produced a valid score; "
+            "check preprocessing methods or input data."
+        )
+
+    if selection_rule == "legacy_score":
+        winner = max(
+            valid,
+            key=lambda index: float(evaluations[index].get("score", float("-inf"))),
+        )
+        decision = {
+            "selection_rule": selection_rule,
+            "reason_code": "maximum_legacy_combined_r2_score",
+            "selected_candidate_id": evaluations[winner]["candidate_id"],
+            "eligible_candidate_ids": [evaluations[winner]["candidate_id"]],
+        }
+        return winner, decision
+
+    if selection_rule != "rmsecv_1pct":
+        raise ValueError(
+            "selection_rule must be 'legacy_score' or 'rmsecv_1pct'; "
+            f"got {selection_rule!r}."
+        )
+
+    best_rmse = min(float(evaluations[index]["cv_rmse"]) for index in valid)
+    threshold = best_rmse * 1.01
+    eligible = [
+        index for index in valid if float(evaluations[index]["cv_rmse"]) <= threshold
+    ]
+    winner = min(
+        eligible,
+        key=lambda index: _pipeline_simplicity_key(
+            pipelines[index],
+            str(evaluations[index]["candidate_id"]),
+        ),
+    )
+    decision = {
+        "selection_rule": selection_rule,
+        "reason_code": "simplest_within_one_percent_rmsecv",
+        "best_cv_rmse": best_rmse,
+        "materiality_threshold_cv_rmse": threshold,
+        "selected_candidate_id": evaluations[winner]["candidate_id"],
+        "eligible_candidate_ids": [
+            evaluations[index]["candidate_id"] for index in eligible
+        ],
+        "tie_break": "fewest_steps_then_parameters_then_stateful_then_id",
+    }
+    return winner, decision
 
 
 def nested_cv_preprocessing(
@@ -312,6 +404,8 @@ def nested_cv_preprocessing(
     max_components: int = 20,
     random_state: int = 42,
     wv: np.ndarray | None = None,
+    selection_rule: str = "legacy_score",
+    candidate_ids: list[str] | None = None,
 ) -> tuple[PreprocessingPipeline, dict]:
     """Select the best preprocessing pipeline via nested CV.
 
@@ -363,6 +457,17 @@ def nested_cv_preprocessing(
         )
     if candidate_pipelines is None:
         candidate_pipelines = list(DEFAULT_CANDIDATE_PIPELINES)
+    if candidate_ids is None:
+        candidate_ids = [
+            f"candidate-{index + 1}" for index in range(len(candidate_pipelines))
+        ]
+    if len(candidate_ids) != len(candidate_pipelines):
+        raise ValueError("candidate_ids length must match candidate_pipelines length")
+    if selection_rule not in {"legacy_score", "rmsecv_1pct"}:
+        raise ValueError(
+            "selection_rule must be 'legacy_score' or 'rmsecv_1pct'; "
+            f"got {selection_rule!r}."
+        )
 
     X_train = np.asarray(X_train, dtype=float)
     y_train = np.asarray(y_train, dtype=float).ravel()
@@ -370,33 +475,45 @@ def nested_cv_preprocessing(
     y_val = np.asarray(y_val, dtype=float).ravel()
 
     results: dict = {
-        "scoring": "0.7 * cv_r2 + 0.3 * val_r2",
+        "scoring": (
+            "0.7 * cv_r2 + 0.3 * val_r2"
+            if selection_rule == "legacy_score"
+            else "minimum calibration-only RMSECV with 1% simplicity rule"
+        ),
+        "selection_rule": selection_rule,
         "candidates": {},
     }
 
-    best_pipeline: PreprocessingPipeline | None = None
-    best_score = float("-inf")
+    evaluations: list[dict] = []
 
-    for pipeline in candidate_pipelines:
-        desc = pipeline.description(locale="zh")
+    for candidate_index, pipeline in enumerate(candidate_pipelines):
+        candidate_id = candidate_ids[candidate_index]
+        desc = pipeline.description(locale="zh") or "raw"
+        result_key = desc
+        if result_key in results["candidates"]:
+            result_key = f"{desc} [{candidate_id}]"
         # Fit pipeline on the FULL training set; transform train & val with
         # training statistics so stateful steps cannot leak val info.
         try:
-            p_full = PreprocessingPipeline(pipeline.steps).fit(X_train, wv)
+            p_full = pipeline.unfitted_copy().fit(X_train, wv)
             X_tr_pp = p_full.transform(X_train, wv)
             X_val_pp = p_full.transform(X_val, wv)
-        except Exception as exc:
-            results["candidates"][desc] = {
+        except Exception as exc:  # noqa: BLE001 - one candidate is isolated
+            evidence = {
+                "candidate_id": candidate_id,
                 "score": float("-inf"),
                 "cv_r2": float("-inf"),
+                "cv_rmse": float("inf"),
                 "val_r2": float("-inf"),
                 "best_n_comp": None,
                 "error": str(exc),
             }
+            results["candidates"][result_key] = evidence
+            evaluations.append(evidence)
             continue
 
         # Inner CV on RAW TRAIN ONLY (each fold refits the pipeline).
-        best_nc, cv_r2 = _pls_cv_best_components(
+        best_nc, cv_r2, cv_rmse = _pls_cv_best_components(
             pipeline,
             X_train,
             y_train,
@@ -404,6 +521,7 @@ def nested_cv_preprocessing(
             max_components,
             random_state,
             wv,
+            primary_metric=("rmse" if selection_rule == "rmsecv_1pct" else "r2"),
         )
 
         # Fit final PLS on full preprocessed train, predict val.
@@ -412,36 +530,44 @@ def nested_cv_preprocessing(
             m.fit(X_tr_pp, y_train)
             val_pred = m.predict(X_val_pp).ravel()
             val_r2 = float(r2_score(y_val, val_pred))
-        except Exception as exc:
-            results["candidates"][desc] = {
+        except Exception as exc:  # noqa: BLE001 - one candidate is isolated
+            evidence = {
+                "candidate_id": candidate_id,
                 "score": float("-inf"),
                 "cv_r2": float(cv_r2),
+                "cv_rmse": float(cv_rmse),
                 "val_r2": float("-inf"),
                 "best_n_comp": best_nc,
                 "error": str(exc),
             }
+            results["candidates"][result_key] = evidence
+            evaluations.append(evidence)
             continue
 
         score = 0.7 * float(cv_r2) + 0.3 * float(val_r2)
 
-        results["candidates"][desc] = {
+        evidence = {
+            "candidate_id": candidate_id,
             "score": float(score),
             "cv_r2": float(cv_r2),
+            "cv_rmse": float(cv_rmse),
             "val_r2": float(val_r2),
             "best_n_comp": int(best_nc),
         }
+        results["candidates"][result_key] = evidence
+        evaluations.append(evidence)
 
-        if score > best_score:
-            best_score = score
-            best_pipeline = pipeline
-
-    if best_pipeline is None:
-        raise ValueError(
-            "No candidate pipeline produced a valid score; "
-            "check preprocessing methods or input data."
-        )
-    results["best"] = best_pipeline.description(locale="zh")
-    results["best_score"] = float(best_score)
+    winner_index, decision = _select_preprocessing_winner(
+        candidate_pipelines,
+        evaluations,
+        selection_rule=selection_rule,
+    )
+    best_pipeline = candidate_pipelines[winner_index]
+    winner_evidence = evaluations[winner_index]
+    results["best"] = best_pipeline.description(locale="zh") or "raw"
+    results["best_candidate_id"] = winner_evidence["candidate_id"]
+    results["best_score"] = float(winner_evidence["score"])
+    results["selection_decision"] = decision
     return best_pipeline, results
 
 

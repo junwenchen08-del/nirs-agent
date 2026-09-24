@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import math
+import time
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-import json
-import math
 from pathlib import Path
-import time
 from typing import Any
 
 
@@ -35,11 +35,11 @@ def load_retrieval_cases(path: str | Path) -> list[RetrievalCase]:
     """Load cases from a UTF-8 JSON array without initializing an embedder."""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, list):
-        raise ValueError("Retrieval evaluation file must contain a JSON array")
+        raise TypeError("Retrieval evaluation file must contain a JSON array")
     cases: list[RetrievalCase] = []
     for index, item in enumerate(payload):
         if not isinstance(item, dict):
-            raise ValueError(f"Evaluation case {index} must be a JSON object")
+            raise TypeError(f"Evaluation case {index} must be a JSON object")
         cases.append(
             RetrievalCase(
                 query=str(item.get("query", "")),

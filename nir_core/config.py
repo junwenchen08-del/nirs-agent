@@ -100,7 +100,7 @@ class NirConfig:
     )
 
     @classmethod
-    def load(cls, path: str | Path | None = None) -> "NirConfig":
+    def load(cls, path: str | Path | None = None) -> NirConfig:
         """Load config from a JSON file; fall back to defaults if missing."""
         if path is None:
             return cls()

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 import math
 import os
-from pathlib import Path
 import time
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 
 _MIB = 1024**2
 _GIB = 1024**3

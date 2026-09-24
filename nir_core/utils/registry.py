@@ -62,9 +62,8 @@ class ModelRegistry:
     @contextmanager
     def _locked(self):
         """Acquire in-process and cross-process registry locks."""
-        with _thread_lock_for(self.registry_path):
-            with self._file_locked():
-                yield
+        with _thread_lock_for(self.registry_path), self._file_locked():
+            yield
 
     @contextmanager
     def _file_locked(self):

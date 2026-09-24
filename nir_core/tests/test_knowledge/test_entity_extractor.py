@@ -98,6 +98,7 @@ def test_merge_entities_empty() -> None:
 # Chinese-language alias matching (common in NIR theses)
 # ---------------------------------------------------------------------------
 
+
 def test_extract_chinese_method_aliases() -> None:
     """Chinese preprocessing method names are detected via aliases."""
     text = "本文采用标准正态变量变换(SNV)和多元散射校正(MSC)进行散射校正。"
@@ -128,6 +129,22 @@ def test_extract_chinese_derivative_alias() -> None:
     entities = extract_entities(text)
     assert "derivative1" in entities["methods"]
     assert "derivative2" in entities["methods"]
+
+
+def test_extract_new_preprocessing_method_aliases() -> None:
+    text = (
+        "We compared robust SNV, extended multiplicative scatter correction, "
+        "despiking, and a Norris-Williams first derivative."
+    )
+    entities = extract_entities(text)
+    assert {"robust_snv", "emsc", "despike", "norris_derivative1"}.issubset(
+        set(entities["methods"])
+    )
+
+
+def test_extract_new_chinese_preprocessing_aliases() -> None:
+    entities = extract_entities("采用稳健SNV、扩展多元散射校正和去尖峰预处理。")
+    assert {"robust_snv", "emsc", "despike"}.issubset(set(entities["methods"]))
 
 
 def test_extract_chinese_neural_network_alias() -> None:
