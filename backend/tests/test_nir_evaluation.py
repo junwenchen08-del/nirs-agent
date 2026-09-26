@@ -85,6 +85,20 @@ def _scenario(scenario_id: str):
     return load_scenarios(SCENARIOS_PATH)[scenario_id]
 
 
+def _query_chemotools_catalog(
+    middleware: NIRWorkflowMiddleware,
+    workflow: dict,
+    observations: list[NIRToolObservation],
+) -> dict:
+    return _run_tool(
+        middleware,
+        workflow,
+        observations,
+        tool_name="chemotools_list_capabilities",
+        payload={"status": "success", "capabilities": []},
+    )
+
+
 def test_default_scenario_catalog_covers_core_nir_agent_paths() -> None:
     scenarios = load_scenarios(SCENARIOS_PATH)
 
@@ -135,6 +149,7 @@ def test_complete_calibration_trace_passes_every_evaluation_check() -> None:
         payload={"status": "ok", "samples": 80},
     )
     workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    workflow = _query_chemotools_catalog(middleware, workflow, observations)
     workflow = transition_workflow(workflow, action="plan_ready")
     workflow = _run_tool(
         middleware,
@@ -207,6 +222,7 @@ def test_failed_attempt_with_evidence_then_recovery_passes_retry_scenario() -> N
         payload={"status": "ok"},
     )
     workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    workflow = _query_chemotools_catalog(middleware, workflow, observations)
     workflow = transition_workflow(workflow, action="plan_ready")
     workflow = _run_tool(
         middleware,
@@ -298,6 +314,7 @@ def test_retry_budget_exhaustion_requires_final_stop_reflection() -> None:
         payload={"status": "ok"},
     )
     workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    workflow = _query_chemotools_catalog(middleware, workflow, observations)
     workflow = transition_workflow(workflow, action="plan_ready")
     workflow = _run_tool(
         middleware,

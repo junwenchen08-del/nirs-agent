@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Chemotools MCP-first selection:** Require every new NIR preprocessing or
+  modeling workflow to attempt the live Chemotools MCP capability catalog
+  before plan finalization or execution. Successful catalogs drive candidate selection; recorded
+  MCP failures permit the governed native fallback without bypassing
+  training-boundary preprocessing.
 - **NIR tool contract:** Reuse core pipeline validation in `nir_preprocess`,
   expose provider evidence, and document the catalog across tools, workflow
   policy, skills, and package metadata. One-shot automatic regression selection

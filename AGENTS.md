@@ -202,6 +202,11 @@ without bindings are pinned to native behavior. Bounded automatic candidates are
 from the calibration partition only, always include raw spectra, honor
 explicit-only methods, and use RMSECV with a 1% simplicity rule. The catalog
 list/detail and bounded-recommendation tools are read-only agent interfaces.
+Every new preprocessing or modeling execution must first attempt the live
+Chemotools MCP catalog through `chemotools_list_capabilities`. The workflow
+middleware persists the attempt and rejects plan finalization plus
+`nir_preprocess`/modeling tools when it is missing; a recorded MCP failure
+permits the governed native fallback.
 
 Chemotools 0.4.4 is also exposed as a first-party stdio MCP component at
 `nir_core.chemotools_mcp.chemotools_server`; the example extensions config enables it by

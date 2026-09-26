@@ -23,7 +23,7 @@ def test_backend_default_nir_dependency_includes_deep_runtime():
     config = tomllib.loads(backend_pyproject.read_text(encoding="utf-8"))
     dependencies = config["project"]["dependencies"]
 
-    assert "nir-core[deep,mat73]" in dependencies
+    assert "nir-core[deep,mat73,mcp]" in dependencies
     assert config["tool"]["uv"]["sources"]["torch"] == {"index": "pytorch-cpu"}
     assert {
         "name": "pytorch-cpu",

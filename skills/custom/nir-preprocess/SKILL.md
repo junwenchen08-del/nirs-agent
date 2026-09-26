@@ -19,7 +19,9 @@ allowed-tools:
   - chemotools_validate_operation
   - chemotools_fit_estimator
   - chemotools_apply_estimator
+  - chemotools_call_function
   - chemotools_render_plot
+  - chemotools_run_inspector
   - chemotools_get_artifact_metadata
 ---
 
@@ -30,10 +32,11 @@ allowed-tools:
 
 ## Chemotools MCP
 
-固定版本 `chemotools==0.4.4` 已作为独立 MCP 组件提供。需要查询上游完整能力时，先调用
-`chemotools_list_capabilities(category=...)`，再用
+固定版本 `chemotools==0.4.4` 已作为独立 MCP 组件提供。每个新的预处理选择都必须先调用
+`chemotools_list_capabilities(category=...)` 查询 MCP 运行时目录，再用
 `chemotools_describe_capability(capability_id=...)` 读取运行时构造参数和允许操作；禁止按记忆
-猜测 Python 包参数。MCP 目录覆盖 Chemotools 的全部公开预处理类，以及校准适配、数据增强、
+猜测 Python 包参数。不得把目录查询与预处理执行放在同一批并行调用中。MCP 目录覆盖
+Chemotools 的全部公开预处理类，以及校准适配、数据增强、
 特征选择、PLS 回归、异常值诊断、物理转换、绘图和 Inspector。
 
 Chemotools MCP 的“完整可调用”不等于“全部自动候选”。普通生产建模仍使用
@@ -42,10 +45,16 @@ NIR 注册表的 Chemotools 方法只允许显式实验；不得先对完整数�
 `chemotools_fit_estimator`，再把结果随机划分后宣称无泄漏建模。校准迁移、数据增强、投影和
 异常值算法默认均为显式调用。
 
+选择顺序固定为：Chemotools MCP 目录 → 所选能力详情 → 项目注册表兼容性检查 → 受控执行。
+Chemotools 有等价且语义兼容的能力时优先使用；只有 MCP 调用失败、上游无等价能力、物理轴
+语义不匹配或回放旧工件时才允许使用原生实现，并说明回退原因。正式训练继续通过
+`nir_train_*` / `nir_analyze` 在训练分区内拟合，不能为了“走 MCP”而先处理完整数据。
+
 ## 可用方法
 
-运行时算法目录是权威来源。需要确认当前环境实际可用的方法时，先调用
-`nir_list_preprocessing_methods`；准备构造带参数的步骤前，再调用
+Chemotools MCP 目录是候选选择的第一来源；项目运行时算法目录负责方法 ID、训练边界和工件
+兼容性。完成 MCP 查询后，调用 `nir_list_preprocessing_methods` 确认当前项目可执行的方法；
+准备构造带参数的步骤前，再调用
 `nir_describe_preprocessing_method(method=...)` 获取合法参数、范围、顺序、自动候选级别和实现版本。禁止根据记忆猜参数。下面的表用于快速阅读，不取代运行时目录。
 
 需要解释“为什么推荐这些预处理”时，可调用

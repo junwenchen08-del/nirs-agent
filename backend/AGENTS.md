@@ -285,7 +285,9 @@ from deerflow.config import get_app_config
   while the server also rejects paths outside cwd, disables NumPy pickle, and
   verifies its own joblib artifacts by SHA-256. `NIRWorkflowMiddleware` permits
   MCP catalog reads during planning and limits state-changing calls to
-  execution/evaluation. These tools supplement rather than replace governed
+  execution/evaluation. It also requires every new preprocessing or modeling
+  plan and execution to have a recorded `chemotools_list_capabilities` attempt first;
+  a recorded catalog failure permits the governed native fallback. These tools supplement rather than replace governed
   `nir_train_*` model selection, quality gates, registration, and prediction.
   `nir_align_wavelengths` is a separate
   execution-stage tool because alignment changes both `X` and `wv`; it requires

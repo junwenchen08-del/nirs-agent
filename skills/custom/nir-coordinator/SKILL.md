@@ -186,12 +186,28 @@ MATLAB `.mat` 文件如果 `nir_inspect` 返回两个或更多 `available_subset
 **❌ 禁止手动 import `scipy.io.loadmat`、`sklearn.cross_decomposition.PLSRegression` 等**——由 `nir_*` 工具内部处理。
 **❌ 禁止自己用 matplotlib 画图**——建模工具会自动生成所需产物。
 **✅ V3.6: 允许根据残差诊断自主构造 `pipeline_steps`（含超参数）**——`nir_train_model` 内置 `validate_pipeline` 守护，非法组合会被拦截并返回原因。
-构造新预处理组合前，先用 `nir_list_preprocessing_methods` 获取当前运行时可用的紧凑清单；只有准备使用某个参数化方法时，才调用 `nir_describe_preprocessing_method` 读取它的完整参数 Schema。运行时目录优先于本 Skill 中的静态示例，禁止猜测 Chemotools 或原生实现的参数名。
+### Chemotools MCP-first 预处理决策（强制）
+
+每个新的预处理或建模决策都必须先在 `planning` 阶段调用
+`chemotools_list_capabilities` 查询当前 MCP 运行时目录；不得把该调用与
+`nir_preprocess`、`nir_train_*`、`nir_analyze` 或 `nir_compare` 放在同一批并行工具调用中。
+目录调用成功后，对准备采用的 Chemotools 候选调用
+`chemotools_describe_capability` 核对真实构造参数和允许操作，必要时再调用
+`chemotools_validate_operation`。完成 MCP 候选选择后，才调用
+`nir_list_preprocessing_methods` / `nir_describe_preprocessing_method` 检查项目方法 ID、顺序、
+训练边界和工件回放是否兼容。
+
+Chemotools 有等价且语义兼容的能力时必须优先选择 Chemotools。只有 MCP 目录调用已失败、
+Chemotools 没有等价能力、物理轴语义不匹配或回放旧工件时，才能使用项目原生实现，并在
+结论中说明回退原因。运行时会在任何 `nir_preprocess` 或建模工具执行前检查本工作流是否已经
+尝试过 `chemotools_list_capabilities`；跳过该步骤的调用会被拒绝。
+
+运行时目录优先于本 Skill 中的静态示例，禁止猜测 Chemotools 或原生实现的参数名。
 需要向用户解释自动候选时调用 `nir_recommend_preprocessing`；该工具是只读探索，正式训练必须在校准分区内重新诊断和选择。
 **❌ 禁止自己实现 snv/emsc/despike/sg_smooth/norris_derivative1 等算法**——`nir_preprocess` 已提供。波长轴对齐必须调用 `nir_align_wavelengths`，禁止按列位置拼接、截短或自行插值。
 
-Chemotools 的完整公共 Python 工具集通过 `chemotools` MCP 服务提供。需要确认上游算法或
-参数时，先调用 `chemotools_list_capabilities`，再调用
+Chemotools 的完整公共 Python 工具集通过 `chemotools` MCP 服务提供。预处理候选选择和上游
+参数确认都必须先调用 `chemotools_list_capabilities`，再调用
 `chemotools_describe_capability`，必要时先执行 `chemotools_validate_operation`；不得直接猜测
 类名、参数名或默认值。新任务遇到 Chemotools 与项目原生能力重叠时优先选择 Chemotools；
 只有 Chemotools 没有等价能力、物理轴语义不匹配、或者回放旧工件时才使用原生实现。

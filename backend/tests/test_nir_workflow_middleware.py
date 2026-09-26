@@ -11,7 +11,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
 from deerflow.agents.middlewares.nir_workflow_middleware import NIRWorkflowMiddleware
-from deerflow.community.nir.workflow import start_workflow, transition_workflow
+from deerflow.community.nir.workflow import record_tool_observation, start_workflow, transition_workflow
 
 
 def _request(
@@ -44,6 +44,7 @@ def _execution_state(
     max_attempts: int = 3,
     task_type: str = "calibration",
     validation_goal: str = "internal_holdout",
+    chemotools_catalog_checked: bool = True,
 ) -> dict:
     state = start_workflow(
         task_type=task_type,
@@ -58,6 +59,14 @@ def _execution_state(
         max_attempts=max_attempts,
     )
     state = transition_workflow(state, action="record_audit", audit_passed=True)
+    if chemotools_catalog_checked:
+        state = record_tool_observation(
+            state,
+            name="chemotools_list_capabilities",
+            status="success",
+            stage_before="planning",
+            stage_after="planning",
+        )
     return transition_workflow(state, action="plan_ready")
 
 
@@ -148,6 +157,101 @@ def test_chemotools_mcp_catalog_is_allowed_during_planning() -> None:
     assert isinstance(result, Command)
 
 
+def test_preprocessing_decision_requires_chemotools_catalog_attempt() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = _execution_state(chemotools_catalog_checked=False)
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_train_model", {"status": "ok"})
+
+    result = middleware.wrap_tool_call(
+        _request("nir_train_model", {"nir_workflow": workflow}),
+        handler,
+    )
+
+    assert called is False
+    assert isinstance(result, Command)
+    payload = json.loads(result.update["messages"][0].content)
+    assert payload["code"] == "nir_chemotools_catalog_required"
+    assert payload["details"]["action_required"] == "query_chemotools_catalog_before_preprocessing_decision"
+
+
+def test_plan_ready_requires_chemotools_catalog_attempt() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="calibration",
+        data_path="data.npz",
+        analyte="protein",
+        unit="%",
+        domain="food_protein",
+        validation_goal="internal_holdout",
+    )
+    workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_workflow", {"status": "success"})
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "nir_workflow",
+            {"nir_workflow": workflow},
+            args={"action": "plan_ready"},
+        ),
+        handler,
+    )
+
+    assert called is False
+    assert isinstance(result, Command)
+    payload = json.loads(result.update["messages"][0].content)
+    assert payload["code"] == "nir_chemotools_catalog_required"
+    assert payload["stage"] == "planning"
+
+
+def test_failed_chemotools_catalog_attempt_allows_governed_native_fallback() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="calibration",
+        data_path="data.npz",
+        analyte="protein",
+        unit="%",
+        domain="food_protein",
+        validation_goal="internal_holdout",
+    )
+    workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    catalog_result = middleware.wrap_tool_call(
+        _request("chemotools_list_capabilities", {"nir_workflow": workflow}),
+        lambda _: ToolMessage(
+            content=json.dumps({"status": "error", "error": "service unavailable"}),
+            tool_call_id="call-1",
+            name="chemotools_list_capabilities",
+            status="error",
+        ),
+    )
+
+    assert isinstance(catalog_result, Command)
+    workflow = transition_workflow(catalog_result.update["nir_workflow"], action="plan_ready")
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_train_model", {"status": "ok"})
+
+    result = middleware.wrap_tool_call(
+        _request("nir_train_model", {"nir_workflow": workflow}),
+        handler,
+    )
+
+    assert called is True
+    assert isinstance(result, Command)
+
+
 def test_chemotools_mcp_execution_is_denied_before_execution_stage() -> None:
     middleware = NIRWorkflowMiddleware()
     workflow = start_workflow(
@@ -226,6 +330,13 @@ def test_classification_tool_is_allowed_and_records_attempt_evidence() -> None:
         validation_goal="internal_holdout",
     )
     workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    workflow = record_tool_observation(
+        workflow,
+        name="chemotools_list_capabilities",
+        status="success",
+        stage_before="planning",
+        stage_after="planning",
+    )
     workflow = transition_workflow(workflow, action="plan_ready")
 
     result = middleware.wrap_tool_call(

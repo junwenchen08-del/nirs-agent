@@ -102,6 +102,8 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
 _OBSERVED_NIR_TOOLS = frozenset({*_TOOL_POLICIES, "nir_workflow"})
 
 _MODELING_TOOLS = frozenset({"nir_train_auto_split_model", "nir_train_model", "nir_train_classifier", "nir_train_partitioned_model", "nir_train_multi_model", "nir_analyze", "nir_analyze_collection", "nir_compare"})
+_PREPROCESSING_DECISION_TOOLS = frozenset({*_MODELING_TOOLS, "nir_preprocess"})
+_CHEMOTOOLS_CATALOG_TOOL = "chemotools_list_capabilities"
 _INTERNAL_HOLDOUT_TOOLS = _MODELING_TOOLS
 _EXTERNAL_VALIDATION_TOOLS = frozenset({"nir_train_partitioned_model"})
 _TOOL_VALIDATION_PROTOCOL = {
@@ -557,6 +559,69 @@ def _deny_registration_evidence_mismatch(
     )
 
 
+def _chemotools_catalog_attempted(workflow: Mapping[str, Any]) -> bool:
+    """Return whether this workflow tried the authoritative MCP catalog.
+
+    A failed catalog call is still an attempt: it authorizes the documented
+    native fallback while keeping the outage visible in the durable trace.
+    """
+
+    observations = workflow.get("tool_observations")
+    if not isinstance(observations, list):
+        return False
+    return any(isinstance(observation, Mapping) and observation.get("name") == _CHEMOTOOLS_CATALOG_TOOL and observation.get("status") in {"success", "error"} for observation in observations)
+
+
+def _deny_missing_chemotools_catalog(
+    request: ToolCallRequest,
+    workflow: Mapping[str, Any],
+    policy: _ToolPolicy,
+) -> ToolMessage | None:
+    tool_name = str(request.tool_call.get("name", ""))
+    if tool_name not in _PREPROCESSING_DECISION_TOOLS or _chemotools_catalog_attempted(workflow):
+        return None
+    return _denied_message(
+        request,
+        code="nir_chemotools_catalog_required",
+        error=("Query the Chemotools MCP capability catalog before selecting or executing a preprocessing or modeling path. If the catalog call fails, the recorded failure permits the governed native fallback."),
+        workflow=workflow,
+        policy=policy,
+        details={
+            "required_tool": _CHEMOTOOLS_CATALOG_TOOL,
+            "action_required": "query_chemotools_catalog_before_preprocessing_decision",
+            "fallback_policy": "native_only_after_recorded_mcp_failure_or_no_equivalent_capability",
+        },
+    )
+
+
+def _deny_plan_ready_without_chemotools_catalog(
+    request: ToolCallRequest,
+    workflow: Mapping[str, Any],
+    args: Mapping[str, Any],
+) -> ToolMessage | None:
+    if str(request.tool_call.get("name", "")) != "nir_workflow":
+        return None
+    if str(args.get("action", "")).strip().lower() != "plan_ready":
+        return None
+    if workflow.get("task_type") not in _MODEL_TASKS:
+        return None
+    if workflow.get("validation_goal") == "exploratory":
+        return None
+    if _chemotools_catalog_attempted(workflow):
+        return None
+    return _denied_message(
+        request,
+        code="nir_chemotools_catalog_required",
+        error=("Query the Chemotools MCP capability catalog before finalizing the preprocessing and modeling plan."),
+        workflow=workflow,
+        details={
+            "required_tool": _CHEMOTOOLS_CATALOG_TOOL,
+            "action_required": "query_chemotools_catalog_before_preprocessing_decision",
+            "fallback_policy": "native_only_after_recorded_mcp_failure_or_no_equivalent_capability",
+        },
+    )
+
+
 def _authorize(request: ToolCallRequest) -> ToolMessage | None:
     tool_name = str(request.tool_call.get("name", ""))
     workflow = _state_from_request(request).get("nir_workflow")
@@ -600,6 +665,14 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
                 workflow=workflow,
             )
 
+    if isinstance(workflow, Mapping):
+        if catalog_plan_denial := _deny_plan_ready_without_chemotools_catalog(
+            request,
+            workflow,
+            args,
+        ):
+            return catalog_plan_denial
+
     policy = _TOOL_POLICIES.get(tool_name)
     if policy is None:
         return None
@@ -639,6 +712,8 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
             workflow=workflow,
             policy=policy,
         )
+    if catalog_denial := _deny_missing_chemotools_catalog(request, workflow, policy):
+        return catalog_denial
     if retry_denial := _deny_retry_plan_mismatch(request, workflow, policy):
         return retry_denial
     if registration_denial := _deny_registration_evidence_mismatch(request, workflow, policy):
