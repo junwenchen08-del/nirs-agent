@@ -1,6 +1,17 @@
 {
   "mcpInterceptors": [],
   "mcpServers": {
+    "chemotools": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "-m",
+        "nir_core.chemotools_mcp.chemotools_server"
+      ],
+      "env": {},
+      "description": "Pinned Chemotools 0.4.4 catalog, execution, diagnostics, and visualization"
+    },
     "github": {
       "enabled": false,
       "type": "stdio",

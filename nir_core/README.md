@@ -5,8 +5,9 @@ Deterministic near-infrared (NIR) spectroscopy algorithms for the NIR Agent.
 ## Design Principles
 
 - **Scientific-stack only**: numpy, scipy, scikit-learn, matplotlib, pydantic,
-  plus the pinned Chemotools preprocessing provider.
-- **Pure-function first**: numpy in, numpy out, no side effects.
+  plus the pinned Chemotools provider.
+- **Pure-function first**: core algorithms are numpy-in/numpy-out; the optional
+  MCP layer writes only explicit, thread-scoped result and estimator artifacts.
 - **Pydantic data contracts**: all I/O uses strongly-typed models.
 - **Fully type-annotated** and independently testable without DeerFlow.
 - **Installable**: `pip install -e .` into a sandbox venv.
@@ -19,6 +20,9 @@ pip install -e .
 
 # With optional extras
 pip install -e ".[mat73,dev]"
+
+# Chemotools MCP server
+pip install -e ".[mcp]"
 ```
 
 ## Package Layout
@@ -34,8 +38,19 @@ nir_core/
 ├── model/               # PLS, PCR, SVR, ensemble, evaluation, CARS/SPA
 ├── utils/               # metrics, validation, drift, registry
 ├── plotting/            # spectra, model diagnostics, gallery
+├── chemotools_mcp/      # pinned Chemotools catalog, safe execution, artifacts, stdio server
 └── tests/               # Unit + integration tests
 ```
+
+`nir_core.chemotools_mcp` exposes every callable or constant in the allowlisted public
+`__all__` surface of Chemotools 0.4.4. The catalog includes all 30 public
+preprocessing classes plus adaptation, augmentation, feature selection,
+regression, outlier, physics, plotting, inspector, and dataset modules. Runtime
+execution accepts only catalog IDs; it never imports a caller-supplied module or
+executes Python source. Fitted estimators are stored under the current thread
+workspace with SHA-256 verification before joblib loading, while array IO uses
+`allow_pickle=False`. Start it with `chemotools-mcp` or
+`python -m nir_core.chemotools_mcp.chemotools_server` after installing the `mcp` extra.
 
 The preprocessing package exposes classical and robust SNV/RNV, MSC/EMSC,
 isolated-spike and median filtering, Savitzky-Golay, Whittaker and

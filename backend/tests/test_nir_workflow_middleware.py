@@ -111,6 +111,73 @@ def test_domain_tool_is_denied_outside_authorized_stage() -> None:
     assert payload["next_action"] == "inspect_data"
 
 
+def test_chemotools_mcp_catalog_is_allowed_during_planning() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="calibration",
+        data_path="data.npz",
+        analyte="protein",
+        unit="%",
+        domain="food_protein",
+        validation_goal="internal_holdout",
+    )
+    workflow = transition_workflow(
+        workflow,
+        action="record_audit",
+        audit_passed=True,
+    )
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result(
+            "chemotools_list_capabilities",
+            {"status": "success", "capabilities": []},
+        )
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "chemotools_list_capabilities",
+            {"nir_workflow": workflow},
+        ),
+        handler,
+    )
+
+    assert called is True
+    assert isinstance(result, Command)
+
+
+def test_chemotools_mcp_execution_is_denied_before_execution_stage() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(
+        task_type="calibration",
+        data_path="data.npz",
+        analyte="protein",
+        unit="%",
+        domain="food_protein",
+        validation_goal="internal_holdout",
+    )
+    workflow = transition_workflow(
+        workflow,
+        action="record_audit",
+        audit_passed=True,
+    )
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "chemotools_fit_estimator",
+            {"nir_workflow": workflow},
+        ),
+        lambda _: _result("chemotools_fit_estimator", {"status": "success"}),
+    )
+
+    assert isinstance(result, Command)
+    payload = json.loads(result.update["messages"][0].content)
+    assert payload["code"] == "nir_workflow_stage_denied"
+    assert payload["allowed_stages"] == ["evaluation", "execution"]
+
+
 def test_domain_tool_denial_preserves_targeted_clarification_for_the_agent() -> None:
     middleware = NIRWorkflowMiddleware()
     workflow = start_workflow(task_type="calibration", data_path="data.npz")

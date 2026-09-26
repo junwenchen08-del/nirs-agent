@@ -996,7 +996,7 @@ dependencies = [
     { name = "langgraph-sdk" },
     { name = "lark-oapi" },
     { name = "markdown-to-mrkdwn" },
-    { name = "nir-core", extra = ["deep", "mat73"] },
+    { name = "nir-core", extra = ["deep", "mat73", "mcp"] },
     { name = "pyjwt" },
     { name = "python-multipart" },
     { name = "python-telegram-bot" },
@@ -1041,7 +1041,7 @@ requires-dist = [
     { name = "langgraph-sdk", specifier = ">=0.1.51" },
     { name = "lark-oapi", specifier = ">=1.4.0" },
     { name = "markdown-to-mrkdwn", specifier = ">=0.3.1" },
-    { name = "nir-core", extras = ["deep", "mat73"], editable = "../nir_core" },
+    { name = "nir-core", extras = ["deep", "mat73", "mcp"], editable = "../nir_core" },
     { name = "nir-core", extras = ["knowledge"], marker = "extra == 'knowledge'", editable = "../nir_core" },
     { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "python-multipart", specifier = ">=0.0.31" },
@@ -3400,6 +3400,9 @@ knowledge = [
 mat73 = [
     { name = "h5py" },
 ]
+mcp = [
+    { name = "mcp" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -3411,6 +3414,7 @@ requires-dist = [
     { name = "lightgbm", marker = "extra == 'ensemble'", specifier = ">=3.3.0" },
     { name = "markdownify", marker = "extra == 'knowledge'", specifier = ">=0.11" },
     { name = "matplotlib", specifier = ">=3.6.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = "==1.27.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pypdf", marker = "extra == 'knowledge'", specifier = ">=4.0" },
@@ -3425,7 +3429,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'deep'", specifier = ">=2.0.0", index = "https://download.pytorch.org/whl/cpu" },
     { name = "xgboost", marker = "extra == 'ensemble'", specifier = ">=1.7.0" },
 ]
-provides-extras = ["mat73", "ensemble", "deep", "knowledge", "dev"]
+provides-extras = ["mat73", "ensemble", "deep", "mcp", "knowledge", "dev"]
 
 [[package]]
 name = "numpy"

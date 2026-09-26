@@ -17,6 +17,16 @@ allowed-tools:
   - nir_describe_preprocessing_method
   - nir_recommend_preprocessing
   - nir_preprocess
+  - chemotools_health
+  - chemotools_list_capabilities
+  - chemotools_describe_capability
+  - chemotools_validate_operation
+  - chemotools_fit_estimator
+  - chemotools_apply_estimator
+  - chemotools_call_function
+  - chemotools_render_plot
+  - chemotools_run_inspector
+  - chemotools_get_artifact_metadata
   - nir_align_wavelengths
   - nir_list_calibration_transfer_methods
   - nir_fit_calibration_transfer
@@ -179,6 +189,18 @@ MATLAB `.mat` 文件如果 `nir_inspect` 返回两个或更多 `available_subset
 构造新预处理组合前，先用 `nir_list_preprocessing_methods` 获取当前运行时可用的紧凑清单；只有准备使用某个参数化方法时，才调用 `nir_describe_preprocessing_method` 读取它的完整参数 Schema。运行时目录优先于本 Skill 中的静态示例，禁止猜测 Chemotools 或原生实现的参数名。
 需要向用户解释自动候选时调用 `nir_recommend_preprocessing`；该工具是只读探索，正式训练必须在校准分区内重新诊断和选择。
 **❌ 禁止自己实现 snv/emsc/despike/sg_smooth/norris_derivative1 等算法**——`nir_preprocess` 已提供。波长轴对齐必须调用 `nir_align_wavelengths`，禁止按列位置拼接、截短或自行插值。
+
+Chemotools 的完整公共 Python 工具集通过 `chemotools` MCP 服务提供。需要确认上游算法或
+参数时，先调用 `chemotools_list_capabilities`，再调用
+`chemotools_describe_capability`，必要时先执行 `chemotools_validate_operation`；不得直接猜测
+类名、参数名或默认值。新任务遇到 Chemotools 与项目原生能力重叠时优先选择 Chemotools；
+只有 Chemotools 没有等价能力、物理轴语义不匹配、或者回放旧工件时才使用原生实现。
+
+完整 MCP 目录和生产自动候选是两个边界：校准迁移、数据增强、正交投影、特征选择、异常值
+检测、绘图和 Inspector 均为显式能力，不能因为目录中存在就自动加入普通预处理搜索。
+`chemotools_fit_estimator` 只可在活动 NIR 工作流的 execution/evaluation 阶段调用；监督建模、
+模型选择、最终测试和注册仍必须走 `nir_train_*`/`nir_analyze` 的受控三集协议。禁止将对完整
+数据拟合后导出的 MCP 结果再随机切分建模。
 
 跨仪器模型复用必须走独立校准迁移工具，不能把 DS/PDS/SST 塞进普通 `pipeline_steps`。
 先调用 `nir_list_calibration_transfer_methods` 读取运行时参数；默认只接受两份 NPZ 中

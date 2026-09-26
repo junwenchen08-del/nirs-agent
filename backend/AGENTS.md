@@ -277,6 +277,16 @@ from deerflow.config import get_app_config
   provider and selection evidence; missing legacy bindings always mean native.
   One-shot automatic selection profiles calibration rows only, includes raw as
   a candidate, and uses RMSECV plus a 1% simplicity decision.
+  The enabled first-party `chemotools` stdio MCP server lives in
+  `nir_core.chemotools_mcp.chemotools_server`. It catalogs the pinned 0.4.4 public API and
+  exposes grouped, allowlisted catalog/validation/fit/apply/function/render/
+  inspector operations; it never accepts arbitrary Python module or attribute
+  names. DeerFlow's per-user/per-thread stdio cwd provides filesystem scope,
+  while the server also rejects paths outside cwd, disables NumPy pickle, and
+  verifies its own joblib artifacts by SHA-256. `NIRWorkflowMiddleware` permits
+  MCP catalog reads during planning and limits state-changing calls to
+  execution/evaluation. These tools supplement rather than replace governed
+  `nir_train_*` model selection, quality gates, registration, and prediction.
   `nir_align_wavelengths` is a separate
   execution-stage tool because alignment changes both `X` and `wv`; it requires
   strict monotonic axes, reports source/target axis hashes, and rejects

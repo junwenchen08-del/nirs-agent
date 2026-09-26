@@ -25,6 +25,7 @@ NIR-Agent 是基于 [DeerFlow](https://github.com/bytedance/deer-flow) 构建的
 | 定量分析 | 单目标、多目标、自动划分或具名 Cal/Tuning/Test 分区建模 |
 | 定性分析 | PLS-DA、逻辑回归和校准 SVM，支持字符串类别与分组隔离 |
 | 预处理 | 21 种目录化方法，Chemotools 优先、原生补充，支持训练边界拟合和预测严格回放 |
+| Chemotools MCP | 将固定版本公共工具集作为 MCP 组件提供给智能体，覆盖目录查询、受控执行、诊断和绘图 |
 | 校准迁移 | 对同类仪器配对样本执行 DS/PDS/SST，绑定方向、波长轴、仪器和验证证据 |
 | 模型选择 | PLS 基线以及受控的 Ridge、SVR、Extra Trees 等候选比较 |
 | 波长选择 | 全光谱基线与 CARS 等方案仅使用校准/调优数据比较 |
@@ -61,7 +62,8 @@ cp frontend/.env.example frontend/.env
 在 `config.yaml` 的 `models:` 中启用一个可用模型，并在 `.env` 中填写该供应商的 API
 Key。密钥应通过环境变量引用，不要直接写入配置模板、README 或提交记录。
 
-知识库和外部 MCP 均为可选功能，基础 NIR 分析不要求启用。
+知识库和外部 MCP 均为可选功能，基础 NIR 分析不要求启用。模板会默认启用项目内置的
+Chemotools MCP；它随 Gateway 镜像运行，不需要单独部署服务。
 
 ### 4. 启动项目
 
@@ -192,6 +194,23 @@ Docker 镜像会安装并锁定该依赖，使用者不需要本机 Conda 或 `t
 波长轴对齐由独立的 `nir_align_wavelengths` 完成。它会同时更新光谱矩阵和波长轴，要求
 输入轴严格单调，并默认禁止外推。它只做轴归一化，不等于校准迁移。
 
+## Chemotools MCP
+
+项目将固定版本 `chemotools==0.4.4` 的公共工具集封装为线程隔离的 stdio MCP 组件。
+`extensions_config.example.json` 已默认启用，复制配置后随 Docker Gateway 一起启动。智能体会先
+调用能力目录，再读取所选方法的真实构造参数和允许操作，不依赖模型记忆猜测参数。
+
+MCP 目录覆盖 Chemotools 0.4.4 的全部公开预处理类（30 个），并包含校准适配、数据增强、
+特征选择、PLS 回归、异常值诊断、物理强度转换、绘图和 Inspector。对外提供的是稳定的
+`list_capabilities`、`describe_capability`、`validate_operation`、`fit_estimator`、
+`apply_estimator`、`call_function`、`render_plot` 和 `run_inspector` 等受控接口，而不是允许
+任意模块名或 Python 代码执行。
+
+MCP 训练对象保存在当前对话工作区，并在再次加载前校验 SHA-256；NumPy 输入禁止 pickle，
+读写路径不能越出线程工作区。完整可调用目录不等于全部进入自动候选：普通生产建模仍由
+`nir_train_*`/`nir_analyze` 在训练折内拟合预处理；校准迁移、增强、正交投影、特征选择和
+异常值诊断默认只允许显式选择。因此新增 MCP 不会绕过现有三集分离、质量门禁和审批注册。
+
 ## 跨仪器校准迁移
 
 DS、PDS 和 SST 通过独立工具提供，不会进入普通预处理候选。使用前必须准备同类仪器对
@@ -265,6 +284,13 @@ cd nir_core
 pytest
 ```
 
+仅运行 Chemotools MCP 契约、执行和安全测试：
+
+```bash
+cd nir_core
+pytest tests/test_mcp -q
+```
+
 运行后端 NIR 回归：
 
 ```bash
@@ -295,6 +321,7 @@ CI 会分别执行生产代码 Ruff 检查、快速测试和慢速计算回归�
 - [DeerFlow](https://github.com/bytedance/deer-flow)：智能体运行时、编排、沙箱和技能系统。
 - [LangChain](https://github.com/langchain-ai/langchain) 与
   [LangGraph](https://github.com/langchain-ai/langgraph)：底层智能体框架。
+- [Chemotools](https://chemotools.org/)：化学计量学预处理、建模、诊断和适配工具集。
 - NIR 算法实现使用或参考了 scikit-learn、SciPy 等开源科学计算项目。
 
 ## 许可证

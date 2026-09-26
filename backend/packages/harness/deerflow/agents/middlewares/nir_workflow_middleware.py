@@ -48,6 +48,25 @@ _MODEL_TASKS = frozenset({"analysis", "calibration", "classification", "multi_mo
 _DATA_TASKS = frozenset({"analysis", "calibration", "classification", "multi_modeling", "compare", "prediction", "inspection"})
 _EXECUTION_TASKS = frozenset({"analysis", "calibration", "classification", "multi_modeling", "compare", "prediction"})
 
+_CHEMOTOOLS_READ_TOOLS = frozenset(
+    {
+        "chemotools_health",
+        "chemotools_list_capabilities",
+        "chemotools_describe_capability",
+        "chemotools_validate_operation",
+        "chemotools_get_artifact_metadata",
+    }
+)
+_CHEMOTOOLS_EXECUTION_TOOLS = frozenset(
+    {
+        "chemotools_fit_estimator",
+        "chemotools_apply_estimator",
+        "chemotools_call_function",
+        "chemotools_render_plot",
+        "chemotools_run_inspector",
+    }
+)
+
 _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_load_data": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
     "nir_inspect": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
@@ -65,6 +84,20 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_reflect": _ToolPolicy(frozenset({"evaluation"}), _MODEL_TASKS),
     "nir_search_knowledge": _ToolPolicy(frozenset({"execution", "knowledge"}), frozenset({"knowledge", *_MODEL_TASKS})),
     "nir_register_model": _ToolPolicy(frozenset({"approved"}), _MODEL_TASKS),
+    **{
+        name: _ToolPolicy(
+            frozenset({"planning", "execution", "evaluation", "knowledge", "approved"}),
+            frozenset({*_EXECUTION_TASKS, "knowledge"}),
+        )
+        for name in _CHEMOTOOLS_READ_TOOLS
+    },
+    **{
+        name: _ToolPolicy(
+            frozenset({"execution", "evaluation"}),
+            _EXECUTION_TASKS,
+        )
+        for name in _CHEMOTOOLS_EXECUTION_TOOLS
+    },
 }
 _OBSERVED_NIR_TOOLS = frozenset({*_TOOL_POLICIES, "nir_workflow"})
 

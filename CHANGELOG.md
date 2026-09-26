@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tamper-evident joblib manifests. Production approval requires both a
   non-overlapping independent paired validation set and improved reference-model
   RMSEP.
+- **Chemotools MCP:** Expose the pinned Chemotools 0.4.4 public toolset through
+  a thread-scoped stdio MCP server with runtime-generated parameter schemas,
+  controlled estimator/function/plot/inspector operations, workspace path
+  confinement, no-pickle array IO, and hash-verified fitted artifacts. The
+  default Docker extension template enables the server without a separate
+  service.
 
 ### Changed
 

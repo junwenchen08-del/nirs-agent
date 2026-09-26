@@ -24,6 +24,7 @@ dependencies = [
 mat73 = ["h5py>=3.8.0"]
 ensemble = ["xgboost>=1.7.0", "lightgbm>=3.3.0"]
 deep = ["torch>=2.0.0"]
+mcp = ["mcp==1.27.0"]
 knowledge = [
     "chromadb>=0.5.0",
     "sentence-transformers>=2.0",
@@ -34,6 +35,9 @@ knowledge = [
     "langchain-community>=0.0.20",
 ]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.14.11"]
+
+[project.scripts]
+chemotools-mcp = "nir_core.chemotools_mcp.chemotools_server:main"
 
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }

@@ -173,7 +173,7 @@ levels: `nir_train_partitioned_model(validation_scope="independent_external_vali
 for provenance-backed external validation, or
 `validation_scope="independent_holdout_not_external"` when the same fixed split
 must be preserved without an external-validation claim.
-The default backend dependency is `nir-core[deep,mat73]`, with `torch` pinned
+The default backend dependency is `nir-core[deep,mat73,mcp]`, with `torch` pinned
 to PyTorch's explicit CPU wheel index so a CPU Gateway does not pull CUDA
 packages. Every advertised 1D-CNN path therefore has PyTorch in the Gateway
 runtime. Explicit CNN requests run a dependency preflight before file IO or
@@ -202,6 +202,19 @@ without bindings are pinned to native behavior. Bounded automatic candidates are
 from the calibration partition only, always include raw spectra, honor
 explicit-only methods, and use RMSECV with a 1% simplicity rule. The catalog
 list/detail and bounded-recommendation tools are read-only agent interfaces.
+
+Chemotools 0.4.4 is also exposed as a first-party stdio MCP component at
+`nir_core.chemotools_mcp.chemotools_server`; the example extensions config enables it by
+default. Its allowlisted catalog is generated from the pinned package's public
+module exports and covers preprocessing, adaptation, augmentation, feature
+selection, regression, outliers, physics, plotting, inspectors, and datasets.
+It exposes grouped catalog/validation/fit/apply/function/render tools rather
+than arbitrary Python reflection. Stdio cwd scoping confines IO to the thread
+workspace, NumPy loads disable pickle, and server-created joblib artifacts are
+SHA-256 checked before reload. The NIR workflow allows catalog reads during
+planning but restricts state-changing MCP execution to execution/evaluation;
+governed `nir_train_*` paths remain authoritative for split-safe model choice,
+quality gates, registration, and production prediction.
 
 Calibration transfer is a separate capability, never an ordinary preprocessing
 step. `nir_core.calibration_transfer` wraps Chemotools DS/PDS/SST and enforces

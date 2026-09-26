@@ -13,12 +13,34 @@ allowed-tools:
   - nir_recommend_preprocessing
   - nir_preprocess
   - nir_align_wavelengths
+  - chemotools_health
+  - chemotools_list_capabilities
+  - chemotools_describe_capability
+  - chemotools_validate_operation
+  - chemotools_fit_estimator
+  - chemotools_apply_estimator
+  - chemotools_render_plot
+  - chemotools_get_artifact_metadata
 ---
 
 # NIR 预处理技能
 
 ## 用途
 对 .npz 光谱数据应用单一预处理方法，输出预处理后的 .npz。
+
+## Chemotools MCP
+
+固定版本 `chemotools==0.4.4` 已作为独立 MCP 组件提供。需要查询上游完整能力时，先调用
+`chemotools_list_capabilities(category=...)`，再用
+`chemotools_describe_capability(capability_id=...)` 读取运行时构造参数和允许操作；禁止按记忆
+猜测 Python 包参数。MCP 目录覆盖 Chemotools 的全部公开预处理类，以及校准适配、数据增强、
+特征选择、PLS 回归、异常值诊断、物理转换、绘图和 Inspector。
+
+Chemotools MCP 的“完整可调用”不等于“全部自动候选”。普通生产建模仍使用
+`nir_train_*`/`nir_analyze` 的训练边界和 `pipeline_steps`，这样预处理只在训练折拟合。尚未进入
+NIR 注册表的 Chemotools 方法只允许显式实验；不得先对完整数据调用
+`chemotools_fit_estimator`，再把结果随机划分后宣称无泄漏建模。校准迁移、数据增强、投影和
+异常值算法默认均为显式调用。
 
 ## 可用方法
 
