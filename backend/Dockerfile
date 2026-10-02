@@ -13,14 +13,15 @@ FROM python:3.12-slim-bookworm AS builder
 ARG NODE_MAJOR=22
 ARG APT_MIRROR
 ARG UV_INDEX_URL
+ARG PYTORCH_CPU_WHEEL_MIRROR
 # Optional extras to install (e.g. "postgres" for PostgreSQL support)
 # Usage: docker build --build-arg UV_EXTRAS=postgres,discord ...
 ARG UV_EXTRAS
 
 # Optionally override apt mirror for restricted networks (e.g. APT_MIRROR=mirrors.aliyun.com)
 RUN if [ -n "${APT_MIRROR}" ]; then \
-      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
-      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true; \
+      sed -i "s|http://deb.debian.org|https://${APT_MIRROR}|g; s|https://deb.debian.org|https://${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+      sed -i "s|http://deb.debian.org|https://${APT_MIRROR}|g; s|https://deb.debian.org|https://${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true; \
     fi
 
 # Install build tools + Node.js (build-essential needed for native Python extensions)
@@ -48,6 +49,12 @@ COPY backend ./backend
 # the latest sources at image build time. Without this, the sandbox would
 # be stuck on whatever nir_core wheel was last baked into the base image.
 COPY nir_core ./nir_core
+
+# A local mirror may serve the exact locked CPU wheels when the upstream CDN is
+# slow or unavailable. The lockfile hashes continue to verify wheel contents.
+RUN if [ -n "${PYTORCH_CPU_WHEEL_MIRROR}" ]; then \
+      sed -i "s|https://download-r2.pytorch.org/whl/cpu/|${PYTORCH_CPU_WHEEL_MIRROR%/}/|g" backend/uv.lock; \
+    fi
 
 # Install dependencies with cache mount
 # When UV_EXTRAS is set (comma- or whitespace-separated), installs optional dependencies.
@@ -109,6 +116,7 @@ WORKDIR /app
 
 # Copy backend with pre-built virtualenv from builder
 COPY --from=builder /app/backend ./backend
+COPY --from=builder /app/nir_core ./nir_core
 
 # Expose Gateway API port.
 EXPOSE 8001
