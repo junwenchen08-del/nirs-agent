@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **NIR dataset library foundation:** Add a disabled-by-default, owner-scoped
+  Gateway API for explicitly saving thread CSV/TXT/MAT uploads as immutable,
+  hash-verified assets; include deduplication, capacity admission, tamper
+  quarantine, versioned Profile confirmation, storage usage, and bounded stale
+  staging cleanup. Add idempotent cross-thread attach, remote-sandbox sync,
+  `nir_dataset_*` Agent tools, persistent use records, and fail-closed workflow
+  lineage binding.
+- **NIR persistent model library:** Add an owner-scoped `nir_model_versions`
+  migration, explicit promotion of approved thread-registered models, bounded
+  list/get/promote/attach tools and Gateway endpoints, and safe cross-session
+  attachment to prediction-compatible output paths. Promotion and attachment
+  verify the model, metrics, training-data binding, model/provenance HMACs,
+  scientific gate, validation scope, quotas, version limits, and source
+  lineage; retries are idempotent and never overwrite an existing version.
+- **NIR library management:** Add feature-gated Dataset and Model pages with
+  owner-scoped listings, Profile/history/lineage views, attach actions, bounded
+  storage accounting, and conservative validation wording. Add controlled
+  archive-then-delete APIs that require exact identifiers, preserve SQL
+  tombstones and thread copies, reject referenced Dataset deletion, reclaim only
+  validated library files, and support idempotent recovery after interruption.
+- **NIR workflow panel:** Add a compact drawer to the default chat page for the
+  current thread's stage, attempt, model/preprocessing, bounded metrics,
+  validation scope, approval state, and dataset lineage. Ordinary chats hide
+  the entry, and the projection excludes raw evidence and private paths. Live
+  workflow state takes priority, while an owner-checked state request restores
+  older threads whose stream history omits the workflow field.
+
 - **NIR preprocessing:** Add robust SNV, leakage-safe fitted EMSC, isolated-spike
   removal, and first/second Norris-Williams derivatives as explicit pipeline
   methods.
@@ -37,6 +64,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service.
 
 ### Changed
+
+- **NIR user guide:** Add a plain-language Chinese guide covering Docker startup,
+  file inspection, field confirmation, Chemotools-first modeling, approval,
+  registration, cross-session libraries, prediction, drift, audit artifacts,
+  troubleshooting, and copy-ready chat prompts.
+
+- **NIR cross-session acceptance hardening:** Keep explicit Dataset saves in
+  the data-audit stage, prescribe one ordered attach/inspect/load/predict
+  workflow for reused assets, accept natural long-form model-promotion
+  confirmations while rejecting negations, and prevent phrases such as
+  “不得视为外部验证” from being mistaken for positive external-validation
+  claims. Completed prediction summaries may cite only the exact model path
+  bound to a successful `nir_predict` workflow, while unrelated paths remain
+  blocked. Add deterministic regressions for confirmation and response grounding.
 
 - **Chemotools MCP-first selection:** Require every new NIR preprocessing or
   modeling workflow to attempt the live Chemotools MCP capability catalog

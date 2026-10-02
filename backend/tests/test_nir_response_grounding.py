@@ -350,6 +350,64 @@ def test_internal_holdout_response_rejects_external_validation_overclaim() -> No
     assert "validation_scope_overclaim:external" in verdict.violations
 
 
+def test_completed_prediction_accepts_explicit_external_validation_disclaimer() -> None:
+    model_path = "/mnt/user-data/outputs/models/tablets/model.pkl"
+    workflow = start_workflow(
+        task_type="prediction",
+        data_path="/mnt/user-data/uploads/tablets.mat",
+        model_path=model_path,
+    )
+    workflow["stage"] = "completed"
+    workflow["next_action"] = "none"
+    workflow["tool_observations"] = [
+        {"name": "nir_predict", "status": "success"},
+    ]
+
+    verdict = validate_nir_response(
+        (f"已从跨会话持久库加载模型 {model_path}，预测与审计链路已完成；本次不得视为外部验证，也不作为新的泛化证明。"),
+        workflow,
+    )
+
+    assert verdict.passed is True
+    assert verdict.violations == ()
+
+
+def test_completed_prediction_rejects_a_different_model_artifact_path() -> None:
+    workflow = start_workflow(
+        task_type="prediction",
+        data_path="/mnt/user-data/uploads/tablets.mat",
+        model_path="/mnt/user-data/outputs/models/tablets/model.pkl",
+    )
+    workflow["stage"] = "completed"
+    workflow["next_action"] = "none"
+    workflow["tool_observations"] = [
+        {"name": "nir_predict", "status": "success"},
+    ]
+
+    verdict = validate_nir_response(
+        "预测使用了 /mnt/user-data/outputs/models/other/model.pkl。",
+        workflow,
+    )
+
+    assert verdict.passed is False
+    assert "artifact_path_mismatch:model" in verdict.violations
+
+
+def test_completed_prediction_still_rejects_positive_external_validation_claim() -> None:
+    workflow = start_workflow(
+        task_type="prediction",
+        data_path="/mnt/user-data/uploads/tablets.mat",
+        model_path="/mnt/user-data/outputs/models/tablets/model.pkl",
+    )
+    workflow["stage"] = "completed"
+    workflow["next_action"] = "none"
+
+    verdict = validate_nir_response("预测完成，并证明模型已完成外部验证。", workflow)
+
+    assert verdict.passed is False
+    assert "validation_scope_overclaim:external" in verdict.violations
+
+
 def test_response_rejects_unapproved_model_artifact_path() -> None:
     verdict = validate_nir_response(
         "已生成模型 /mnt/user-data/outputs/other.pkl。",

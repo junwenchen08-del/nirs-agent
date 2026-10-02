@@ -36,6 +36,8 @@ export type MockThread = {
   messages?: unknown[];
   artifacts?: string[];
   goal?: Record<string, unknown> | null;
+  values?: Record<string, unknown>;
+  historyValues?: Record<string, unknown>;
 };
 
 export type MockAgent = {
@@ -109,6 +111,12 @@ function mockStreamMessages() {
  * for a real backend.
  */
 export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
+  const routeRegistrations: Promise<unknown>[] = [];
+  const registerRoute = (...args: Parameters<Page["route"]>) => {
+    const registration = page.route(...args);
+    routeRegistrations.push(registration);
+    return registration;
+  };
   let threads = [...(options?.threads ?? [])];
   const agents = options?.agents ?? [];
   const skills = options?.skills ?? DEFAULT_SKILLS;
@@ -134,11 +142,15 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
       ...(thread.agent_name ? { agent_name: thread.agent_name } : {}),
     },
     status: "idle",
-    values: { title: thread.title ?? "Untitled", goal: thread.goal ?? null },
+    values: {
+      ...(thread.values ?? {}),
+      title: thread.title ?? "Untitled",
+      goal: thread.goal ?? null,
+    },
   });
 
   // Auth — keep workspace tests independent from a real gateway session.
-  void page.route("**/api/v1/auth/me", (route) => {
+  void registerRoute("**/api/v1/auth/me", (route) => {
     if (route.request().method() === "GET") {
       return route.fulfill({
         status: 200,
@@ -149,7 +161,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
     return route.fallback();
   });
 
-  void page.route("**/api/v1/auth/setup-status", (route) => {
+  void registerRoute("**/api/v1/auth/setup-status", (route) => {
     if (route.request().method() === "GET") {
       return route.fulfill({
         status: 200,
@@ -160,14 +172,14 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
     return route.fallback();
   });
 
-  void page.route("**/api/v1/auth/logout", (route) => {
+  void registerRoute("**/api/v1/auth/logout", (route) => {
     if (route.request().method() === "POST") {
       return route.fulfill({ status: 204 });
     }
     return route.fallback();
   });
 
-  void page.route("**/api/channels/providers", (route) => {
+  void registerRoute("**/api/channels/providers", (route) => {
     if (route.request().method() === "GET") {
       return route.fulfill({
         status: 200,
@@ -178,7 +190,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
     return route.fallback();
   });
 
-  void page.route("**/api/channels/connections", (route) => {
+  void registerRoute("**/api/channels/connections", (route) => {
     if (route.request().method() === "GET") {
       return route.fulfill({
         status: 200,
@@ -190,7 +202,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
   });
 
   // Thread search — sidebar thread list & chats list page
-  void page.route("**/api/langgraph/threads/search", async (route) => {
+  void registerRoute("**/api/langgraph/threads/search", async (route) => {
     const body = threads.map(threadSearchResult);
 
     let limit: number | undefined;
@@ -223,7 +235,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
   });
 
   // Thread create — called when user sends first message in a new chat
-  void page.route("**/api/langgraph/threads", (route) => {
+  void registerRoute("**/api/langgraph/threads", (route) => {
     if (route.request().method() === "POST") {
       upsertThread({
         thread_id: MOCK_THREAD_ID,
@@ -248,7 +260,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
   });
 
   // Thread update (PATCH) — metadata update after creation
-  void page.route("**/api/langgraph/threads/*", (route) => {
+  void registerRoute("**/api/langgraph/threads/*", (route) => {
     const threadId = decodeURIComponent(
       new URL(route.request().url()).pathname.split("/").at(-1) ?? "",
     );
@@ -285,7 +297,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
     return route.fallback();
   });
 
-  void page.route(/\/api\/threads\/[^/]+$/, (route) => {
+  void registerRoute(/\/api\/threads\/[^/]+$/, (route) => {
     if (route.request().method() === "DELETE") {
       return route.fulfill({
         status: 204,
@@ -294,7 +306,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
     return route.fallback();
   });
 
-  void page.route(/\/api\/threads\/[^/]+\/goal$/, async (route) => {
+  void registerRoute(/\/api\/threads\/[^/]+\/goal$/, async (route) => {
     const threadId = decodeURIComponent(
       new URL(route.request().url()).pathname.split("/").at(-2) ?? "",
     );
@@ -351,7 +363,33 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
     return route.fallback();
   });
 
-  void page.route("**/api/threads/*/uploads/limits", (route) => {
+  void registerRoute(/\/api\/threads\/[^/]+\/state$/, (route) => {
+    const threadId = decodeURIComponent(
+      new URL(route.request().url()).pathname.split("/").at(-2) ?? "",
+    );
+    const matchingThread = threads.find(
+      (thread) => thread.thread_id === threadId,
+    );
+    if (route.request().method() === "GET" && matchingThread) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          values: matchingThread.values ?? {},
+          next: [],
+          metadata: {},
+          checkpoint: { id: "checkpoint-one", ts: "2025-01-01T00:00:00Z" },
+        }),
+      });
+    }
+    return route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "Thread not found" }),
+    });
+  });
+
+  void registerRoute("**/api/threads/*/uploads/limits", (route) => {
     if (route.request().method() === "GET") {
       return route.fulfill({
         status: 200,
@@ -363,7 +401,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
   });
 
   // Thread history — useStream fetches state history on mount
-  void page.route("**/api/langgraph/threads/*/history", (route) => {
+  void registerRoute("**/api/langgraph/threads/*/history", (route) => {
     const url = route.request().url();
 
     // For threads that exist in our mock data, return history with messages
@@ -375,6 +413,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
         body: JSON.stringify([
           {
             values: {
+              ...(matchingThread.historyValues ?? matchingThread.values ?? {}),
               title: matchingThread.title ?? "Untitled",
               goal: matchingThread.goal ?? null,
               messages: matchingThread.messages ?? [
@@ -409,7 +448,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
   });
 
   // Thread state — getState for individual thread
-  void page.route("**/api/langgraph/threads/*/state", (route) => {
+  void registerRoute("**/api/langgraph/threads/*/state", (route) => {
     if (route.request().method() === "GET") {
       const url = route.request().url();
       const matchingThread = threads.find((t) => url.includes(t.thread_id));
@@ -418,6 +457,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
         contentType: "application/json",
         body: JSON.stringify({
           values: {
+            ...(matchingThread?.values ?? {}),
             title: matchingThread?.title ?? "Untitled",
             goal: matchingThread?.goal ?? null,
             messages: matchingThread
@@ -448,36 +488,39 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
   // The URL carries a query string (e.g. `?limit=10&offset=0`), which Playwright
   // glob `*` does NOT cross, so we match with a regex anchored to `/runs`
   // followed by `?` or end-of-string.  This must NOT match `/runs/stream`.
-  void page.route(/\/api\/langgraph\/threads\/[^/]+\/runs(\?|$)/, (route) => {
-    if (route.request().method() === "GET") {
-      const url = route.request().url();
-      const matchingThread = threads.find((t) => url.includes(t.thread_id));
-      return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(
-          matchingThread
-            ? [
-                {
-                  run_id: `run-${matchingThread.thread_id}`,
-                  thread_id: matchingThread.thread_id,
-                  assistant_id: "lead_agent",
-                  status: "success",
-                  metadata: {},
-                  kwargs: {},
-                  created_at: "2025-01-01T00:00:00Z",
-                  updated_at:
-                    matchingThread.updated_at ?? "2025-01-01T00:00:00Z",
-                },
-              ]
-            : [],
-        ),
-      });
-    }
-    return route.fallback();
-  });
+  void registerRoute(
+    /\/api\/langgraph\/threads\/[^/]+\/runs(\?|$)/,
+    (route) => {
+      if (route.request().method() === "GET") {
+        const url = route.request().url();
+        const matchingThread = threads.find((t) => url.includes(t.thread_id));
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(
+            matchingThread
+              ? [
+                  {
+                    run_id: `run-${matchingThread.thread_id}`,
+                    thread_id: matchingThread.thread_id,
+                    assistant_id: "lead_agent",
+                    status: "success",
+                    metadata: {},
+                    kwargs: {},
+                    created_at: "2025-01-01T00:00:00Z",
+                    updated_at:
+                      matchingThread.updated_at ?? "2025-01-01T00:00:00Z",
+                  },
+                ]
+              : [],
+          ),
+        });
+      }
+      return route.fallback();
+    },
+  );
 
-  void page.route(
+  void registerRoute(
     /\/api\/threads\/([^/]+)\/runs\/([^/]+)\/messages/,
     (route) => {
       if (route.request().method() === "GET") {
@@ -521,14 +564,14 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
     return handleRunStream(route, { goal });
   };
 
-  void page.route("**/api/langgraph/runs/stream", handleMockRunStream);
-  void page.route(
+  void registerRoute("**/api/langgraph/runs/stream", handleMockRunStream);
+  void registerRoute(
     "**/api/langgraph/threads/*/runs/stream",
     handleMockRunStream,
   );
 
   // Models list — model picker dropdown
-  void page.route("**/api/models", (route) => {
+  void registerRoute("**/api/models", (route) => {
     if (route.request().method() === "GET") {
       return route.fulfill({
         status: 200,
@@ -542,22 +585,36 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
     return route.fallback();
   });
 
-  // Feature flags — frontend gates UI (e.g. agents) on these. Default to
-  // enabled so existing tests exercise the normal path; tests that need the
-  // disabled state override this route after calling mockLangGraphAPI.
-  void page.route("**/api/features", (route) => {
+  void registerRoute("**/api/suggestions/config", (route) => {
     if (route.request().method() === "GET") {
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ agents_api: { enabled: true } }),
+        body: JSON.stringify({ enabled: true }),
+      });
+    }
+    return route.fallback();
+  });
+
+  // Feature flags — frontend gates UI (e.g. agents) on these. Default to
+  // enabled so existing tests exercise the normal path; tests that need the
+  // disabled state override this route after calling mockLangGraphAPI.
+  void registerRoute("**/api/features", (route) => {
+    if (route.request().method() === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          agents_api: { enabled: true },
+          nir_library: { enabled: true },
+        }),
       });
     }
     return route.fallback();
   });
 
   // Skills list — settings page and slash autocomplete
-  void page.route("**/api/skills", (route) => {
+  void registerRoute("**/api/skills", (route) => {
     if (route.request().method() === "GET") {
       return route.fulfill({
         status: 200,
@@ -569,7 +626,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
   });
 
   // Follow-up suggestions — input box auto-suggest after AI response
-  void page.route("**/api/threads/*/suggestions", (route) => {
+  void registerRoute("**/api/threads/*/suggestions", (route) => {
     if (route.request().method() === "POST") {
       return route.fulfill({
         status: 200,
@@ -581,7 +638,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
   });
 
   // Agents list — sidebar & gallery page
-  void page.route("**/api/agents", (route) => {
+  void registerRoute("**/api/agents", (route) => {
     if (route.request().method() === "GET") {
       return route.fulfill({
         status: 200,
@@ -593,7 +650,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
   });
 
   // Individual agent — agent chat page
-  void page.route("**/api/agents/*", (route) => {
+  void registerRoute("**/api/agents/*", (route) => {
     if (route.request().method() === "GET") {
       const url = route.request().url();
       const agent = agents.find((a) => url.endsWith(`/api/agents/${a.name}`));
@@ -611,6 +668,10 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
       body: JSON.stringify({ detail: "Agent not found" }),
     });
   });
+
+  return {
+    ready: Promise.all(routeRegistrations).then(() => undefined),
+  };
 }
 
 // ---------------------------------------------------------------------------

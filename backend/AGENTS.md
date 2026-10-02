@@ -382,6 +382,10 @@ from deerflow.config import get_app_config
   quality-passage claims, and model/metrics paths must match the current
   `attempt_evidence`; unsupported claims are replaced with a bounded
   evidence-only summary and recorded in `response_guard_events`. Evaluation
+  A completed prediction with a successful `nir_predict` observation may also
+  cite the exact model path already bound to that workflow; this does not
+  authorize any other model path. Explicit disclaimers such as “不得视为外部验证”
+  are not positive external-validation claims.
   trace export captures the latest visible final `AIMessage` as
   `response_text`; offline scoring applies the same validator and fails traces
   where the runtime guard had to intervene.
@@ -862,6 +866,92 @@ Focused regression coverage for the updater lives in `backend/tests/test_memory_
 - `resolve_class(path, base_class)` - Import and validate class against base class
 
 ### Schema Migrations (`packages/harness/deerflow/persistence/migrations/`)
+
+**NIR cross-session library (Batch G, disabled by default):**
+`deerflow.persistence.nir_library.model` registers `nir_datasets`,
+`nir_dataset_profiles`, `nir_dataset_uses`, and `nir_model_versions` through
+`persistence/models/__init__.py`; revisions `0003_nir_datasets_profiles` and
+`0004_nir_dataset_uses` plus `0005_nir_model_versions` upgrade existing
+databases while validating matching pre-created tables in legacy bootstrap.
+Dataset/model bytes are not stored in SQL.
+The active `(owner_user_id, sha256)` partial unique index excludes
+deleted tombstones; profiles use a composite `(dataset_id, owner_user_id)` FK
+and keep `profile_status` (user confirmation) separate from `schema_status`
+(inspection outcome). `Paths.user_nir_*` resolves persistent user-scoped
+directories outside thread cleanup and rejects unsafe/Windows-device IDs.
+`nir_library.enabled` is disabled by default and rejects memory databases when
+enabled. Its 15 GiB total is a *new-library-write admission threshold*, not a
+strict cap on existing uploads/sandbox output. Batch C's
+`deerflow.community.nir.datasets.DatasetService` accepts only an explicitly
+confirmed `/mnt/user-data/uploads/{file}` from an existing owner-matched thread,
+streams it into owner-serialized staging without following symlinks, hashes and
+publishes an immutable source plus manifest, compensates failed DB commits, and
+quarantines missing/tampered assets. Same-owner bytes deduplicate; other owners
+remain isolated. The Gateway exposes owner-scoped save/list/get/rename/archive,
+Profile create/list/confirm, and storage-usage endpoints. Profile mappings are
+size-bounded JSON, versioned separately from the original bytes, and
+`needs_user_mapping` cannot be confirmed. `nir_inspect` remains read-only.
+The owner-only reconciliation endpoint compares active SQL sizes with exact
+asset directories and reports missing/untracked/stale counts without returning
+host paths; it does not mutate files.
+Stale cleanup only touches old regular files with the service staging prefix in
+the exact owner staging directory. Dataset Attach copies a reverified source to
+an owner-matched target thread through an atomic no-overwrite path, compensates
+local copies after remote sandbox-sync failures, and records an idempotent use
+with run/workflow identifiers when available. The Agent-facing
+`nir_dataset_list/get/history/save/attach` tools return bounded metadata; save
+requires explicit current-user intent, while attach requires a fresh
+`nir_inspect`. `NIRWorkflowState` binds the dataset/Profile/hash/attachment and
+middleware rejects forged or mismatched attachment lineage. Same-revision
+source conflicts fail closed. When the latest request explicitly asks to keep a
+current upload, the coordinator saves it after inspection and before
+`record_audit`, because later workflow stages deliberately reject persistent
+Dataset writes.
+
+`deerflow.community.nir.models.ModelService` promotes only the exact artifact
+recorded by an approved workflow and the source thread's `registry.json` after
+`nir_register_model` has completed. Promotion re-runs the scientific and
+validation gates, verifies model SHA/size/HMAC, metrics SHA, training-data
+binding, and provenance HMAC before and after a no-symlink staged copy, then
+atomically publishes the bundle and commits a ready SQL record. Production
+signing policy requires both model and provenance signatures. Owner admission
+serialization covers quotas, the total new-write threshold, disk floor, and
+per-model version cap; retries are idempotent and never overwrite a version.
+Lineage stores source Dataset/Profile when available and always keeps source
+thread/run/attempt plus the exact existing `validation_scope`; null Dataset
+lineage remains valid for older direct uploads.
+
+`nir_model_list/get/promote/attach` are bounded Agent tools and the Gateway
+exposes matching owner-scoped endpoints. Promotion requires explicit current
+user intent and the `registered` workflow stage. The intent matcher accepts
+natural Chinese/English confirmation even when a long model identity separates
+the save action from the cross-session scope, while explicit negation fails
+closed. Attach re-verifies the library
+package, copies it to `/mnt/user-data/outputs/models/{model_id}/{version}/` in
+an owner-matched target thread, re-verifies the copy, and returns the model path
+accepted by `nir_predict`; remote sandbox sync copies the whole bundle. Model
+promotion is distinct from thread registration and is never automatic.
+
+Cross-session prediction attaches both assets before starting a prediction
+workflow, then runs inspect/load while the workflow is still in `data_audit`,
+followed by audit, planning, prediction, and completion. Response grounding
+recognizes explicit phrases such as “不得视为外部验证” as disclaimers; it still
+rejects positive external-validation claims. Prediction summaries do not need
+model-training `attempt_evidence`, but they must not invent training metrics.
+
+Batch G adds owner-scoped `DELETE /api/nir/datasets/{dataset_id}` and
+`DELETE /api/nir/models/{model_id}/versions/{version}`. Physical reclamation is
+deliberately separate from archive: the caller must archive first and submit the
+exact Dataset ID or `model_id:version` confirmation. Dataset deletion refuses
+every active or archived `nir_model_versions` reference. Both flows persist a
+`deleting` state before touching disk, remove only allowlisted files inside the
+validated asset directory, retain SQL tombstones, and are idempotent so a
+partially completed operation can be retried. Copies already attached to thread
+uploads/outputs are independent and remain until that thread is deleted.
+`/api/features` exposes `nir_library.enabled`; when enabled, the frontend shows
+owner-scoped Dataset and Model pages. Archive does not reduce usage, while a
+successful controlled deletion does. Validation scope remains evaluation
+provenance and must never be presented as independent production approval.
 
 DeerFlow's application tables (`runs`, `threads_meta`, `feedback`, `users`, `run_events`, plus the four `channel_*` tables) are owned by alembic via a **hybrid bootstrap** strategy. LangGraph's checkpointer tables (`checkpoints`, `checkpoint_blobs`, `checkpoint_writes`, `checkpoint_migrations`) live in the same database but are owned by LangGraph and excluded from alembic's view via `migrations/_env_filters.py::include_object`.
 

@@ -11,6 +11,15 @@ allowed-tools:
   - ask_clarification
   - present_files
   - nir_workflow
+  - nir_dataset_list
+  - nir_dataset_get
+  - nir_dataset_history
+  - nir_dataset_save
+  - nir_dataset_attach
+  - nir_model_list
+  - nir_model_get
+  - nir_model_promote
+  - nir_model_attach
   - nir_load_data
   - nir_inspect
   - nir_list_preprocessing_methods
@@ -66,6 +75,41 @@ allowed-tools:
 
 # NIR 光谱分析协调器
 
+## 跨会话数据集（工作流开始前）
+
+当用户要分析“之前保存的数据”且本线程没有明确上传路径时，先调用
+`nir_dataset_list`，再对用户选定的唯一 ID 调用 `nir_dataset_get`。不得按重复名称选第一个。
+随后调用 `nir_dataset_attach`，用其返回的当前线程 `virtual_path` 启动 `nir_workflow`，并在
+启动成功后重新调用 `nir_inspect`。挂载只复用原始字节和可选的 confirmed Profile，不继承
+旧会话的数据审查、划分、指标或模型结论。若 Profile 不确定，省略 `profile_id` 后重新映射。
+
+只有用户最新消息明确要求长期或跨会话保存当前上传文件时才调用 `nir_dataset_save`；
+`nir_inspect` 本身永远不保存。若用户已明确要求保存，必须在 `nir_workflow(action="start")`
+成功并完成 `nir_inspect` 后、调用 `record_audit` 前，仍处于 `data_audit` 阶段时立即保存。
+不得把保存动作推迟到 `clarification`、`planning`、`execution` 或 `review`；这些阶段的拒绝是
+安全边界，不能通过重试绕过。数据集库关闭或不可用时，诚实说明并继续使用当前线程上传。
+
+## 跨会话模型（注册后或预测工作流开始前）
+
+线程内 `nir_register_model` 成功只表示该线程的版本注册完成，不等于长期模型库已经保存。
+只有用户最新消息明确要求“持久化模型、保存到模型库或以后跨会话使用”，并且工作流已自动
+进入 `stage="registered"`，才调用一次 `nir_model_promote(model_id, version)`。必须原样使用
+`nir_register_model` 返回的 `model_id/version`；不得把任意上传的 pkl、另一个 attempt 或仅有
+好指标但未审批的工件加入模型库。返回 `library_status="ready"` 才表示长期副本可用。
+
+用户要用以前保存的模型预测且本线程没有模型路径时，先在工作流开始前调用
+`nir_model_list`；候选不唯一时用 `nir_model_get` 展示验证范围和最小指标摘要，让用户按
+`model_id/version` 选择。随后调用 `nir_model_attach`，再用其返回的精确 `model_path` 启动
+`task_type="prediction"` 的新工作流、检查本次输入数据并调用 `nir_predict`。不得沿用旧会话
+的预测审计或漂移连续计数；它们仍是当前线程范围。`independent_holdout_not_external` 必须
+明确称为内部独立留出，不能因模型已持久化而改称外部验证或生产批准。
+
+跨会话预测必须严格按一个工作流完成：先在工作流开始前挂载数据集和模型；再用两个挂载
+结果中的精确路径和数据集绑定字段启动 `prediction`；随后依次执行 `nir_inspect`，若输入还
+不是可直接预测的 NPZ，则必须在仍处于 `data_audit` 时调用 `nir_load_data`，然后才
+`record_audit → plan_ready → nir_predict → complete`。不得先进入 `execution` 再尝试加载数据，
+也不得为了补做标准化而提前 `complete`、重新挂载资产或启动第二个工作流。
+
 ## 工作流状态（强制）
 
 运行时会自动将明确的近红外请求路由到本 Skill，用户无需输入
@@ -91,7 +135,8 @@ nir_workflow(
 `axis_first`、`axis_last` 和 `axis_direction`；`wavelength_range=[min,max]` 只表示数值范围，
 不能据此推断升序或降序。
 
-其他数据任务在检查后调用
+其他数据任务在检查后，若用户最新消息明确要求长期或跨会话保存，先调用一次
+`nir_dataset_save`，确认返回 `dataset_status="ready"` 后再调用
 `record_audit(audit_passed=true, domain=..., analyte=..., unit=..., ...)` 写回持久工作流。
 
 审查通过后若进入 `stage="clarification"`：

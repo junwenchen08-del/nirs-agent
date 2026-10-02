@@ -35,6 +35,7 @@ export interface AgentThreadState extends Record<string, unknown> {
   artifacts?: string[];
   todos?: Todo[];
   goal?: GoalState | null;
+  nir_workflow?: unknown;
 }
 
 export interface AgentThreadContext extends Record<string, unknown> {

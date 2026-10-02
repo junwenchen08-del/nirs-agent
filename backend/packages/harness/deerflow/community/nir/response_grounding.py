@@ -246,8 +246,13 @@ _QUALITY_PASSED_RE = re.compile(
 _NEGATIONS = (
     "不是",
     "并非",
+    "不得",
     "不能",
     "不可",
+    "不作为",
+    "不视为",
+    "不算",
+    "不构成",
     "不等同",
     "不属于",
     "未",
@@ -480,6 +485,16 @@ def validate_nir_response(
         violations.append("quality_overclaim:passed")
 
     approved_model_paths = {_normalized_path(record.get("model_path")) for record in attempt_records if _normalized_path(record.get("model_path"))}
+    observations = workflow.get("tool_observations")
+    prediction_completed = (
+        str(workflow.get("task_type") or "") == "prediction"
+        and str(workflow.get("stage") or "") == "completed"
+        and isinstance(observations, list)
+        and any(isinstance(observation, Mapping) and observation.get("name") == "nir_predict" and observation.get("status") == "success" for observation in observations)
+    )
+    bound_prediction_model_path = _normalized_path(workflow.get("model_path"))
+    if prediction_completed and bound_prediction_model_path:
+        approved_model_paths.add(bound_prediction_model_path)
     for match in _MODEL_PATH_RE.finditer(response_text):
         if _normalized_path(match.group("path")) not in approved_model_paths:
             violations.append("artifact_path_mismatch:model")

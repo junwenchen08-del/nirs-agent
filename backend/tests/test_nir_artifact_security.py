@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -10,8 +11,10 @@ from nir_core.models import PreprocessingStep
 from nir_core.preprocess.pipeline import PreprocessingPipeline
 
 from deerflow.community.nir._common import (
+    _bind_model_metrics,
     _load_npz_safely,
     _load_trusted_model_artifact,
+    _verify_trusted_model_bundle,
     _write_trusted_model_artifact,
 )
 from deerflow.community.nir.artifacts import _build_model_artifact
@@ -61,6 +64,89 @@ def test_model_loader_round_trips_verified_output(tmp_path: Path) -> None:
     loaded = _load_trusted_model_artifact(str(path), "/mnt/user-data/outputs/model.pkl")
 
     assert loaded == expected
+
+
+def _write_bound_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, signing_key: str | None = None) -> tuple[Path, Path, str]:
+    if signing_key is None:
+        monkeypatch.delenv("NIR_ARTIFACT_SIGNING_KEY", raising=False)
+    else:
+        monkeypatch.setenv("NIR_ARTIFACT_SIGNING_KEY", signing_key)
+    model_path = tmp_path / "model.pkl"
+    metrics_path = tmp_path / "metrics.json"
+    training_hash = "a" * 64
+    _write_trusted_model_artifact({"format": "nir_model_artifact", "value": 11}, str(model_path))
+    metrics_path.write_text(json.dumps({"training_data_hash": training_hash}), encoding="utf-8")
+    _bind_model_metrics(str(model_path), str(metrics_path), training_data_hash=training_hash)
+    return model_path, metrics_path, training_hash
+
+
+def test_bundle_verifier_checks_model_metrics_and_training_binding_before_load(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_path, metrics_path, training_hash = _write_bound_bundle(tmp_path, monkeypatch)
+
+    verified = _verify_trusted_model_bundle(
+        str(model_path),
+        str(metrics_path),
+        virtual_model_path="/mnt/user-data/outputs/model.pkl",
+    )
+
+    assert verified["model_sha256"] == json.loads((tmp_path / "model.pkl.manifest.json").read_text(encoding="utf-8"))["sha256"]
+    assert verified["training_data_sha256"] == training_hash
+    assert verified["metrics"]["training_data_hash"] == training_hash
+
+
+@pytest.mark.parametrize("tampered_file", ["model", "metrics", "manifest"])
+def test_bundle_verifier_rejects_each_tampered_component(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tampered_file: str,
+) -> None:
+    model_path, metrics_path, _training_hash = _write_bound_bundle(tmp_path, monkeypatch)
+    if tampered_file == "model":
+        model_path.write_bytes(model_path.read_bytes() + b"tampered")
+    elif tampered_file == "metrics":
+        metrics_path.write_text('{"training_data_hash":"' + ("b" * 64) + '"}', encoding="utf-8")
+    else:
+        manifest_path = tmp_path / "model.pkl.manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["training_data_sha256"] = "b" * 64
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        _verify_trusted_model_bundle(str(model_path), str(metrics_path))
+
+
+def test_bundle_verifier_requires_both_signatures_under_signed_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_path, metrics_path, _training_hash = _write_bound_bundle(tmp_path, monkeypatch)
+    monkeypatch.setenv("NIR_ARTIFACT_SIGNING_KEY", "deployment-secret")
+    monkeypatch.setenv("NIR_REQUIRE_SIGNED_ARTIFACTS", "1")
+
+    with pytest.raises(ValueError, match="signed NIR model bundle"):
+        _verify_trusted_model_bundle(str(model_path), str(metrics_path))
+
+
+def test_bundle_verifier_validates_model_and_provenance_hmac(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_path, metrics_path, training_hash = _write_bound_bundle(
+        tmp_path,
+        monkeypatch,
+        signing_key="deployment-secret",
+    )
+    monkeypatch.setenv("NIR_REQUIRE_SIGNED_ARTIFACTS", "true")
+
+    verified = _verify_trusted_model_bundle(str(model_path), str(metrics_path))
+    assert verified["training_data_sha256"] == training_hash
+
+    monkeypatch.setenv("NIR_ARTIFACT_SIGNING_KEY", "wrong-secret")
+    with pytest.raises(ValueError, match="signature verification failed"):
+        _verify_trusted_model_bundle(str(model_path), str(metrics_path))
 
 
 def test_build_artifact_rejects_unfitted_stateful_pipeline() -> None:

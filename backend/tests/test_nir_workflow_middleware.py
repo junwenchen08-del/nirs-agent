@@ -97,6 +97,177 @@ def test_domain_tool_requires_started_workflow() -> None:
     assert payload["next_action"] == "start_workflow"
 
 
+@pytest.mark.parametrize("tool_name", ["nir_dataset_list", "nir_dataset_get", "nir_dataset_history", "nir_dataset_save", "nir_dataset_attach"])
+def test_dataset_library_tools_are_available_before_workflow_start(tool_name: str) -> None:
+    middleware = NIRWorkflowMiddleware()
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result(tool_name, {"status": "ok"})
+
+    result = middleware.wrap_tool_call(_request(tool_name, {}), handler)
+    assert called is True
+    assert isinstance(result, ToolMessage)
+
+
+@pytest.mark.parametrize("tool_name", ["nir_model_list", "nir_model_get", "nir_model_attach"])
+def test_model_reuse_tools_are_available_before_prediction_workflow_start(tool_name: str) -> None:
+    middleware = NIRWorkflowMiddleware()
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result(tool_name, {"status": "ok"})
+
+    result = middleware.wrap_tool_call(_request(tool_name, {}), handler)
+    assert called is True
+    assert isinstance(result, ToolMessage)
+
+
+def test_model_promotion_requires_registered_model_workflow() -> None:
+    middleware = NIRWorkflowMiddleware()
+    denied = middleware.wrap_tool_call(
+        _request("nir_model_promote", {"nir_workflow": {"stage": "approved", "task_type": "calibration"}}),
+        lambda _: _result("nir_model_promote", {"status": "ok"}),
+    )
+    assert isinstance(denied, Command)
+    assert json.loads(denied.update["messages"][0].content)["code"] == "nir_workflow_stage_denied"
+
+    allowed = middleware.wrap_tool_call(
+        _request("nir_model_promote", {"nir_workflow": {"stage": "registered", "task_type": "calibration"}}),
+        lambda _: _result("nir_model_promote", {"status": "ok"}),
+    )
+    assert isinstance(allowed, Command)
+    assert json.loads(allowed.update["messages"][0].content)["status"] == "ok"
+
+
+def test_dataset_attach_cannot_switch_input_after_data_audit_started() -> None:
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(task_type="calibration", data_path="/mnt/user-data/uploads/current.csv")
+    result = middleware.wrap_tool_call(
+        _request("nir_dataset_attach", {"nir_workflow": workflow}),
+        lambda _: _result("nir_dataset_attach", {"status": "ok"}),
+    )
+    assert isinstance(result, Command)
+    payload = json.loads(result.update["messages"][0].content)
+    assert payload["code"] == "nir_workflow_stage_denied"
+    assert payload["allowed_stages"] == ["clarification"]
+
+
+def _dataset_attach_result() -> ToolMessage:
+    return ToolMessage(
+        content=json.dumps(
+            {
+                "status": "ok",
+                "attachment_status": "attached",
+                "attachment_id": "use_one",
+                "dataset_id": "ds_one",
+                "profile_id": "dsp_one",
+                "workflow_project_id": "nir-project-one",
+                "source_sha256": "a" * 64,
+                "virtual_path": "/mnt/user-data/uploads/dataset.csv",
+            }
+        ),
+        tool_call_id="attach-1",
+        name="nir_dataset_attach",
+    )
+
+
+def test_workflow_start_requires_lineage_for_latest_dataset_attachment() -> None:
+    middleware = NIRWorkflowMiddleware()
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_workflow", {"status": "success"})
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "nir_workflow",
+            {"messages": [_dataset_attach_result()]},
+            args={
+                "action": "start",
+                "task_type": "calibration",
+                "project_id": "nir-project-one",
+                "data_path": "/mnt/user-data/uploads/dataset.csv",
+            },
+        ),
+        handler,
+    )
+
+    assert called is False
+    payload = json.loads(result.content)
+    assert payload["code"] == "nir_dataset_binding_invalid"
+    assert payload["details"]["action_required"] == "copy_all_lineage_fields_from_nir_dataset_attach"
+
+
+def test_workflow_start_accepts_exact_latest_dataset_attachment_lineage() -> None:
+    middleware = NIRWorkflowMiddleware()
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_workflow", {"status": "success"})
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "nir_workflow",
+            {"messages": [_dataset_attach_result()]},
+            args={
+                "action": "start",
+                "task_type": "calibration",
+                "project_id": "nir-project-one",
+                "data_path": "/mnt/user-data/uploads/dataset.csv",
+                "dataset_id": "ds_one",
+                "dataset_profile_id": "dsp_one",
+                "dataset_sha256": "a" * 64,
+                "dataset_attachment_id": "use_one",
+            },
+        ),
+        handler,
+    )
+
+    assert called is True
+    assert isinstance(result, ToolMessage)
+    assert json.loads(result.content)["status"] == "success"
+
+
+def test_workflow_start_rejects_forged_dataset_lineage_without_attachment() -> None:
+    middleware = NIRWorkflowMiddleware()
+    called = False
+
+    def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal called
+        called = True
+        return _result("nir_workflow", {"status": "success"})
+
+    result = middleware.wrap_tool_call(
+        _request(
+            "nir_workflow",
+            {"messages": []},
+            args={
+                "action": "start",
+                "task_type": "calibration",
+                "data_path": "/mnt/user-data/uploads/dataset.csv",
+                "dataset_id": "ds_one",
+                "dataset_sha256": "a" * 64,
+                "dataset_attachment_id": "use_one",
+            },
+        ),
+        handler,
+    )
+
+    assert called is False
+    payload = json.loads(result.content)
+    assert payload["code"] == "nir_dataset_binding_invalid"
+    assert payload["details"]["action_required"] == "attach_dataset_before_starting_workflow"
+
+
 def test_domain_tool_is_denied_outside_authorized_stage() -> None:
     middleware = NIRWorkflowMiddleware()
     workflow = start_workflow(

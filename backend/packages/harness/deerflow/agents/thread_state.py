@@ -63,6 +63,10 @@ class NIRWorkflowState(TypedDict):
     grouping_column: NotRequired[str | None]
     reference_method: NotRequired[str | None]
     data_path: NotRequired[str | None]
+    dataset_id: NotRequired[str | None]
+    dataset_profile_id: NotRequired[str | None]
+    dataset_sha256: NotRequired[str | None]
+    dataset_attachment_id: NotRequired[str | None]
     model_path: NotRequired[str | None]
     metrics_path: NotRequired[str | None]
     audit_evidence: NotRequired[dict | None]
@@ -174,6 +178,14 @@ def _merge_sibling_nir_workflows(existing: NIRWorkflowState, new: NIRWorkflowSta
     existing_score = _workflow_progress_score(existing)
     new_score = _workflow_progress_score(new)
     preferred = new if new_score > existing_score else existing
+    lineage_fields = (
+        "data_path",
+        "dataset_id",
+        "dataset_profile_id",
+        "dataset_sha256",
+        "dataset_attachment_id",
+    )
+    lineage_conflicts = [field for field in lineage_fields if existing.get(field) != new.get(field)]
     project_conflict_event = []
     if existing.get("project_id") != new.get("project_id"):
         project_conflict_event = [
@@ -185,7 +197,22 @@ def _merge_sibling_nir_workflows(existing: NIRWorkflowState, new: NIRWorkflowSta
             }
         ]
     merged = _merge_nir_workflow_evidence(preferred, existing, new)
-    merged["history"] = _dedupe_ordered([*(merged.get("history") or []), *project_conflict_event])[-_NIR_HISTORY_LIMIT:]
+    lineage_conflict_event = []
+    if lineage_conflicts:
+        # Source identity is a scientific and security boundary. A concurrent
+        # sibling update must never silently replace the bytes/profile bound
+        # to an active analysis, even when that update otherwise looks more
+        # progressed than its sibling.
+        merged["stage"] = "blocked"
+        merged["next_action"] = "report_best_effort"
+        lineage_conflict_event = [
+            {
+                "action": "dataset_lineage_conflict_blocked",
+                "conflicting_fields": lineage_conflicts,
+                "revision": preferred.get("revision"),
+            }
+        ]
+    merged["history"] = _dedupe_ordered([*(merged.get("history") or []), *project_conflict_event, *lineage_conflict_event])[-_NIR_HISTORY_LIMIT:]
     return merged  # type: ignore[return-value]
 
 

@@ -66,6 +66,18 @@ _CHEMOTOOLS_EXECUTION_TOOLS = frozenset(
         "chemotools_run_inspector",
     }
 )
+_DATASET_LIBRARY_TOOLS = frozenset(
+    {
+        "nir_dataset_list",
+        "nir_dataset_get",
+        "nir_dataset_history",
+        "nir_dataset_save",
+        "nir_dataset_attach",
+    }
+)
+_MODEL_REUSE_TOOLS = frozenset({"nir_model_list", "nir_model_get", "nir_model_attach"})
+_DATASET_READ_STAGES = frozenset({"clarification", "data_audit", "planning", "execution", "evaluation", "knowledge", "review", "approved", "registered", "completed", "blocked"})
+_ALL_NIR_TASKS = frozenset({*_DATA_TASKS, "knowledge"})
 
 _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_load_data": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
@@ -84,6 +96,15 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_reflect": _ToolPolicy(frozenset({"evaluation"}), _MODEL_TASKS),
     "nir_search_knowledge": _ToolPolicy(frozenset({"execution", "knowledge"}), frozenset({"knowledge", *_MODEL_TASKS})),
     "nir_register_model": _ToolPolicy(frozenset({"approved"}), _MODEL_TASKS),
+    "nir_dataset_list": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
+    "nir_dataset_get": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
+    "nir_dataset_history": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
+    "nir_dataset_save": _ToolPolicy(frozenset({"clarification", "data_audit"}), _DATA_TASKS),
+    "nir_dataset_attach": _ToolPolicy(frozenset({"clarification"}), _DATA_TASKS),
+    "nir_model_list": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
+    "nir_model_get": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
+    "nir_model_attach": _ToolPolicy(frozenset({"clarification"}), frozenset({"prediction"})),
+    "nir_model_promote": _ToolPolicy(frozenset({"registered"}), _MODEL_TASKS),
     **{
         name: _ToolPolicy(
             frozenset({"planning", "execution", "evaluation", "knowledge", "approved"}),
@@ -236,6 +257,59 @@ def _denied_message(
         name=tool_name,
         status="error",
     )
+
+
+def _deny_invalid_dataset_start_binding(request: ToolCallRequest) -> ToolMessage | None:
+    if str(request.tool_call.get("name", "")) != "nir_workflow":
+        return None
+    args = request.tool_call.get("args")
+    args = args if isinstance(args, Mapping) else {}
+    if str(args.get("action", "")).strip().lower() != "start":
+        return None
+    lineage_keys = ("dataset_id", "dataset_profile_id", "dataset_sha256", "dataset_attachment_id")
+    requested_lineage = any(args.get(key) is not None for key in lineage_keys)
+    latest_attachment: Mapping[str, Any] | None = None
+    messages = _state_from_request(request).get("messages")
+    if isinstance(messages, list):
+        for message in reversed(messages):
+            if not isinstance(message, ToolMessage) or message.name != "nir_dataset_attach":
+                continue
+            try:
+                payload = json.loads(message_content_to_text(message.content))
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, Mapping) and payload.get("status") == "ok" and payload.get("attachment_status") == "attached":
+                latest_attachment = payload
+                break
+    requested_path = str(args.get("data_path") or "")
+    uses_latest_path = bool(latest_attachment and requested_path == str(latest_attachment.get("virtual_path") or ""))
+    if not requested_lineage and not uses_latest_path:
+        return None
+    if latest_attachment is None:
+        return _denied_message(
+            request,
+            code="nir_dataset_binding_invalid",
+            error="Saved Dataset lineage must come from a successful nir_dataset_attach result in this thread.",
+            workflow=None,
+            details={"action_required": "attach_dataset_before_starting_workflow"},
+        )
+    expected = {
+        "project_id": latest_attachment.get("workflow_project_id"),
+        "data_path": latest_attachment.get("virtual_path"),
+        "dataset_id": latest_attachment.get("dataset_id"),
+        "dataset_profile_id": latest_attachment.get("profile_id"),
+        "dataset_sha256": latest_attachment.get("source_sha256"),
+        "dataset_attachment_id": latest_attachment.get("attachment_id"),
+    }
+    if any(args.get(key) != value for key, value in expected.items()):
+        return _denied_message(
+            request,
+            code="nir_dataset_binding_invalid",
+            error="Workflow Dataset lineage does not match the latest verified attachment.",
+            workflow=None,
+            details={"action_required": "copy_all_lineage_fields_from_nir_dataset_attach"},
+        )
+    return None
 
 
 def _requested_model_method(request: ToolCallRequest) -> str | None:
@@ -627,6 +701,8 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
     workflow = _state_from_request(request).get("nir_workflow")
     args = request.tool_call.get("args")
     args = args if isinstance(args, Mapping) else {}
+    if dataset_binding_denial := _deny_invalid_dataset_start_binding(request):
+        return dataset_binding_denial
     if isinstance(workflow, Mapping) and tool_name in {"read_file", "read_file_tool"}:
         requested_path = str(args.get("path") or args.get("file_path") or "").replace("\\", "/")
         workflow_path = str(workflow.get("data_path") or "").replace("\\", "/")
@@ -678,6 +754,10 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
         return None
 
     if not isinstance(workflow, Mapping):
+        # Library discovery/save/attach precedes workflow start: attach must
+        # produce the virtual path that nir_workflow(action="start") binds.
+        if tool_name in _DATASET_LIBRARY_TOOLS or tool_name in _MODEL_REUSE_TOOLS:
+            return None
         return _denied_message(
             request,
             code="nir_workflow_required",

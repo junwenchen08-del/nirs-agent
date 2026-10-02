@@ -20,7 +20,7 @@
 # ============================================================================
 # Bump this number when the config schema changes.
 # Run `make config-upgrade` to merge new fields into your local config.yaml.
-config_version: 18
+config_version: 21
 
 # ============================================================================
 # Logging
@@ -861,6 +861,42 @@ tools:
     group: bash
     use: deerflow.community.nir.workflow:nir_workflow_tool
 
+  - name: nir_dataset_list
+    group: bash
+    use: deerflow.community.nir.dataset_tools:nir_dataset_list_tool
+
+  - name: nir_dataset_get
+    group: bash
+    use: deerflow.community.nir.dataset_tools:nir_dataset_get_tool
+
+  - name: nir_dataset_history
+    group: bash
+    use: deerflow.community.nir.dataset_tools:nir_dataset_history_tool
+
+  - name: nir_dataset_save
+    group: bash
+    use: deerflow.community.nir.dataset_tools:nir_dataset_save_tool
+
+  - name: nir_dataset_attach
+    group: bash
+    use: deerflow.community.nir.dataset_tools:nir_dataset_attach_tool
+
+  - name: nir_model_list
+    group: bash
+    use: deerflow.community.nir.model_tools:nir_model_list_tool
+
+  - name: nir_model_get
+    group: bash
+    use: deerflow.community.nir.model_tools:nir_model_get_tool
+
+  - name: nir_model_promote
+    group: bash
+    use: deerflow.community.nir.model_tools:nir_model_promote_tool
+
+  - name: nir_model_attach
+    group: bash
+    use: deerflow.community.nir.model_tools:nir_model_attach_tool
+
   - name: nir_load_data
     group: bash
     use: deerflow.community.nir.io_tools:nir_load_data_tool
@@ -1488,6 +1524,27 @@ skill_evolution:
 database:
   backend: sqlite
   sqlite_dir: .deer-flow/data
+
+# ============================================================================
+# NIR Dataset/Model Library (optional)
+# ============================================================================
+# Provides owner-scoped APIs, Agent tools and web pages for explicitly saving
+# immutable thread uploads, versioned parsing profiles, verified cross-thread
+# dataset attach, promotion/attach of approved registered model packages, and
+# controlled archive-then-delete capacity reclamation. Keep disabled unless the
+# deployment needs cross-session reuse and its database plus asset volume are
+# backed up together. The 15 GiB value is an admission gate for *new library
+# writes*, not a strict limit on ordinary uploads, attached thread copies, or
+# sandbox output. Enabling requires a persistent sqlite/postgres DB.
+nir_library:
+  enabled: false
+  max_dataset_file_size: 52428800
+  max_user_dataset_bytes: 5368709120
+  max_user_model_bytes: 5368709120
+  max_total_bytes_for_library_writes: 16106127360
+  max_model_versions_per_id: 20
+  min_free_disk_bytes: 2147483648
+  staging_ttl_hours: 24
 
 # ============================================================================
 # Run Events Configuration

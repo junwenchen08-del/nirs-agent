@@ -1,6 +1,12 @@
 "use client";
 
-import { ActivityIcon, BotIcon, MessagesSquare } from "lucide-react";
+import {
+  ActivityIcon,
+  BotIcon,
+  BoxesIcon,
+  DatabaseIcon,
+  MessagesSquare,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -17,11 +23,13 @@ import {
 } from "@/components/ui/tooltip";
 import { useAgentsApiEnabled } from "@/core/agents";
 import { useI18n } from "@/core/i18n/hooks";
+import { useNirLibraryEnabled } from "@/core/nir-library";
 
 export function WorkspaceNavChatList() {
   const { t } = useI18n();
   const pathname = usePathname();
   const { enabled: agentsEnabled } = useAgentsApiEnabled();
+  const { enabled: nirLibraryEnabled } = useNirLibraryEnabled();
   return (
     <SidebarGroup className="pt-1">
       <SidebarMenu>
@@ -33,6 +41,38 @@ export function WorkspaceNavChatList() {
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>
+        {nirLibraryEnabled && (
+          <>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={pathname.startsWith("/workspace/nir/datasets")}
+                asChild
+              >
+                <Link
+                  className="text-muted-foreground"
+                  href="/workspace/nir/datasets"
+                >
+                  <DatabaseIcon />
+                  <span>{t.sidebar.nirDatasets}</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={pathname.startsWith("/workspace/nir/models")}
+                asChild
+              >
+                <Link
+                  className="text-muted-foreground"
+                  href="/workspace/nir/models"
+                >
+                  <BoxesIcon />
+                  <span>{t.sidebar.nirModels}</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </>
+        )}
         <SidebarMenuItem>
           {agentsEnabled ? (
             <SidebarMenuButton

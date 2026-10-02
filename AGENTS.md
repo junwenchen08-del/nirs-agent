@@ -208,6 +208,18 @@ middleware persists the attempt and rejects plan finalization plus
 `nir_preprocess`/modeling tools when it is missing; a recorded MCP failure
 permits the governed native fallback.
 
+The default `/workspace/chats/{thread_id}` page conditionally exposes a compact
+NIR workflow Sheet. Live `thread.values.nir_workflow` is authoritative; when an
+older thread's restored stream omits that field, the page uses the existing
+owner-checked `/api/threads/{thread_id}/state` endpoint as a fallback. Same-project
+snapshots merge by revision and a live different-project state always wins. The
+frontend's `core/nir` selector is the privacy and compatibility boundary: it
+accepts old optional fields, allowlists and bounds metrics/strings/pipeline
+steps, shows only a shortened dataset hash, and excludes artifact paths and raw
+evidence. The panel is a current-thread summary, not persistent cross-thread
+history, and is intentionally absent from ordinary chats and the custom-agent
+chat route.
+
 Chemotools 0.4.4 is also exposed as a first-party stdio MCP component at
 `nir_core.chemotools_mcp.chemotools_server`; the example extensions config enables it by
 default. Its allowlisted catalog is generated from the pinned package's public
@@ -230,6 +242,29 @@ transfer artifacts under `/mnt/user-data/outputs`. Spectral-only improvement is
 `model_validated_internal`. Production approval additionally requires a
 non-overlapping independent paired validation set, a bound trusted reference
 model, and improved validation RMSEP.
+
+The cross-session NIR asset library remains disabled by default.
+`deerflow.community.nir.datasets.DatasetService` explicitly
+saves owner-matched thread CSV/TXT/MAT uploads as immutable, hash-verified assets
+with versioned interpretation Profiles. Batch D adds owner-checked, idempotent
+Dataset Attach into a target thread's uploads, `nir_dataset_*` Agent tools,
+`nir_dataset_uses`, and workflow lineage binding. The Agent must run a fresh
+`nir_inspect`; prior conclusions are never inherited, and concurrent lineage
+conflicts block the workflow. `nir_inspect` never saves automatically. Batch F
+adds `nir_model_versions`, explicit approved-and-registered Model Promotion,
+owner-scoped list/get/attach APIs and Agent tools, full model/metrics/training
+binding verification, and prediction-compatible copies under a new thread's
+`outputs/models/`. Promotion is not automatic, exact `validation_scope` values
+are preserved, and old direct-upload training may keep null Dataset/Profile
+lineage. Batch G adds feature-gated `/workspace/nir/datasets` and
+`/workspace/nir/models` pages plus controlled physical reclamation. Dataset or
+model deletion requires archive first and an exact-ID confirmation; active and
+archived model references block Dataset deletion, deleted rows remain as SQL
+tombstones, and copies already attached to threads are deliberately retained.
+The storage UI distinguishes persistent Dataset/Model bytes, thread-copy bytes,
+the new-write admission threshold, and free disk; it never calls that threshold
+a strict whole-system quota. See `backend/AGENTS.md` and `frontend/AGENTS.md` for
+the exact service and browser boundaries.
 
 The NIR retrieval knowledge base keeps vectors in ChromaDB and document
 governance in a lightweight SQLite catalog. Governed ingestion derives stable

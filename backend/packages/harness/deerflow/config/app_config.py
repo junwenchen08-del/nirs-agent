@@ -21,6 +21,7 @@ from deerflow.config.guardrails_config import GuardrailsConfig, load_guardrails_
 from deerflow.config.loop_detection_config import LoopDetectionConfig
 from deerflow.config.memory_config import MemoryConfig, load_memory_config_from_dict
 from deerflow.config.model_config import ModelConfig
+from deerflow.config.nir_library_config import NIRLibraryConfig
 from deerflow.config.reload_boundary import format_field_description
 from deerflow.config.run_events_config import RunEventsConfig
 from deerflow.config.runtime_paths import existing_project_file
@@ -158,6 +159,7 @@ class AppConfig(BaseModel):
     title: TitleConfig = Field(default_factory=TitleConfig, description="Automatic title generation configuration")
     summarization: SummarizationConfig = Field(default_factory=SummarizationConfig, description="Conversation summarization configuration")
     memory: MemoryConfig = Field(default_factory=MemoryConfig, description="Memory subsystem configuration")
+    nir_library: NIRLibraryConfig = Field(default_factory=NIRLibraryConfig, description="Disabled-by-default persistent NIR asset-library policy.")
     agents_api: AgentsApiConfig = Field(default_factory=AgentsApiConfig, description="Custom-agent management API configuration")
     acp_agents: dict[str, ACPAgentConfig] = Field(default_factory=dict, description="ACP-compatible agent configuration")
     subagents: SubagentsAppConfig = Field(default_factory=SubagentsAppConfig, description="Subagent runtime configuration")
@@ -236,6 +238,12 @@ class AppConfig(BaseModel):
         if isinstance(data, dict):
             return {key: value for key, value in data.items() if value is not None}
         return data
+
+    @model_validator(mode="after")
+    def _require_persistent_nir_library_database(self) -> Self:
+        if self.nir_library.enabled and self.database.backend == "memory":
+            raise ValueError("nir_library.enabled requires a persistent database (sqlite or postgres)")
+        return self
 
     @classmethod
     def resolve_config_path(cls, config_path: str | None = None) -> Path:

@@ -15,6 +15,7 @@ import hmac
 import json
 import logging
 import os
+import stat
 from pathlib import Path, PurePosixPath
 
 import numpy as np
@@ -121,6 +122,69 @@ def _artifact_digest(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _regular_file_identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
+def _read_regular_bytes(path: Path, *, label: str, limit: int) -> bytes:
+    """Read one bounded regular file without following a replaceable symlink."""
+
+    try:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} is not a regular file.")
+        if before.st_size > limit:
+            raise ValueError(f"{label} exceeds the supported size limit.")
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        with os.fdopen(os.open(path, flags), "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if _regular_file_identity(opened) != _regular_file_identity(before):
+                raise ValueError(f"{label} changed during verification.")
+            payload = handle.read(limit + 1)
+            after_open = os.fstat(handle.fileno())
+        after_path = path.lstat()
+    except FileNotFoundError as exc:
+        raise ValueError(f"{label} is missing.") from exc
+    except OSError as exc:
+        raise ValueError(f"{label} could not be read safely.") from exc
+    if len(payload) > limit:
+        raise ValueError(f"{label} exceeds the supported size limit.")
+    if _regular_file_identity(before) != _regular_file_identity(after_open) or _regular_file_identity(before) != _regular_file_identity(after_path):
+        raise ValueError(f"{label} changed during verification.")
+    return payload
+
+
+def _regular_file_digest(path: Path, *, label: str) -> tuple[str, int]:
+    """Hash one regular file through the same descriptor that was validated."""
+
+    try:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} is not a regular file.")
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        with os.fdopen(os.open(path, flags), "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if _regular_file_identity(opened) != _regular_file_identity(before):
+                raise ValueError(f"{label} changed during verification.")
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+            after_open = os.fstat(handle.fileno())
+        after_path = path.lstat()
+    except FileNotFoundError as exc:
+        raise ValueError(f"{label} is missing.") from exc
+    except OSError as exc:
+        raise ValueError(f"{label} could not be read safely.") from exc
+    if _regular_file_identity(before) != _regular_file_identity(after_open) or _regular_file_identity(before) != _regular_file_identity(after_path):
+        raise ValueError(f"{label} changed during verification.")
+    return digest, before.st_size
+
+
+def _sha256_value(value: object, *, label: str) -> str:
+    normalized = str(value or "").lower()
+    if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
+        raise ValueError(f"{label} is not a SHA-256 digest.")
+    return normalized
 
 
 def _sha256_file(path: str) -> str:
@@ -248,6 +312,109 @@ def _model_evidence(
         "model_sha256": _artifact_digest(Path(real_model_path)),
         "metrics_sha256": _artifact_digest(Path(real_metrics_path)),
         "training_data_sha256": str(training_data_hash).lower(),
+    }
+
+
+def _verify_trusted_model_bundle(
+    real_model_path: str,
+    real_metrics_path: str,
+    *,
+    virtual_model_path: str | None = None,
+    expected_model_sha256: str | None = None,
+    expected_metrics_sha256: str | None = None,
+    expected_training_data_sha256: str | None = None,
+) -> dict[str, object]:
+    """Verify a complete model/metrics/manifest bundle without deserializing it.
+
+    Promotion and cross-session attachment call this boundary before any copy
+    is accepted.  It intentionally does not call ``joblib.load``.
+    """
+
+    if virtual_model_path is not None:
+        virtual = PurePosixPath(virtual_model_path.replace("\\", "/"))
+        if virtual.parts[:4] != _MODEL_OUTPUT_PREFIX:
+            raise ValueError("Untrusted model path: model bundles must originate under /mnt/user-data/outputs.")
+
+    model_path = Path(real_model_path)
+    metrics_path = Path(real_metrics_path)
+    manifest_path = _model_manifest_path(real_model_path)
+    manifest_bytes = _read_regular_bytes(manifest_path, label="Model integrity manifest", limit=64 * 1024)
+    try:
+        manifest = json.loads(manifest_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid model integrity manifest.") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1 or manifest.get("artifact_type") != "nir_model_artifact":
+        raise ValueError("Unsupported model integrity manifest.")
+
+    manifest_model_hash = _sha256_value(manifest.get("sha256"), label="Manifest model hash")
+    actual_model_hash, model_size = _regular_file_digest(model_path, label="Model artifact")
+    if not hmac.compare_digest(manifest_model_hash, actual_model_hash):
+        raise ValueError("Model artifact integrity check failed.")
+    if manifest.get("size_bytes") != model_size:
+        raise ValueError("Model artifact size does not match its integrity manifest.")
+
+    metrics_bytes = _read_regular_bytes(metrics_path, label="Model metrics", limit=16 * 1024 * 1024)
+    actual_metrics_hash = hashlib.sha256(metrics_bytes).hexdigest()
+    manifest_metrics_hash = _sha256_value(manifest.get("metrics_sha256"), label="Manifest metrics hash")
+    if not hmac.compare_digest(manifest_metrics_hash, actual_metrics_hash):
+        raise ValueError("Model metrics integrity check failed.")
+    try:
+        metrics = json.loads(metrics_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid model metrics JSON.") from exc
+    if not isinstance(metrics, dict):
+        raise ValueError("Model metrics must contain a JSON object.")
+
+    manifest_training_hash = _sha256_value(manifest.get("training_data_sha256"), label="Manifest training-data hash")
+    metrics_training_hash = _sha256_value(metrics.get("training_data_hash"), label="Metrics training-data hash")
+    if not hmac.compare_digest(manifest_training_hash, metrics_training_hash):
+        raise ValueError("Model and metrics reference different training data.")
+
+    signing_key = os.environ.get("NIR_ARTIFACT_SIGNING_KEY")
+    require_signed = os.environ.get("NIR_REQUIRE_SIGNED_ARTIFACTS", "").strip().lower() in {"1", "true", "yes"}
+    model_signature = manifest.get("hmac_sha256")
+    provenance_signature = manifest.get("provenance_hmac_sha256")
+    if require_signed and (not signing_key or not isinstance(model_signature, str) or not isinstance(provenance_signature, str)):
+        raise ValueError("A signed NIR model bundle is required, including model and provenance signatures.")
+    if model_signature is not None or provenance_signature is not None:
+        if not signing_key:
+            raise ValueError("Model bundle is signed, but NIR_ARTIFACT_SIGNING_KEY is not configured.")
+        expected_model_signature = hmac.new(
+            signing_key.encode("utf-8"),
+            actual_model_hash.encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest()
+        binding = f"{actual_model_hash}:{actual_metrics_hash}:{manifest_training_hash}"
+        expected_provenance_signature = hmac.new(
+            signing_key.encode("utf-8"),
+            binding.encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not isinstance(model_signature, str) or not hmac.compare_digest(model_signature, expected_model_signature):
+            raise ValueError("Model artifact signature verification failed.")
+        if not isinstance(provenance_signature, str) or not hmac.compare_digest(provenance_signature, expected_provenance_signature):
+            raise ValueError("Model provenance signature verification failed.")
+
+    expected_values = (
+        (expected_model_sha256, actual_model_hash, "approved model hash"),
+        (expected_metrics_sha256, actual_metrics_hash, "approved metrics hash"),
+        (expected_training_data_sha256, manifest_training_hash, "approved training-data hash"),
+    )
+    for expected, actual, label in expected_values:
+        if expected is None:
+            continue
+        normalized = _sha256_value(expected, label=label)
+        if not hmac.compare_digest(normalized, actual):
+            raise ValueError(f"The {label} does not match the verified model bundle.")
+
+    return {
+        "model_sha256": actual_model_hash,
+        "metrics_sha256": actual_metrics_hash,
+        "training_data_sha256": manifest_training_hash,
+        "model_size_bytes": model_size,
+        "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "manifest": manifest,
+        "metrics": metrics,
     }
 
 

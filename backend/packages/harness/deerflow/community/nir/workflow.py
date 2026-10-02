@@ -90,6 +90,10 @@ _AGENT_VIEW_FIELDS = (
     "grouping_column",
     "reference_method",
     "data_path",
+    "dataset_id",
+    "dataset_profile_id",
+    "dataset_sha256",
+    "dataset_attachment_id",
     "model_path",
     "metrics_path",
     "audit_evidence",
@@ -628,6 +632,10 @@ def start_workflow(
     task_type: str,
     project_id: str | None = None,
     data_path: str | None = None,
+    dataset_id: str | None = None,
+    dataset_profile_id: str | None = None,
+    dataset_sha256: str | None = None,
+    dataset_attachment_id: str | None = None,
     model_path: str | None = None,
     domain: str | None = None,
     analyte: str | None = None,
@@ -645,6 +653,16 @@ def start_workflow(
         raise NIRWorkflowError(f"Unsupported task_type {task_type!r}; expected one of {sorted(_SUPPORTED_TASK_TYPES)}")
     if not 1 <= max_attempts <= 10:
         raise NIRWorkflowError("max_attempts must be between 1 and 10")
+    binding_values = (dataset_id, dataset_profile_id, dataset_sha256, dataset_attachment_id)
+    if any(value is not None for value in binding_values):
+        if not all((data_path, dataset_id, dataset_sha256, dataset_attachment_id)):
+            raise NIRWorkflowError("Dataset lineage requires data_path, dataset_id, dataset_sha256, and dataset_attachment_id")
+        normalized_sha = str(dataset_sha256).lower()
+        if len(normalized_sha) != 64 or any(character not in "0123456789abcdef" for character in normalized_sha):
+            raise NIRWorkflowError("dataset_sha256 must be a SHA-256 digest")
+        if not str(data_path).replace("\\", "/").startswith("/mnt/user-data/uploads/"):
+            raise NIRWorkflowError("A saved Dataset workflow must use the attached thread uploads path")
+        dataset_sha256 = normalized_sha
 
     normalized_requirements = _requirement_updates(
         data_path=data_path,
@@ -672,6 +690,10 @@ def start_workflow(
         "grouping_column": normalized_requirements.get("grouping_column"),
         "reference_method": normalized_requirements.get("reference_method"),
         "data_path": normalized_requirements.get("data_path"),
+        "dataset_id": dataset_id,
+        "dataset_profile_id": dataset_profile_id,
+        "dataset_sha256": dataset_sha256,
+        "dataset_attachment_id": dataset_attachment_id,
         "model_path": normalized_requirements.get("model_path"),
         "metrics_path": None,
         "audit_evidence": None,
@@ -1260,6 +1282,10 @@ def nir_workflow_tool(
     task_type: str | None = None,
     project_id: str | None = None,
     data_path: str | None = None,
+    dataset_id: str | None = None,
+    dataset_profile_id: str | None = None,
+    dataset_sha256: str | None = None,
+    dataset_attachment_id: str | None = None,
     model_path: str | None = None,
     metrics_path: str | None = None,
     domain: str | None = None,
@@ -1300,6 +1326,10 @@ def nir_workflow_tool(
             classification, prediction, inspection, or knowledge.
         project_id: Optional stable identifier for a new workflow.
         data_path: Input spectral data path.
+        dataset_id: Optional saved Dataset ID from the immediately preceding verified attachment.
+        dataset_profile_id: Optional confirmed Profile ID bound by that attachment.
+        dataset_sha256: Optional attached source SHA-256 returned by nir_dataset_attach.
+        dataset_attachment_id: Optional attachment ID returned by nir_dataset_attach.
         model_path: Model artifact path.
         metrics_path: Metrics artifact path for a completed attempt.
         domain: NIR application domain.
@@ -1345,6 +1375,10 @@ def nir_workflow_tool(
                 task_type=task_type,
                 project_id=project_id,
                 data_path=data_path,
+                dataset_id=dataset_id,
+                dataset_profile_id=dataset_profile_id,
+                dataset_sha256=dataset_sha256,
+                dataset_attachment_id=dataset_attachment_id,
                 model_path=model_path,
                 domain=domain,
                 analyte=analyte,

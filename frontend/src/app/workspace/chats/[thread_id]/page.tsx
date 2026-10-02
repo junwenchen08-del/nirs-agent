@@ -19,6 +19,7 @@ import {
   MESSAGE_LIST_DEFAULT_PADDING_BOTTOM,
 } from "@/components/workspace/messages";
 import { ThreadContext } from "@/components/workspace/messages/context";
+import { NIRWorkflowPanel } from "@/components/workspace/nir";
 import { ThreadTitle } from "@/components/workspace/thread-title";
 import { TodoList } from "@/components/workspace/todo-list";
 import { TokenUsageIndicator } from "@/components/workspace/token-usage-indicator";
@@ -26,6 +27,7 @@ import { useActiveGoal } from "@/components/workspace/use-active-goal";
 import { Welcome } from "@/components/workspace/welcome";
 import { useI18n } from "@/core/i18n/hooks";
 import { useModels } from "@/core/models/hooks";
+import { useNIRWorkflow } from "@/core/nir";
 import { useNotification } from "@/core/notification/hooks";
 import { useLocalSettings, useThreadSettings } from "@/core/settings";
 import {
@@ -121,6 +123,10 @@ export default function ChatPage() {
       }
     },
   });
+  const nirWorkflow = useNIRWorkflow(
+    isNewThread || isMock ? undefined : threadId,
+    thread.values.nir_workflow,
+  );
 
   const hasThreadMessages = thread.messages.length > 0;
 
@@ -194,6 +200,7 @@ export default function ChatPage() {
               <ThreadTitle threadId={threadId} thread={thread} />
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <NIRWorkflowPanel workflow={nirWorkflow} />
               <TokenUsageIndicator
                 threadId={isNewThread ? undefined : threadId}
                 backendUsage={backendTokenUsage}

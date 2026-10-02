@@ -12,8 +12,11 @@ VIRTUAL_PATH_PREFIX = "/mnt/user-data"
 
 _SAFE_THREAD_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 _SAFE_USER_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
+_SAFE_NIR_LIBRARY_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 _UNSAFE_USER_ID_CHAR_RE = re.compile(r"[^A-Za-z0-9_\-]")
 _SAFE_USER_ID_DIGEST_HEX_LEN = 16
+_MAX_NIR_LIBRARY_ID_LENGTH = 128
+_WINDOWS_RESERVED_NIR_IDS = {"con", "prn", "aux", "nul", *(f"com{index}" for index in range(1, 10)), *(f"lpt{index}" for index in range(1, 10))}
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,13 @@ def _validate_user_id(user_id: str) -> str:
     if not _SAFE_USER_ID_RE.match(user_id):
         raise ValueError(f"Invalid user_id {user_id!r}: only alphanumeric characters, hyphens, and underscores are allowed.")
     return user_id
+
+
+def _validate_nir_library_id(value: str) -> str:
+    """Validate a dataset/model/version identifier before path construction."""
+    if len(value) > _MAX_NIR_LIBRARY_ID_LENGTH or not _SAFE_NIR_LIBRARY_ID_RE.fullmatch(value) or value.lower() in _WINDOWS_RESERVED_NIR_IDS:
+        raise ValueError(f"Invalid NIR library identifier {value!r}: use 1-{_MAX_NIR_LIBRARY_ID_LENGTH} ASCII letters, digits, hyphens or underscores, excluding Windows device names.")
+    return value
 
 
 def make_safe_user_id(raw: str) -> str:
@@ -222,6 +232,22 @@ class Paths:
     def user_agent_memory_file(self, user_id: str, agent_name: str) -> Path:
         """Per-user per-agent memory: `{base_dir}/users/{user_id}/agents/{name}/memory.json`."""
         return self.user_agent_dir(user_id, agent_name) / "memory.json"
+
+    def user_nir_datasets_dir(self, user_id: str) -> Path:
+        """Per-user persistent NIR dataset root."""
+        return self.user_dir(user_id) / "nir-datasets"
+
+    def user_nir_dataset_dir(self, user_id: str, dataset_id: str) -> Path:
+        """Directory for one immutable user-owned NIR dataset asset."""
+        return self.user_nir_datasets_dir(user_id) / _validate_nir_library_id(dataset_id)
+
+    def user_nir_models_dir(self, user_id: str) -> Path:
+        """Per-user persistent NIR model root."""
+        return self.user_dir(user_id) / "nir-models"
+
+    def user_nir_model_version_dir(self, user_id: str, model_id: str, version: str) -> Path:
+        """Directory for one promoted user-owned NIR model version."""
+        return self.user_nir_models_dir(user_id) / _validate_nir_library_id(model_id) / _validate_nir_library_id(version)
 
     def thread_dir(self, thread_id: str, *, user_id: str | None = None) -> Path:
         """

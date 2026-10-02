@@ -31,6 +31,50 @@ def test_start_audits_data_before_asking_inferable_professional_requirements():
     assert state["next_action"] == "inspect_data"
 
 
+def test_start_workflow_persists_verified_dataset_lineage():
+    state = start_workflow(
+        task_type="calibration",
+        data_path="/mnt/user-data/uploads/dataset.csv",
+        dataset_id="ds_one",
+        dataset_profile_id="dsp_one",
+        dataset_sha256="A" * 64,
+        dataset_attachment_id="use_one",
+    )
+
+    assert state["dataset_id"] == "ds_one"
+    assert state["dataset_profile_id"] == "dsp_one"
+    assert state["dataset_sha256"] == "a" * 64
+    assert state["dataset_attachment_id"] == "use_one"
+
+
+@pytest.mark.parametrize(
+    "lineage",
+    [
+        {"dataset_id": "ds_one"},
+        {"dataset_id": "ds_one", "dataset_sha256": "a" * 64},
+        {
+            "dataset_id": "ds_one",
+            "dataset_sha256": "a" * 64,
+            "dataset_attachment_id": "use_one",
+        },
+    ],
+)
+def test_start_workflow_rejects_partial_dataset_lineage(lineage: dict[str, str]):
+    with pytest.raises(NIRWorkflowError, match="Dataset lineage requires"):
+        start_workflow(task_type="calibration", **lineage)
+
+
+def test_start_workflow_rejects_dataset_lineage_outside_thread_uploads():
+    with pytest.raises(NIRWorkflowError, match="attached thread uploads path"):
+        start_workflow(
+            task_type="calibration",
+            data_path="/tmp/dataset.csv",
+            dataset_id="ds_one",
+            dataset_sha256="a" * 64,
+            dataset_attachment_id="use_one",
+        )
+
+
 def test_classification_workflow_requires_label_context_but_not_regression_unit():
     state = start_workflow(
         task_type="classification",
@@ -604,6 +648,35 @@ def test_nir_workflow_reducer_collapses_same_revision_project_swap():
         "dropped_project_id": "project-b",
         "revision": existing["revision"],
     }
+
+
+def test_nir_workflow_reducer_blocks_same_revision_dataset_lineage_conflict():
+    existing = start_workflow(
+        task_type="calibration",
+        data_path="/mnt/user-data/uploads/one.csv",
+        dataset_id="ds_one",
+        dataset_sha256="a" * 64,
+        dataset_attachment_id="use_one",
+    )
+    conflicting = {
+        **existing,
+        "data_path": "/mnt/user-data/uploads/two.csv",
+        "dataset_id": "ds_two",
+        "dataset_sha256": "b" * 64,
+        "dataset_attachment_id": "use_two",
+    }
+
+    merged = merge_nir_workflow(existing, conflicting)
+
+    assert merged["stage"] == "blocked"
+    assert merged["next_action"] == "report_best_effort"
+    assert merged["history"][-1]["action"] == "dataset_lineage_conflict_blocked"
+    assert merged["history"][-1]["conflicting_fields"] == [
+        "data_path",
+        "dataset_id",
+        "dataset_sha256",
+        "dataset_attachment_id",
+    ]
 
 
 def test_thread_state_wires_nir_workflow_reducer():

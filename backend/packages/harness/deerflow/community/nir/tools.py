@@ -46,6 +46,13 @@ from .calibration_transfer import (
     nir_list_calibration_transfer_methods_tool,
 )
 from .classification import nir_train_classifier_tool
+from .dataset_tools import (
+    nir_dataset_attach_tool,
+    nir_dataset_get_tool,
+    nir_dataset_history_tool,
+    nir_dataset_list_tool,
+    nir_dataset_save_tool,
+)
 
 # Re-export every @tool function so ``deerflow.community.nir.tools:<name>``
 # paths in config.yaml keep working.
@@ -59,6 +66,7 @@ from .knowledge import (
     _search_knowledge_via_http,
     nir_search_knowledge_tool,
 )
+from .model_tools import nir_model_attach_tool, nir_model_get_tool, nir_model_list_tool, nir_model_promote_tool
 from .modeling import (
     nir_analyze_collection_tool,
     nir_analyze_tool,
@@ -82,10 +90,19 @@ from .workflow import nir_workflow_tool
 __all__ = [
     # Tools
     "nir_apply_calibration_transfer_tool",
+    "nir_dataset_attach_tool",
+    "nir_dataset_get_tool",
+    "nir_dataset_history_tool",
+    "nir_dataset_list_tool",
+    "nir_dataset_save_tool",
     "nir_evaluate_calibration_transfer_tool",
     "nir_fit_calibration_transfer_tool",
     "nir_list_calibration_transfer_methods_tool",
     "nir_load_data_tool",
+    "nir_model_attach_tool",
+    "nir_model_get_tool",
+    "nir_model_list_tool",
+    "nir_model_promote_tool",
     "nir_inspect_tool",
     "nir_preprocess_tool",
     "nir_align_wavelengths_tool",

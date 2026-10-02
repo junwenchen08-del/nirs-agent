@@ -25,6 +25,7 @@ class FeaturesResponse(BaseModel):
     """Frontend-facing feature availability flags."""
 
     agents_api: AgentsApiFeature
+    nir_library: AgentsApiFeature
 
 
 @router.get(
@@ -37,4 +38,5 @@ async def list_features(config: AppConfig = Depends(get_config)) -> FeaturesResp
     """Return availability of optional, config-gated frontend features."""
     return FeaturesResponse(
         agents_api=AgentsApiFeature(enabled=config.agents_api.enabled),
+        nir_library=AgentsApiFeature(enabled=config.nir_library.enabled),
     )

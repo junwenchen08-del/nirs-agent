@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import hashlib
 import json
@@ -58,11 +59,19 @@ def _approved_workflow(model_path: str, metrics_path: str, evidence: dict) -> di
 
 def test_nir_lifecycle_from_csv_to_registered_prediction_and_tamper_rejection(tmp_path: Path) -> None:
     """Exercise the deployable NIR path without replacing scientific components."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
     from deerflow.community.nir.io_tools import nir_load_data_tool, nir_predict_tool
     from deerflow.community.nir.modeling import (
         nir_register_model_tool,
         nir_train_model_tool,
     )
+    from deerflow.community.nir.models.service import ModelService
+    from deerflow.community.nir.workflow import transition_workflow
+    from deerflow.config.nir_library_config import NIRLibraryConfig
+    from deerflow.config.paths import Paths
+    from deerflow.persistence.base import Base
+    from deerflow.persistence.thread_meta.model import ThreadMetaRow
 
     rng = np.random.RandomState(20260721)
     n_samples, n_wavelengths = 96, 12
@@ -77,13 +86,15 @@ def test_nir_lifecycle_from_csv_to_registered_prediction_and_tamper_rejection(tm
     calibration_npz = tmp_path / "calibration.npz"
     clean_npz = tmp_path / "clean.npz"
     shifted_npz = tmp_path / "shifted.npz"
-    model_file = tmp_path / "outputs" / "model.pkl"
-    metrics_file = tmp_path / "outputs" / "metrics.json"
-    registry_file = tmp_path / "outputs" / "registry.json"
-    predictions_file = tmp_path / "outputs" / "predictions.csv"
-    prediction_audit_file = tmp_path / "outputs" / "prediction-audit.jsonl"
-    drift_state_file = tmp_path / "outputs" / "prediction-drift-state.json"
-    drift_alerts_file = tmp_path / "outputs" / "prediction-drift-alerts.jsonl"
+    library_paths = Paths(tmp_path / "library-home")
+    source_outputs = library_paths.sandbox_outputs_dir("source-thread", user_id="alice")
+    model_file = source_outputs / "model.pkl"
+    metrics_file = source_outputs / "metrics.json"
+    registry_file = source_outputs / "registry.json"
+    predictions_file = source_outputs / "predictions.csv"
+    prediction_audit_file = source_outputs / "prediction-audit.jsonl"
+    drift_state_file = source_outputs / "prediction-drift-state.json"
+    drift_alerts_file = source_outputs / "prediction-drift-alerts.jsonl"
     _write_calibration_csv(upload_csv, X, y, wv)
     np.savez(clean_npz, X=X[:8], wv=wv)
     spectral_shift = np.linspace(-20.0, 20.0, n_wavelengths)
@@ -168,6 +179,53 @@ def test_nir_lifecycle_from_csv_to_registered_prediction_and_tamper_rejection(tm
         assert registration_payload["status"] == "registered"
         assert registration_payload["n_versions"] == 1
 
+        registered_state = transition_workflow(approved_state, action="registered")
+
+        async def promote_and_attach() -> dict:
+            engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'e2e-model-library.db').as_posix()}")
+            try:
+                async with engine.begin() as connection:
+                    await connection.run_sync(Base.metadata.create_all)
+                service = ModelService(
+                    async_sessionmaker(engine, expire_on_commit=False),
+                    library_paths,
+                    NIRLibraryConfig(enabled=True, min_free_disk_bytes=0),
+                )
+                async with service.session_factory() as session:
+                    session.add_all(
+                        [
+                            ThreadMetaRow(thread_id="source-thread", user_id="alice", status="idle", metadata_json={}),
+                            ThreadMetaRow(thread_id="prediction-thread", user_id="alice", status="idle", metadata_json={}),
+                        ]
+                    )
+                    await session.commit()
+                promoted = await service.promote_registered(
+                    "alice",
+                    "source-thread",
+                    "e2e-synthetic-pls",
+                    registration_payload["version"],
+                    workflow=registered_state,
+                    source_run_id="e2e-run",
+                )
+                attached = await service.attach_to_thread(
+                    "alice",
+                    "e2e-synthetic-pls",
+                    registration_payload["version"],
+                    "prediction-thread",
+                )
+                assert attached["artifact_sha256"] == promoted["artifact_sha256"]
+                return attached
+            finally:
+                await engine.dispose()
+
+        attached = asyncio.run(promote_and_attach())
+        attached_model_file = library_paths.resolve_virtual_path(
+            "prediction-thread",
+            attached["model_path"],
+            user_id="alice",
+        )
+        resolved[attached["model_path"]] = str(attached_model_file)
+
         registry = json.loads(registry_file.read_text(encoding="utf-8"))
         record = registry["e2e-synthetic-pls"][0]
         metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
@@ -246,3 +304,22 @@ def test_nir_lifecycle_from_csv_to_registered_prediction_and_tamper_rejection(tm
         audit_events = [json.loads(line) for line in prediction_audit_file.read_text(encoding="utf-8").splitlines()]
         assert audit_events[-1]["status"] == "error"
         assert audit_events[-1]["error"]["type"] == "ValueError"
+
+        # The persistent copy remains independently usable after every source
+        # thread model/registry file is gone (and after the source was damaged).
+        for source_file in (model_file, Path(str(model_file) + ".manifest.json"), metrics_file, registry_file):
+            source_file.unlink(missing_ok=True)
+        target_audit = library_paths.sandbox_outputs_dir("prediction-thread", user_id="alice") / "prediction-audit.jsonl"
+        resolved[virtual["prediction_audit"]] = str(target_audit)
+        reused_payload = json.loads(
+            nir_predict_tool.func(
+                runtime=MagicMock(),
+                model_path=attached["model_path"],
+                data_path=virtual["clean"],
+                detect_drift=True,
+            )
+        )
+        assert reused_payload["status"] == "ok"
+        assert reused_payload["preprocessing"]["applied"] is True
+        assert reused_payload["drift"]["method"] == "pca_t2_q"
+        assert json.loads(target_audit.read_text(encoding="utf-8").splitlines()[-1])["status"] == "success"

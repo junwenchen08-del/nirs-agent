@@ -131,6 +131,8 @@ export interface Translations {
     agentsDisabledTooltip: string;
     channels: string;
     evaluations: string;
+    nirDatasets: string;
+    nirModels: string;
   };
 
   // Agents
@@ -177,6 +179,7 @@ export interface Translations {
     workspace: string;
     chats: string;
     evaluations: string;
+    nirLibrary: string;
   };
 
   // Workspace
@@ -191,6 +194,71 @@ export interface Translations {
     logout: string;
     gatewayUnavailable: string;
     gatewayUnavailableRetrying: string;
+  };
+
+  nirLibrary: {
+    datasetsTitle: string;
+    datasetsDescription: string;
+    modelsTitle: string;
+    modelsDescription: string;
+    featureDisabledTitle: string;
+    featureDisabledDescription: string;
+    refresh: string;
+    loading: string;
+    empty: string;
+    search: string;
+    saveDataset: string;
+    name: string;
+    sourceThread: string;
+    targetThread: string;
+    sourcePath: string;
+    saveConfirmation: string;
+    cancel: string;
+    save: string;
+    attach: string;
+    attached: string;
+    details: string;
+    rename: string;
+    archive: string;
+    delete: string;
+    permanentDelete: string;
+    deleteWarning: string;
+    deleteCopiesWarning: string;
+    typeExact: string;
+    status: string;
+    created: string;
+    size: string;
+    hash: string;
+    file: string;
+    version: string;
+    method: string;
+    validation: string;
+    validationInternal: string;
+    validationExternal: string;
+    productionNotApproved: string;
+    metrics: string;
+    source: string;
+    profile: string;
+    profiles: string;
+    history: string;
+    noProfiles: string;
+    noHistory: string;
+    createProfile: string;
+    taskType: string;
+    schemaStatus: string;
+    mappingJson: string;
+    confirmProfile: string;
+    invalidJson: string;
+    storageTitle: string;
+    datasetsStorage: string;
+    modelsStorage: string;
+    threadStorage: string;
+    accountedTotal: string;
+    admissionLimit: string;
+    diskFree: string;
+    notStrictQuota: string;
+    operationSuccess: string;
+    statuses: Record<string, string>;
   };
 
   nirEvaluations: {
@@ -354,6 +422,34 @@ export interface Translations {
     completeTodo: (content: string) => string;
     updateTodo: (content: string) => string;
     removeTodo: (content: string) => string;
+  };
+
+  // NIR workflow panel
+  nirWorkflow: {
+    title: string;
+    open: string;
+    description: string;
+    currentStage: string;
+    task: string;
+    attempt: (current: number, maximum: number) => string;
+    method: string;
+    preprocessing: string;
+    metrics: string;
+    validation: string;
+    approval: string;
+    source: string;
+    dataset: string;
+    profile: string;
+    hash: string;
+    nextAction: string;
+    revision: string;
+    notAvailable: string;
+    stages: Record<string, string>;
+    taskTypes: Record<string, string>;
+    validationGoals: Record<string, string>;
+    validationScopes: Record<string, string>;
+    approvals: Record<string, string>;
+    metricLabels: Record<string, string>;
   };
 
   // Shortcuts

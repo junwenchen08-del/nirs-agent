@@ -135,6 +135,40 @@ class TestUserAgentDir:
             paths.user_agent_dir("../escape", "myagent")
 
 
+class TestUserNIRLibraryDirs:
+    def test_user_nir_datasets_dir(self, paths: Paths):
+        expected = paths.base_dir / "users" / "alice" / "nir-datasets"
+        assert paths.user_nir_datasets_dir("alice") == expected
+
+    def test_user_nir_dataset_dir(self, paths: Paths):
+        expected = paths.base_dir / "users" / "alice" / "nir-datasets" / "ds_abc-123"
+        assert paths.user_nir_dataset_dir("alice", "ds_abc-123") == expected
+
+    def test_user_nir_models_dir(self, paths: Paths):
+        expected = paths.base_dir / "users" / "alice" / "nir-models"
+        assert paths.user_nir_models_dir("alice") == expected
+
+    def test_user_nir_model_version_dir(self, paths: Paths):
+        expected = paths.base_dir / "users" / "alice" / "nir-models" / "corn-moisture" / "v_001"
+        assert paths.user_nir_model_version_dir("alice", "corn-moisture", "v_001") == expected
+
+    @pytest.mark.parametrize(
+        ("method", "args"),
+        [
+            ("user_nir_dataset_dir", ("alice", "../escape")),
+            ("user_nir_dataset_dir", ("alice", "bad/name")),
+            ("user_nir_model_version_dir", ("alice", "../escape", "v1")),
+            ("user_nir_model_version_dir", ("alice", "model", "../escape")),
+            ("user_nir_dataset_dir", ("alice", "CON")),
+            ("user_nir_model_version_dir", ("alice", "nul", "v1")),
+            ("user_nir_model_version_dir", ("alice", "model", "LPT1")),
+        ],
+    )
+    def test_nir_library_ids_reject_path_traversal(self, paths: Paths, method: str, args: tuple[str, ...]):
+        with pytest.raises(ValueError, match="Invalid NIR library identifier"):
+            getattr(paths, method)(*args)
+
+
 class TestUserThreadDir:
     def test_user_thread_dir(self, paths: Paths):
         expected = paths.base_dir / "users" / "u1" / "threads" / "t1"

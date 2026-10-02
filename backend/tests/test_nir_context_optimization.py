@@ -82,6 +82,18 @@ def test_nir_skill_uses_compact_metrics_instead_of_full_report_reads() -> None:
     assert "用 `read_file` 读取 `report` 路径" not in text
 
 
+def test_nir_skill_keeps_persistent_save_and_prediction_loading_in_audit_stage() -> None:
+    coordinator = (REPO_ROOT / "skills/custom/nir-coordinator/SKILL.md").read_text(encoding="utf-8")
+    io_skill = (REPO_ROOT / "skills/custom/nir-io/SKILL.md").read_text(encoding="utf-8")
+
+    assert "调用 `record_audit` 前" in coordinator
+    assert "`nir_dataset_save`" in coordinator
+    assert "`nir_inspect`，若输入还" in coordinator
+    assert "仍处于 `data_audit` 时调用 `nir_load_data`" in coordinator
+    assert "不得先进入 `execution` 再尝试加载数据" in coordinator
+    assert "`nir_inspect` → `nir_dataset_save` → `record_audit`" in io_skill
+
+
 def test_runtime_context_retention_is_token_bounded() -> None:
     config = yaml.safe_load((REPO_ROOT / "config.yaml").read_text(encoding="utf-8"))
 

@@ -53,7 +53,7 @@ The frontend is a stateful chat application. Users create **threads** (conversat
   - `workspace/` — Chat page components (messages, artifacts, settings)
   - `landing/` — Landing page sections
   - `docs/` — Docs / MDX rendering components
-- **`core/`** — Business logic, the heart of the app. Domains include `threads/` (creation, streaming, state), `api/` (LangGraph client singleton), `agents/` (custom agents), `auth/` (authentication), `artifacts/`, `channels/` (IM connections), `i18n/` (en-US, zh-CN), `settings/`, `memory/`, `skills/`, `messages/`, `mcp/`, `models/`, `suggestions/`, `tasks/`, `todos/`, `tools/`, `config/`, `notification/`, `blog/`, plus rendering helpers (`rehype/`, `streamdown/`) and `utils/`.
+- **`core/`** — Business logic, the heart of the app. Domains include `threads/` (creation, streaming, state), `api/` (LangGraph client singleton), `agents/` (custom agents), `auth/` (authentication), `artifacts/`, `channels/` (IM connections), `i18n/` (en-US, zh-CN), `nir/` (bounded NIR workflow projection), `nir-library/` (owner-scoped Dataset/Model API contracts), `settings/`, `memory/`, `skills/`, `messages/`, `mcp/`, `models/`, `suggestions/`, `tasks/`, `todos/`, `tools/`, `config/`, `notification/`, `blog/`, plus rendering helpers (`rehype/`, `streamdown/`) and `utils/`.
 - **`hooks/`** — Shared React hooks
 - **`lib/`** — Utilities (`cn()` from clsx + tailwind-merge)
 - **`content/`** — MDX content (blog posts, docs) rendered by the app
@@ -82,6 +82,32 @@ deterministic scoring. The `core/nir-evaluations/` domain owns API contracts and
 the browser keeps only mappings plus the latest 12 aggregate summaries in
 user-scoped localStorage keys; complete evidence remains in the current response and can be
 exported as JSON.
+
+The default chat page projects live `thread.values.nir_workflow` through
+`core/nir/selectors.ts` into a bounded view model and conditionally renders the
+`components/workspace/nir/` Sheet. When an older restored stream omits that
+field, `core/nir/hooks.ts` reads the owner-checked thread state endpoint; live
+state remains authoritative, and only same-project snapshots merge by revision.
+The projection allowlists metrics, caps strings and list sizes, shortens the
+dataset hash, and never passes artifact paths or the complete evidence object
+into the component. This V1 surface is the current thread's latest workflow
+summary, not a permanent experiment timeline; ordinary chats render no trigger.
+The custom-agent chat route does not mount this panel yet.
+
+The optional cross-session library lives at `/workspace/nir/datasets` and
+`/workspace/nir/models`. The sidebar reads `/api/features` and exposes these
+routes only when `nir_library.enabled` is true. `core/nir-library/api.ts` owns
+the centralized authenticated/CSRF-protected requests; page components must not
+fetch or cache raw spectra, model bytes, host paths, or another user's records.
+The Dataset page covers explicit save, Profile versions/confirmation, durable
+use history, attach, archive, and controlled deletion. The Model page covers
+versions, bounded metrics and lineage, attach, archive, and controlled deletion.
+Both deletion dialogs require the exact server identifier and explain that
+thread-attached copies and backups remain. Storage copy distinguishes persistent
+Dataset/Model bytes, thread-copy bytes, the new-write admission threshold, and
+free disk; never label the admission threshold as a strict total quota. Display
+`validation_scope` as validation provenance only, never as production approval.
+Deleted source thread IDs are plain text, not broken links.
 
 Knowledge settings submit multi-file PDF selections as sequential one-file
 requests. BGE-M3 CPU ingestion can take several minutes per document, so files
