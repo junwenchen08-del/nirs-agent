@@ -1056,6 +1056,7 @@ Returns `{}` when Langfuse is not in the enabled providers — LangSmith-only de
 - vLLM reasoning models should use `deerflow.models.vllm_provider:VllmChatModel`; for Qwen-style parsers prefer `when_thinking_enabled.extra_body.chat_template_kwargs.enable_thinking`, and DeerFlow will also normalize the older `thinking` alias
 - `tools[]` - Tool configs with `use` variable path and `group`
 - `tool_groups[]` - Logical groupings for tools
+- Keep `nir_*` tools in the `nir` group. Host Bash filtering checks the shell provider path, not group membership, so NIR tools remain available when `sandbox.allow_host_bash` is false.
 - `sandbox.use` - Sandbox provider class path
 - `skills.path` / `skills.container_path` - Host and container paths to skills directory
 - `title` - Auto-title generation (enabled, max_words, max_chars, model_name; null model_name uses fast local fallback, explicit model_name uses the prompt_template LLM path)

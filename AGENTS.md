@@ -61,6 +61,9 @@ Runtime config lives at the **repo root**: copy `config.example.yaml` → `confi
 servers + skills). Both real files are gitignored and may be edited at runtime via the
 Gateway API. Config schema and resolution order are documented in
 [backend/AGENTS.md](backend/AGENTS.md).
+The `nir_*` tools use the dedicated `nir` tool group. Host Bash gating identifies
+the actual `deerflow.sandbox.tools:bash_tool` provider, so disabling host Bash
+does not hide deterministic NIR tools in older configurations.
 
 ## Commands: Root vs. Module
 

@@ -78,6 +78,9 @@ Key。密钥应通过环境变量引用，不要直接写入配置模板、READM
 
 知识库和外部 MCP 均为可选功能，基础 NIR 分析不要求启用。模板会默认启用项目内置的
 Chemotools MCP；它随 Gateway 镜像运行，不需要单独部署服务。
+`nir_*` 工具属于独立的 `nir` 工具组；即使 `sandbox.allow_host_bash: false`，
+`nir_workflow`、数据检查和建模工具也应可用。已有配置若将它们归入 `bash`，
+请将这些工具的 `group` 改为 `nir`，并在 `tool_groups` 中添加 `nir` 后重启 Gateway。
 
 ### 4. 启动项目
 

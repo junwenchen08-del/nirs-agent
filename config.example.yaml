@@ -577,6 +577,7 @@ tool_groups:
   - name: file:read
   - name: file:write
   - name: bash
+  - name: nir
 
 # ============================================================================
 # Tools Configuration
@@ -858,135 +859,135 @@ tools:
 
   # NIR spectroscopy tools (backed by nir_core)
   - name: nir_workflow
-    group: bash
+    group: nir
     use: deerflow.community.nir.workflow:nir_workflow_tool
 
   - name: nir_dataset_list
-    group: bash
+    group: nir
     use: deerflow.community.nir.dataset_tools:nir_dataset_list_tool
 
   - name: nir_dataset_get
-    group: bash
+    group: nir
     use: deerflow.community.nir.dataset_tools:nir_dataset_get_tool
 
   - name: nir_dataset_history
-    group: bash
+    group: nir
     use: deerflow.community.nir.dataset_tools:nir_dataset_history_tool
 
   - name: nir_dataset_save
-    group: bash
+    group: nir
     use: deerflow.community.nir.dataset_tools:nir_dataset_save_tool
 
   - name: nir_dataset_attach
-    group: bash
+    group: nir
     use: deerflow.community.nir.dataset_tools:nir_dataset_attach_tool
 
   - name: nir_model_list
-    group: bash
+    group: nir
     use: deerflow.community.nir.model_tools:nir_model_list_tool
 
   - name: nir_model_get
-    group: bash
+    group: nir
     use: deerflow.community.nir.model_tools:nir_model_get_tool
 
   - name: nir_model_promote
-    group: bash
+    group: nir
     use: deerflow.community.nir.model_tools:nir_model_promote_tool
 
   - name: nir_model_attach
-    group: bash
+    group: nir
     use: deerflow.community.nir.model_tools:nir_model_attach_tool
 
   - name: nir_load_data
-    group: bash
+    group: nir
     use: deerflow.community.nir.io_tools:nir_load_data_tool
 
   - name: nir_inspect
-    group: bash
+    group: nir
     use: deerflow.community.nir.io_tools:nir_inspect_tool
 
   - name: nir_list_preprocessing_methods
-    group: bash
+    group: nir
     use: deerflow.community.nir.preprocess:nir_list_preprocessing_methods_tool
 
   - name: nir_describe_preprocessing_method
-    group: bash
+    group: nir
     use: deerflow.community.nir.preprocess:nir_describe_preprocessing_method_tool
 
   - name: nir_recommend_preprocessing
-    group: bash
+    group: nir
     use: deerflow.community.nir.preprocess:nir_recommend_preprocessing_tool
 
   - name: nir_preprocess
-    group: bash
+    group: nir
     use: deerflow.community.nir.preprocess:nir_preprocess_tool
 
   - name: nir_align_wavelengths
-    group: bash
+    group: nir
     use: deerflow.community.nir.preprocess:nir_align_wavelengths_tool
 
   - name: nir_list_calibration_transfer_methods
-    group: bash
+    group: nir
     use: deerflow.community.nir.calibration_transfer:nir_list_calibration_transfer_methods_tool
 
   - name: nir_fit_calibration_transfer
-    group: bash
+    group: nir
     use: deerflow.community.nir.calibration_transfer:nir_fit_calibration_transfer_tool
 
   - name: nir_apply_calibration_transfer
-    group: bash
+    group: nir
     use: deerflow.community.nir.calibration_transfer:nir_apply_calibration_transfer_tool
 
   - name: nir_evaluate_calibration_transfer
-    group: bash
+    group: nir
     use: deerflow.community.nir.calibration_transfer:nir_evaluate_calibration_transfer_tool
 
   - name: nir_train_model
-    group: bash
+    group: nir
     use: deerflow.community.nir.modeling:nir_train_model_tool
 
   - name: nir_train_classifier
-    group: bash
+    group: nir
     use: deerflow.community.nir.classification:nir_train_classifier_tool
 
   - name: nir_train_auto_split_model
-    group: bash
+    group: nir
     use: deerflow.community.nir.modeling:nir_train_auto_split_model_tool
 
   - name: nir_train_partitioned_model
-    group: bash
+    group: nir
     use: deerflow.community.nir.modeling:nir_train_partitioned_model_tool
 
   - name: nir_train_multi_model
-    group: bash
+    group: nir
     use: deerflow.community.nir.modeling:nir_train_multi_model_tool
 
   - name: nir_predict
-    group: bash
+    group: nir
     use: deerflow.community.nir.io_tools:nir_predict_tool
 
   - name: nir_analyze
-    group: bash
+    group: nir
     use: deerflow.community.nir.modeling:nir_analyze_tool
 
   - name: nir_analyze_collection
-    group: bash
+    group: nir
     use: deerflow.community.nir.modeling:nir_analyze_collection_tool
 
   - name: nir_reflect
-    group: bash
+    group: nir
     use: deerflow.community.nir.reflect:nir_reflect_tool
 
   - name: nir_compare
-    group: bash
+    group: nir
     use: deerflow.community.nir.modeling:nir_compare_tool
 
   - name: nir_register_model
-    group: bash
+    group: nir
     use: deerflow.community.nir.modeling:nir_register_model_tool
 
   - name: nir_search_knowledge
-    group: bash
+    group: nir
     use: deerflow.community.nir.knowledge:nir_search_knowledge_tool
 
 # ============================================================================
