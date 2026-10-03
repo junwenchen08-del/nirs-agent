@@ -18,6 +18,7 @@ export type GoalCommand =
 
 export type InputSubmitAction =
   | { kind: "goal"; command: GoalCommand }
+  | { kind: "datasets" }
   | { kind: "stop" }
   | { kind: "empty" }
   | { kind: "message" };
@@ -207,6 +208,9 @@ export function getInputSubmitAction({
   const goalCommand = parseGoalCommand(text);
   if (goalCommand && fileCount === 0) {
     return { kind: "goal", command: goalCommand };
+  }
+  if (fileCount === 0 && /^\/datasets\s*$/i.test(text.trim())) {
+    return { kind: "datasets" };
   }
   if (status === "streaming") {
     return { kind: "stop" };

@@ -64,6 +64,7 @@ import { getBackendBaseURL } from "@/core/config";
 import { useI18n } from "@/core/i18n/hooks";
 import { isHiddenFromUIMessage } from "@/core/messages/utils";
 import { useModels } from "@/core/models/hooks";
+import { useNirLibraryEnabled, type NIRDataset } from "@/core/nir-library";
 import { useSkills } from "@/core/skills/hooks";
 import { useSuggestionsConfig } from "@/core/suggestions/hooks";
 import type { AgentThreadContext, GoalState } from "@/core/threads";
@@ -112,6 +113,7 @@ import {
 } from "./input-box-helpers";
 import { useThread } from "./messages/context";
 import { ModeHoverGuide } from "./mode-hover-guide";
+import { DatasetCommandDialog } from "./nir/dataset-command-dialog";
 import { Tooltip } from "./tooltip";
 
 type InputMode = "flash" | "thinking" | "pro" | "ultra";
@@ -137,6 +139,7 @@ export function InputBox({
   context,
   extraHeader,
   isWelcomeMode,
+  enableDatasetCommand = false,
   threadId,
   initialValue,
   onContextChange,
@@ -163,6 +166,7 @@ export function InputBox({
    * decoupled from "the backend has created the thread" — see issue #2746.
    */
   isWelcomeMode?: boolean;
+  enableDatasetCommand?: boolean;
   threadId: string;
   initialValue?: string;
   onContextChange?: (
@@ -188,6 +192,9 @@ export function InputBox({
   const attachmentParts = attachments.files;
   const removeAttachment = attachments.remove;
   const { skills } = useSkills();
+  const { enabled: nirLibraryEnabled } = useNirLibraryEnabled();
+  const datasetCommandAvailable =
+    enableDatasetCommand && nirLibraryEnabled && attachmentParts.length === 0;
   const { data: uploadLimits } = useUploadLimits(threadId);
   const promptRootRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -210,18 +217,32 @@ export function InputBox({
   const messagesRef = useRef(thread.messages);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [datasetDialogOpen, setDatasetDialogOpen] = useState(false);
   const [pendingSuggestion, setPendingSuggestion] = useState<string | null>(
     null,
   );
   const builtinSlashCommands = useMemo<SlashSuggestion[]>(
     () => [
+      ...(datasetCommandAvailable
+        ? [
+            {
+              name: "datasets",
+              description: t.inputBox.datasetCommandDescription,
+              kind: "builtin" as const,
+            },
+          ]
+        : []),
       {
         name: "goal",
         description: t.inputBox.goalCommandDescription,
         kind: "builtin",
       },
     ],
-    [t.inputBox.goalCommandDescription],
+    [
+      datasetCommandAvailable,
+      t.inputBox.datasetCommandDescription,
+      t.inputBox.goalCommandDescription,
+    ],
   );
 
   const reportUploadLimitViolations = useCallback(
@@ -592,6 +613,17 @@ export function InputBox({
     ],
   );
 
+  const useSavedDataset = useCallback(
+    async (dataset: NIRDataset) => {
+      const prompt = t.inputBox.datasetUsePrompt
+        .replace("{id}", () => dataset.id)
+        .replace("{name}", () => dataset.name);
+      textInput.setInput("");
+      await submitThreadMessage({ text: prompt, files: [] });
+    },
+    [submitThreadMessage, t.inputBox.datasetUsePrompt, textInput],
+  );
+
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
       const submitAction = getInputSubmitAction({
@@ -599,6 +631,16 @@ export function InputBox({
         fileCount: message.files.length,
         status,
       });
+      if (submitAction.kind === "datasets") {
+        if (!enableDatasetCommand) return submitThreadMessage(message);
+        if (!datasetCommandAvailable) {
+          toast.error(t.nirLibrary.featureDisabledDescription);
+          return;
+        }
+        textInput.setInput("");
+        setDatasetDialogOpen(true);
+        return;
+      }
       if (submitAction.kind === "goal") {
         promptHistoryIndexRef.current = null;
         promptHistoryDraftRef.current = "";
@@ -629,7 +671,16 @@ export function InputBox({
       }
       return submitThreadMessage(message);
     },
-    [handleGoalCommand, onStop, status, submitThreadMessage],
+    [
+      handleGoalCommand,
+      datasetCommandAvailable,
+      enableDatasetCommand,
+      onStop,
+      status,
+      submitThreadMessage,
+      t.nirLibrary.featureDisabledDescription,
+      textInput,
+    ],
   );
 
   const requestFormSubmit = useCallback(() => {
@@ -711,6 +762,11 @@ export function InputBox({
 
   const applySkillSuggestion = useCallback(
     (suggestion: SlashSuggestion) => {
+      if (suggestion.kind === "builtin" && suggestion.name === "datasets") {
+        textInput.setInput("");
+        setDatasetDialogOpen(true);
+        return;
+      }
       const nextValue = `/${suggestion.name} `;
       textInput.setInput(nextValue);
       setDismissedSkillSuggestionValue(nextValue);
@@ -1474,6 +1530,14 @@ export function InputBox({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {enableDatasetCommand && (
+        <DatasetCommandDialog
+          open={datasetDialogOpen}
+          onOpenChange={setDatasetDialogOpen}
+          onUse={useSavedDataset}
+          canUse={!disabled && status !== "streaming"}
+        />
+      )}
     </div>
   );
 }

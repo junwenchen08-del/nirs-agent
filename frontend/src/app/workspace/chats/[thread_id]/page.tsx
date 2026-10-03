@@ -284,6 +284,7 @@ export default function ChatPage() {
                       isWelcomeMode && "-translate-y-2 sm:-translate-y-4",
                     )}
                     isWelcomeMode={isWelcomeMode}
+                    enableDatasetCommand
                     threadId={threadId}
                     autoFocus={isWelcomeMode}
                     status={

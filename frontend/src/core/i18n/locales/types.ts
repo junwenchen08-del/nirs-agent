@@ -96,6 +96,9 @@ export interface Translations {
     followupConfirmReplace: string;
     suggestionPlaceholderRequired: string;
     goalCommandDescription: string;
+    datasetCommandDescription: string;
+    datasetPickerDescription: string;
+    datasetUsePrompt: string;
     goalLabel: string;
     goalContinuing: string;
     goalContinuationTooltip: string;

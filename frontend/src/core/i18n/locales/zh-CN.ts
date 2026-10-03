@@ -113,6 +113,11 @@ export const zhCN: Translations = {
     followupConfirmReplace: "替换并发送",
     suggestionPlaceholderRequired: "发送前请先填写建议模板中的占位内容。",
     goalCommandDescription: "设置、查看或清除当前目标",
+    datasetCommandDescription: "查看并使用已保存的数据集",
+    datasetPickerDescription:
+      "选择数据集后，将在当前对话中发起挂载和数据检查。",
+    datasetUsePrompt:
+      "从数据集库挂载编号为 {id} 的数据集（{name}）到当前对话，检查文件结构并告诉我可以用于哪些分析；先不要建模。",
     goalLabel: "目标",
     goalContinuing: "续跑中 {count}/{max}",
     goalContinuationTooltip:

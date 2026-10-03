@@ -119,6 +119,11 @@ export const enUS: Translations = {
     suggestionPlaceholderRequired:
       "Replace the suggestion placeholder before sending.",
     goalCommandDescription: "Set, show, or clear an active goal",
+    datasetCommandDescription: "Browse and use saved datasets",
+    datasetPickerDescription:
+      "Choose a dataset to attach it to this chat and check its structure.",
+    datasetUsePrompt:
+      "Attach dataset {id} ({name}) from my saved dataset library to this chat. Check its structure and tell me which analyses it supports. Do not start modeling yet.",
     goalLabel: "Goal",
     goalContinuing: "Continuing {count}/{max}",
     goalContinuationTooltip:
