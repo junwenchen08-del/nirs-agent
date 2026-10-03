@@ -2,12 +2,14 @@
 
 import {
   ActivityIcon,
+  CheckIcon,
   CheckCircle2Icon,
   DatabaseIcon,
+  FilesIcon,
   FlaskConicalIcon,
   ShieldCheckIcon,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import {
   Sheet,
@@ -17,8 +19,9 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { useArtifacts } from "@/components/workspace/artifacts";
 import { useI18n } from "@/core/i18n/hooks";
-import { selectNIRWorkflowView } from "@/core/nir";
+import { selectNIRMilestones, selectNIRWorkflowView } from "@/core/nir";
 import { cn } from "@/lib/utils";
 
 interface NIRWorkflowPanelProps {
@@ -56,8 +59,8 @@ function Section({
 function Definition({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-3 py-1 text-sm">
-      <dt className="text-muted-foreground truncate">{label}</dt>
-      <dd className="truncate text-right font-medium" title={value}>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="text-right font-medium break-words" title={value}>
         {value}
       </dd>
     </div>
@@ -66,6 +69,8 @@ function Definition({ label, value }: { label: string; value: string }) {
 
 export function NIRWorkflowPanel({ workflow }: NIRWorkflowPanelProps) {
   const { t } = useI18n();
+  const { artifacts, setOpen: setArtifactsOpen } = useArtifacts();
+  const [open, setOpen] = useState(false);
   const view = useMemo(() => selectNIRWorkflowView(workflow), [workflow]);
   if (!view) {
     return null;
@@ -101,9 +106,14 @@ export function NIRWorkflowPanel({ workflow }: NIRWorkflowPanelProps) {
   const completed = ["approved", "registered", "completed"].includes(
     view.stage,
   );
+  const milestones = selectNIRMilestones(view);
+  const nextAction =
+    view.nextAction && view.nextAction !== "none"
+      ? translated(t.nirWorkflow.nextActions, view.nextAction, view.nextAction)
+      : null;
 
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <button
           type="button"
@@ -125,7 +135,7 @@ export function NIRWorkflowPanel({ workflow }: NIRWorkflowPanelProps) {
           />
         </button>
       </SheetTrigger>
-      <SheetContent className="w-[92vw] gap-0 sm:max-w-md">
+      <SheetContent className="w-[92vw] gap-0 sm:max-w-lg">
         <SheetHeader className="border-b pr-12">
           <SheetTitle className="flex items-center gap-2">
             <FlaskConicalIcon className="size-5" />
@@ -159,41 +169,102 @@ export function NIRWorkflowPanel({ workflow }: NIRWorkflowPanelProps) {
                 label={t.nirWorkflow.revision}
                 value={String(view.revision)}
               />
-              {view.nextAction && (
-                <Definition
-                  label={t.nirWorkflow.nextAction}
-                  value={view.nextAction}
-                />
-              )}
             </dl>
           </Section>
 
+          {milestones && (
+            <Section icon={ActivityIcon} title={t.nirWorkflow.progress}>
+              <ol
+                aria-label={t.nirWorkflow.progress}
+                className="grid grid-cols-2 gap-2"
+              >
+                {milestones.map((milestone, index) => (
+                  <li
+                    key={milestone.key}
+                    aria-current={
+                      milestone.status === "current" ? "step" : undefined
+                    }
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-medium",
+                      milestone.status === "complete" &&
+                        "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                      milestone.status === "current" &&
+                        "border-primary/40 bg-primary/10 text-foreground",
+                      milestone.status === "upcoming" &&
+                        "border-border text-muted-foreground",
+                    )}
+                  >
+                    <span className="flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px]">
+                      {milestone.status === "complete" ? (
+                        <CheckIcon className="size-3" aria-hidden="true" />
+                      ) : (
+                        index + 1
+                      )}
+                    </span>
+                    <span>{t.nirWorkflow.milestones[milestone.key]}</span>
+                  </li>
+                ))}
+              </ol>
+            </Section>
+          )}
+
+          {nextAction && (
+            <div
+              className={cn(
+                "rounded-xl border px-4 py-3",
+                blocked
+                  ? "border-destructive/40 bg-destructive/10"
+                  : "border-primary/30 bg-primary/5",
+              )}
+            >
+              <p className="text-muted-foreground text-xs font-medium">
+                {t.nirWorkflow.nextAction}
+              </p>
+              <p className="mt-1 text-sm font-semibold">{nextAction}</p>
+            </div>
+          )}
+
           <Section icon={FlaskConicalIcon} title={t.nirWorkflow.method}>
-            <dl className="divide-y">
-              <Definition
-                label={t.nirWorkflow.method}
-                value={view.method ?? t.nirWorkflow.notAvailable}
-              />
-              <Definition
-                label={t.nirWorkflow.preprocessing}
-                value={
-                  view.preprocessing.length > 0
-                    ? view.preprocessing.join(" → ")
-                    : t.nirWorkflow.notAvailable
-                }
-              />
-            </dl>
+            <p className="text-base font-semibold">
+              {view.method ?? t.nirWorkflow.notAvailable}
+            </p>
+            <p className="text-muted-foreground mt-2 text-xs">
+              {t.nirWorkflow.preprocessing}
+            </p>
+            <p className="mt-1 text-sm break-words">
+              {view.preprocessing.length > 0
+                ? view.preprocessing.join(" → ")
+                : t.nirWorkflow.notAvailable}
+            </p>
           </Section>
 
           <Section icon={CheckCircle2Icon} title={t.nirWorkflow.metrics}>
             {view.metrics.length > 0 ? (
-              <dl className="divide-y">
+              <dl className="grid grid-cols-2 gap-2">
                 {view.metrics.map((metric) => (
-                  <Definition
+                  <div
                     key={metric.key}
-                    label={t.nirWorkflow.metricLabels[metric.key] ?? metric.key}
-                    value={metric.value}
-                  />
+                    className="border-border/70 bg-background rounded-lg border p-2.5"
+                  >
+                    <dt className="text-muted-foreground text-xs">
+                      {t.nirWorkflow.metricLabels[metric.key] ?? metric.key}
+                    </dt>
+                    <dd
+                      className={cn(
+                        "mt-1 text-lg font-semibold tabular-nums",
+                        metric.key === "passed" &&
+                          (metric.value === "yes"
+                            ? "text-emerald-700 dark:text-emerald-300"
+                            : "text-destructive"),
+                      )}
+                    >
+                      {metric.key === "passed"
+                        ? metric.value === "yes"
+                          ? t.nirWorkflow.qualityPassed
+                          : t.nirWorkflow.qualityFailed
+                        : metric.value}
+                    </dd>
+                  </div>
                 ))}
               </dl>
             ) : (
@@ -231,6 +302,20 @@ export function NIRWorkflowPanel({ workflow }: NIRWorkflowPanelProps) {
                 )}
               </dl>
             </Section>
+          )}
+
+          {artifacts.length > 0 && (
+            <button
+              type="button"
+              className="border-border hover:bg-accent focus-visible:ring-ring flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium focus-visible:ring-2 focus-visible:outline-none"
+              onClick={() => {
+                setOpen(false);
+                setArtifactsOpen(true);
+              }}
+            >
+              <FilesIcon className="size-4" aria-hidden="true" />
+              {t.nirWorkflow.resultFiles}
+            </button>
           )}
         </div>
       </SheetContent>

@@ -430,6 +430,8 @@ export interface Translations {
     open: string;
     description: string;
     currentStage: string;
+    progress: string;
+    milestones: Record<string, string>;
     task: string;
     attempt: (current: number, maximum: number) => string;
     method: string;
@@ -442,6 +444,10 @@ export interface Translations {
     profile: string;
     hash: string;
     nextAction: string;
+    nextActions: Record<string, string>;
+    resultFiles: string;
+    qualityPassed: string;
+    qualityFailed: string;
     revision: string;
     notAvailable: string;
     stages: Record<string, string>;

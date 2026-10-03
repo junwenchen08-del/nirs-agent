@@ -1,5 +1,6 @@
 export { loadNIRWorkflowState } from "./api";
 export { useNIRWorkflow } from "./hooks";
+export { selectNIRMilestones } from "./progress";
 export {
   selectLatestNIRWorkflow,
   selectNIRWorkflow,

@@ -39,7 +39,7 @@ test("shows bounded current NIR workflow evidence in the chat drawer", async ({
             max_attempts: 3,
             validation_goal: "external_validation",
             approval_status: "pending",
-            next_action: "request_approval",
+            next_action: "request_user_approval",
             dataset_id: "ds_one",
             dataset_profile_id: "dsp_one",
             dataset_sha256: "a".repeat(64),
@@ -68,6 +68,15 @@ test("shows bounded current NIR workflow evidence in the chat drawer", async ({
   ).toBeVisible();
   await expect(page.getByText("Review", { exact: true })).toBeVisible();
   await expect(page.getByText("Attempt 2 of 3")).toBeVisible();
+  await expect(
+    page.getByRole("list", { name: "Workflow progress" }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("list", { name: "Workflow progress" })
+      .locator('li[aria-current="step"]'),
+  ).toContainText("Review and deliver");
+  await expect(page.getByText("Review the model results")).toBeVisible();
   await expect(page.getByText("Independent external validation")).toBeVisible();
   await expect(page.getByText("snv → derivative1")).toBeVisible();
   await expect(page.getByText("ds_one", { exact: true })).toBeVisible();

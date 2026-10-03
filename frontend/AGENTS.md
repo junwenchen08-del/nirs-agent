@@ -90,8 +90,12 @@ field, `core/nir/hooks.ts` reads the owner-checked thread state endpoint; live
 state remains authoritative, and only same-project snapshots merge by revision.
 The projection allowlists metrics, caps strings and list sizes, shortens the
 dataset hash, and never passes artifact paths or the complete evidence object
-into the component. This V1 surface is the current thread's latest workflow
-summary, not a permanent experiment timeline; ordinary chats render no trigger.
+into the component. The panel groups modeling stages into four milestone cards,
+translates next-action codes, displays bounded metric cards, and opens the
+existing thread artifact drawer when artifacts are available. Milestones show
+workflow position, not elapsed time or a numeric completion percentage. This
+surface is the current thread's latest workflow summary, not a permanent
+experiment timeline; ordinary chats render no trigger.
 The custom-agent chat route does not mount this panel yet.
 
 The optional cross-session library lives at `/workspace/nir/datasets` and
