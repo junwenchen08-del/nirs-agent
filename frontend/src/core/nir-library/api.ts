@@ -1,5 +1,5 @@
 import { fetch } from "@/core/api/fetcher";
-import { getBackendBaseURL } from "@/core/config";
+import { getBackendBaseURL, getLangGraphBaseURL } from "@/core/config";
 
 import type {
   NIRDataset,
@@ -161,13 +161,19 @@ export function confirmDatasetProfile(datasetId: string, profileId: string) {
 
 export function attachDataset(
   datasetId: string,
-  input: { threadId: string; profileId?: string; desiredFilename?: string },
+  input: {
+    threadId: string;
+    profileId?: string;
+    desiredFilename?: string;
+    signal?: AbortSignal;
+  },
 ) {
   return requestJSON<{ status: string; virtual_path: string }>(
     `/api/nir/datasets/${encoded(datasetId)}/attach`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: input.signal,
       body: JSON.stringify({
         thread_id: input.threadId,
         profile_id: input.profileId ?? null,
@@ -177,6 +183,37 @@ export function attachDataset(
     },
     "Failed to attach dataset",
   );
+}
+
+async function prepareComposerThread(threadId: string, signal: AbortSignal) {
+  const response = await fetch(
+    `${getLangGraphBaseURL().replace(/\/+$/, "")}/threads`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({ thread_id: threadId, metadata: {} }),
+    },
+  );
+  if (!response.ok)
+    throw new Error(
+      await errorMessage(
+        response,
+        "Failed to prepare this chat for attachment",
+      ),
+    );
+  const thread = (await response.json()) as { thread_id: string };
+  if (thread.thread_id !== threadId)
+    throw new Error("Attachment chat does not match the current chat");
+}
+
+export async function attachDatasetForComposer(
+  datasetId: string,
+  threadId: string,
+  signal: AbortSignal,
+) {
+  await prepareComposerThread(threadId, signal);
+  return attachDataset(datasetId, { threadId, signal });
 }
 
 export function archiveDataset(datasetId: string) {
@@ -214,16 +251,33 @@ export function attachModel(
   modelId: string,
   version: string,
   threadId: string,
+  signal?: AbortSignal,
 ) {
-  return requestJSON<{ status: string; model_path: string }>(
+  return requestJSON<{
+    status: string;
+    model_id: string;
+    version: string;
+    model_path: string;
+  }>(
     `/api/nir/models/${encoded(modelId)}/versions/${encoded(version)}/attach`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal,
       body: JSON.stringify({ thread_id: threadId }),
     },
     "Failed to attach model",
   );
+}
+
+export async function attachModelForComposer(
+  modelId: string,
+  version: string,
+  threadId: string,
+  signal: AbortSignal,
+) {
+  await prepareComposerThread(threadId, signal);
+  return attachModel(modelId, version, threadId, signal);
 }
 
 export function archiveModel(modelId: string, version: string) {

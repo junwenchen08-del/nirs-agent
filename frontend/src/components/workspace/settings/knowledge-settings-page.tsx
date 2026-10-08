@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { fetch } from "@/core/api/fetcher";
 import { getBackendBaseURL } from "@/core/config";
 import { useI18n } from "@/core/i18n/hooks";
@@ -47,6 +48,7 @@ import {
   uploadKnowledgeDocumentsSequentially,
 } from "@/core/knowledge/api";
 
+import { MethodKnowledgeSettingsPage } from "./method-knowledge-settings-page";
 import { SettingsSection } from "./settings-section";
 
 // ---------------------------------------------------------------------------
@@ -178,6 +180,38 @@ async function apiSearch(
 // ---------------------------------------------------------------------------
 
 export function KnowledgeSettingsPage() {
+  const { locale, t } = useI18n();
+  const zh = locale.startsWith("zh");
+  return (
+    <SettingsSection
+      title={t.settings.knowledge.title}
+      description={
+        zh
+          ? "管理论文证据和算法方法，为建模检索提供依据。"
+          : "Manage research papers and method references used during modeling."
+      }
+    >
+      <Tabs defaultValue="papers">
+        <TabsList>
+          <TabsTrigger value="papers">
+            {zh ? "论文知识库" : "Paper knowledge"}
+          </TabsTrigger>
+          <TabsTrigger value="methods">
+            {zh ? "方法知识库" : "Method knowledge"}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="papers">
+          <PaperKnowledgeSettingsPage />
+        </TabsContent>
+        <TabsContent value="methods">
+          <MethodKnowledgeSettingsPage />
+        </TabsContent>
+      </Tabs>
+    </SettingsSection>
+  );
+}
+
+function PaperKnowledgeSettingsPage() {
   const { t } = useI18n();
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
@@ -299,10 +333,7 @@ export function KnowledgeSettingsPage() {
   );
 
   return (
-    <SettingsSection
-      title={t.settings.knowledge.title}
-      description={t.settings.knowledge.description}
-    >
+    <div>
       <div className="flex flex-col gap-6">
         {/* Stats + toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -436,7 +467,7 @@ export function KnowledgeSettingsPage() {
           </DialogContent>
         </Dialog>
       </div>
-    </SettingsSection>
+    </div>
   );
 }
 

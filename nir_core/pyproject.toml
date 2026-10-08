@@ -51,6 +51,9 @@ explicit = true
 where = [".."]
 include = ["nir_core*"]
 
+[tool.setuptools.package-data]
+"nir_core.knowledge" = ["method_cards/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

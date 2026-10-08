@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -76,6 +77,24 @@ def _result(tool_name: str, payload: dict, *, call_id: str = "call-1") -> ToolMe
         tool_call_id=call_id,
         name=tool_name,
     )
+
+
+def test_method_reference_search_is_allowed_in_planning_without_advancing_literature_gate():
+    middleware = NIRWorkflowMiddleware()
+    workflow = start_workflow(task_type="calibration", data_path="/mnt/user-data/uploads/data.npz", analyte="protein", unit="%", domain="default", validation_goal="internal_holdout")
+    workflow = transition_workflow(workflow, action="record_audit", audit_passed=True)
+    called = []
+
+    def handler(request):
+        called.append(request.tool_call["name"])
+        return _result("nir_search_method_knowledge", {"status": "ok", "evidence_kind": "official_method_reference", "results": [{"evidence_id": "method:sg_smooth:abc"}]})
+
+    result = middleware.wrap_tool_call(_request("nir_search_method_knowledge", {"nir_workflow": workflow}, args={"query": "noise"}), handler)
+    assert called == ["nir_search_method_knowledge"]
+    if isinstance(result, Command):
+        updated = result.update.get("nir_workflow", workflow)
+        assert updated["stage"] == "planning"
+        assert not updated.get("knowledge_evidence")
 
 
 def test_domain_tool_requires_started_workflow() -> None:
@@ -532,6 +551,8 @@ def test_classification_tool_is_allowed_and_records_attempt_evidence() -> None:
                 "label_name": "origin",
                 "classes": ["north", "south"],
                 "class_distribution": {"north": 30, "south": 30},
+                "preprocessing_selection": {"selected_candidate_id": "snv", "candidates": [{"candidate_id": "snv", "cv_rmse": 0.2, "selected": True}]},
+                "wavelength_selection_candidates": [{"method": "cars", "RMSE_tuning": 0.3, "selected_indices": list(range(500))}],
                 "model_path": "/mnt/user-data/outputs/qualitative.pkl",
                 "metrics_path": "/mnt/user-data/outputs/qualitative.json",
                 "holdout": {"balanced_accuracy": 0.95, "macro_f1": 0.94, "mcc": 0.92},
@@ -550,6 +571,9 @@ def test_classification_tool_is_allowed_and_records_attempt_evidence() -> None:
     assert updated["attempt_evidence"]["tool_name"] == "nir_train_classifier"
     assert updated["attempt_evidence"]["metrics_summary"]["holdout"]["balanced_accuracy"] == 0.95
     assert updated["attempt_evidence"]["result_facts"]["classes"] == ["north", "south"]
+    assert updated["attempt_evidence"]["result_facts"]["preprocessing_selection"]["selected_candidate_id"] == "snv"
+    assert updated["attempts"][0]["decision_facts"]["preprocessing_selection"]["candidates"][0]["cv_rmse"] == 0.2
+    assert "selected_indices" not in str(updated["attempts"][0]["decision_facts"])
 
 
 def test_regression_model_tool_is_denied_for_classification_workflow() -> None:
@@ -1900,3 +1924,26 @@ async def test_async_wrapper_enforces_the_same_policy() -> None:
     assert called is False
     assert isinstance(result, ToolMessage)
     assert json.loads(result.content)["code"] == "nir_workflow_required"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure,status", [(asyncio.CancelledError, "cancelled"), (RuntimeError, "failed")])
+async def test_process_attempt_records_tool_cancellation_and_failure(tmp_path, monkeypatch, failure, status):
+    from deerflow.community.nir.process import ProcessStore
+    from deerflow.config import paths as paths_module
+
+    paths = paths_module.Paths(tmp_path)
+    monkeypatch.setattr(paths_module, "get_paths", lambda: paths)
+    request = _request("nir_train_model", {"nir_workflow": _execution_state()}, context={"user_id": "alice", "run_id": "agent-run"})
+    request.runtime.config["configurable"]["thread_id"] = "thread"
+
+    async def handler(_):
+        raise failure()
+
+    with pytest.raises(failure):
+        await NIRWorkflowMiddleware().awrap_tool_call(request, handler)
+    store = ProcessStore(paths.thread_dir("thread", user_id="alice") / "nir-process")
+    run_id = store.runs()["data"][0]["run_id"]
+    attempt = store.summary(run_id)["attempts"][0]
+    assert attempt["execution_status"] == status
+    assert attempt["steps"][0]["evidence_status"] == "not_recorded"

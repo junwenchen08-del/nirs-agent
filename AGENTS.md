@@ -249,15 +249,24 @@ model, and improved validation RMSEP.
 The cross-session NIR asset library remains disabled by default.
 `deerflow.community.nir.datasets.DatasetService` explicitly
 saves owner-matched thread CSV/TXT/MAT uploads as immutable, hash-verified assets
-with versioned interpretation Profiles. Batch D adds owner-checked, idempotent
-Dataset Attach into a target thread's uploads, `nir_dataset_*` Agent tools,
+with versioned interpretation Profiles.
+HTTP uploads automatically save successful CSV/TXT/MAT when the library is
+enabled and `nir_library.auto_save_uploads` (default true) is on; the upload
+response distinguishes new saves, reuse, and failures. Manual Agent saves still
+require explicit intent. Source files persist independently of model quality.
+Batch D adds owner-checked, idempotent Dataset Attach into a target thread's uploads, `nir_dataset_*` Agent tools,
 `nir_dataset_uses`, and workflow lineage binding. The Agent must run a fresh
 `nir_inspect`; prior conclusions are never inherited, and concurrent lineage
 conflicts block the workflow. `nir_inspect` never saves automatically. Batch F
-adds `nir_model_versions`, explicit approved-and-registered Model Promotion,
+adds `nir_model_versions`, verified approved-and-registered Model Promotion,
 owner-scoped list/get/attach APIs and Agent tools, full model/metrics/training
 binding verification, and prediction-compatible copies under a new thread's
-`outputs/models/`. Promotion is not automatic, exact `validation_scope` values
+`outputs/models/`. Approved agent registration automatically saves the exact
+version when `nir_library.auto_save_registered_models` (default true) is enabled,
+unless the user refuses storage. Its bounded outcome is persisted separately
+from scientific registration. Explicit retries also accept completed approved
+workflows after verifying their actual registry and current artifact evidence.
+Exact `validation_scope` values
 are preserved, and old direct-upload training may keep null Dataset/Profile
 lineage. Batch G adds feature-gated `/workspace/nir/datasets` and
 `/workspace/nir/models` pages plus controlled physical reclamation. Dataset or
@@ -268,6 +277,12 @@ The storage UI distinguishes persistent Dataset/Model bytes, thread-copy bytes,
 the new-write admission threshold, and free disk; it never calls that threshold
 a strict whole-system quota. See `backend/AGENTS.md` and `frontend/AGENTS.md` for
 the exact service and browser boundaries.
+
+The default desktop chat exposes `/models` alongside `/datasets` when the asset
+library is enabled. The model picker mounts an exact verified version without
+starting a run, retains any newly added data files, and passes the selection into
+the next manually submitted message for the existing prediction workflow.
+Selection is not inference evidence. See `docs/nir-model-command.md`.
 
 The NIR retrieval knowledge base keeps vectors in ChromaDB and document
 governance in a lightweight SQLite catalog. Governed ingestion derives stable

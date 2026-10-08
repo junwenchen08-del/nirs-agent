@@ -221,6 +221,18 @@ async def langgraph_runtime(app: FastAPI, startup_config: AppConfig) -> AsyncGen
                 before=now_iso(),
             )
             await _mark_latest_recovered_threads_error(app.state.run_manager, app.state.thread_store, recovered_runs)
+            # Process evidence is owner/thread local and only reconciles run IDs
+            # that the authoritative runtime store has confirmed orphaned.
+            from deerflow.community.nir.process import ProcessStore
+            from deerflow.config.paths import get_paths
+
+            for record in recovered_runs:
+                if getattr(record, "user_id", None):
+                    try:
+                        process_store = ProcessStore(get_paths().thread_dir(record.thread_id, user_id=record.user_id) / "nir-process")
+                        await asyncio.to_thread(process_store.recover, record.run_id)
+                    except Exception:
+                        logger.warning("Unable to reconcile orphaned process evidence", exc_info=True)
 
         try:
             yield

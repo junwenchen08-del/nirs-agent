@@ -23,10 +23,12 @@ from app.gateway.routers import (
     knowledge,
     mcp,
     memory,
+    method_knowledge,
     models,
     nir_datasets,
     nir_evaluations,
     nir_models,
+    nir_process,
     runs,
     skills,
     suggestions,
@@ -412,10 +414,12 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
 
     # Knowledge base API is mounted at /api/knowledge
     app.include_router(knowledge.router)
+    app.include_router(method_knowledge.router)
     app.include_router(nir_datasets.router)
     app.include_router(nir_datasets.storage_router)
     app.include_router(nir_models.router)
     app.include_router(nir_evaluations.router)
+    app.include_router(nir_process.router)
 
     # Thread cleanup API is mounted at /api/threads/{thread_id}
     app.include_router(threads.router)

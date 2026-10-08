@@ -20,6 +20,7 @@ from langchain_core.tools import tool
 from langgraph.types import Command
 
 from deerflow.agents.thread_state import NIRClarificationQuestion, NIRWorkflowState
+from deerflow.community.nir.decision_facts import model_result_facts, selection_decision_facts
 from deerflow.tools.types import Runtime
 from deerflow.utils.messages import get_original_user_content_text
 
@@ -941,12 +942,14 @@ def transition_workflow(
             "grade": grade,
             "tool_name": evidence.get("tool_name"),
             "method": evidence.get("method"),
+            "selected_method": model_result_facts(evidence["result_facts"]).get("method") if isinstance(evidence.get("result_facts"), Mapping) else None,
             "pipeline_steps": evidence.get("pipeline_steps") or [],
             "model_args": evidence.get("model_args") or {},
             "execution_signature": evidence.get("execution_signature"),
             "protocol": evidence.get("protocol"),
             "validation_scope": evidence.get("validation_scope"),
             "metrics_summary": evidence.get("metrics_summary") or {},
+            "decision_facts": selection_decision_facts(evidence.get("result_facts")),
             "model_path": model_path,
             "metrics_path": metrics_path,
             "retry_plan_id": active_retry_plan.get("plan_id") if isinstance(active_retry_plan, Mapping) else None,

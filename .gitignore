@@ -29,6 +29,8 @@ htmlcov/
 
 # Build artifacts
 artifacts/
+!frontend/src/core/artifacts/
+!frontend/tests/unit/core/artifacts/
 nir_core.egg-info/
 *.egg-info/
 dist/
@@ -54,6 +56,24 @@ SYSTEM.md
 /docs/nir-preprocessing-toolkit-and-calibration-transfer-roadmap.md
 /docs/chemotools-algorithm-catalog-and-selection-plan.md
 /docs/chemotools-algorithm-catalog-and-selection-implementation-log.md
+
+# Paper research and literature comparisons (keep outside the engineering repository)
+/research/
+/tmp_paper_review/
+/literature-review/
+/paper-notes/
+/papers/
+/manuscripts/
+/thesis/
+/论文/
+*.bib
+*.ris
+*.docx
+*.tex
+**/2026-10-06_literature_35_*.md
+**/2026-10-06_literature_35_*.json
+**/2026-10-06_novelty_assessment.md
+**/2026-10-06_pipeline_selection_method.md
 
 # Internal plans, change notes, and manual test evidence (never publish)
 /docs/plans/

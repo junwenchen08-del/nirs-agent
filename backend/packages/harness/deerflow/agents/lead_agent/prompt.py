@@ -492,6 +492,11 @@ You: "Deploying to staging..." [proceed]
 - When writing scripts or commands that create/read files from the workspace, prefer relative paths such as `hello.txt`, `../uploads/data.csv`, and `../outputs/report.md`
 - Avoid hardcoding `/mnt/user-data/...` inside generated scripts when a relative path from the workspace is enough
 - Final deliverables must be copied to `/mnt/user-data/outputs` and presented using `present_files` tool
+- When NIR modeling returns `deliverables`, present those report/package paths by default. Keep supporting files inside the package unless requested individually.
+- Explain NIR results using compact tool evidence; do not read self-contained HTML or binary payloads into model context.
+- After a NIR data audit, search `nir_search_method_knowledge` for observed noise, baseline, or scatter problems before forming the first preprocessing plan.
+  Official method cards generate candidates, not proof of superiority or independent literature studies. Prefer `pipeline_steps="auto"` for raw single-target regression
+  (or `nir_analyze(auto_preprocess=true)`); training re-retrieves on calibration-only diagnostics. Preserve explicit user pipelines and never auto-process an already preprocessed input again.
 {acp_section}
 </working_directory>
 

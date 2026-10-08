@@ -5,14 +5,18 @@ import os
 import stat
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 
 from app.gateway.authz import require_permission
-from app.gateway.deps import get_config
+from app.gateway.deps import get_config, get_thread_store
+from deerflow.community.nir.datasets.service import DatasetError, DatasetService
 from deerflow.config.app_config import AppConfig
 from deerflow.config.paths import get_paths
+from deerflow.persistence.engine import get_session_factory
 from deerflow.runtime.user_context import get_effective_user_id
 from deerflow.sandbox.sandbox_provider import SandboxProvider, get_sandbox_provider
 from deerflow.uploads.manager import (
@@ -43,6 +47,14 @@ DEFAULT_MAX_FILE_SIZE = 50 * 1024 * 1024
 DEFAULT_MAX_TOTAL_SIZE = 100 * 1024 * 1024
 
 
+class DatasetLibrarySave(BaseModel):
+    """Library outcome is separate from successful thread-file upload."""
+
+    status: Literal["saved", "reused", "failed"]
+    dataset_id: str | None = None
+    error_code: str | None = None
+
+
 class UploadedFileInfo(BaseModel):
     """Uploaded file metadata exposed by upload and list APIs."""
 
@@ -58,6 +70,7 @@ class UploadedFileInfo(BaseModel):
     markdown_path: str | None = None
     markdown_virtual_path: str | None = None
     markdown_artifact_url: str | None = None
+    dataset_library: DatasetLibrarySave | None = None
 
 
 class UploadResponse(BaseModel):
@@ -226,6 +239,50 @@ def _auto_convert_documents_enabled(app_config: AppConfig) -> bool:
         return False
 
 
+async def _save_uploaded_datasets(thread_id: str, request: Request, owner: str, files: list[dict], config: AppConfig) -> None:
+    """Persist upload bytes independently of agent/model success, after the batch completes.
+
+    Upload policy authorizes this deterministic save; manual Agent/API saves
+    retain their explicit-intent checks. Never claim an unowned legacy thread.
+    """
+    policy = getattr(config, "nir_library", None)
+    if policy is None or not policy.enabled or not policy.auto_save_uploads:
+        return
+    candidates = [file for file in files if Path(file["filename"]).suffix.lower() in {".csv", ".txt", ".mat"}]
+    if not candidates:
+        return
+    try:
+        session_factory = get_session_factory()
+        if session_factory is None:
+            raise DatasetError("database_unavailable", "Persistent database is unavailable")
+        store = get_thread_store(request)
+        record = await store.get(thread_id, user_id=None)
+        if record is None:
+            # Web uploads precede the first run and may precede threads.create.
+            # Creation is owner-explicit; a race must recheck the winning owner.
+            try:
+                record = await store.create(thread_id, user_id=owner, metadata={})
+            except IntegrityError:
+                record = await store.get(thread_id, user_id=None)
+        if record is None or record.get("user_id") != owner:
+            raise DatasetError("thread_not_owned", "Source thread is not owned")
+        service = DatasetService(session_factory, get_paths(), policy)
+    except Exception as exc:
+        code = exc.code if isinstance(exc, DatasetError) else "storage_error"
+        logger.warning("Dataset upload auto-save setup failed (%s)", code)
+        for file in candidates:
+            file["dataset_library"] = {"status": "failed", "error_code": code}
+        return
+    for file in candidates:
+        try:
+            saved = await service.save_from_thread_upload(owner, thread_id, file["virtual_path"], file["filename"], save_confirmed=True)
+            file["dataset_library"] = {"status": "reused" if saved["reused_existing"] else "saved", "dataset_id": saved["id"]}
+        except Exception as exc:
+            code = exc.code if isinstance(exc, DatasetError) else "storage_error"
+            logger.warning("Dataset upload auto-save failed (%s)", code)
+            file["dataset_library"] = {"status": "failed", "error_code": code}
+
+
 @router.post("", response_model=UploadResponse)
 @require_permission("threads", "write", owner_check=True, require_existing=False)
 async def upload_files(
@@ -350,6 +407,8 @@ async def upload_files(
         for file_path, virtual_path in sandbox_sync_targets:
             _make_file_sandbox_writable(file_path)
             sandbox.update_file(virtual_path, file_path.read_bytes())
+
+    await _save_uploaded_datasets(thread_id, request, effective_user_id, uploaded_files, config)
 
     message = f"Successfully uploaded {len(uploaded_files)} file(s)"
     if skipped_files:

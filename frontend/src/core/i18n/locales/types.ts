@@ -98,7 +98,17 @@ export interface Translations {
     goalCommandDescription: string;
     datasetCommandDescription: string;
     datasetPickerDescription: string;
-    datasetUsePrompt: string;
+    datasetAttached: string;
+    datasetAttaching: string;
+    datasetAttachFailed: string;
+    datasetClearSelection: string;
+    modelCommandDescription: string;
+    modelPickerDescription: string;
+    modelAttached: string;
+    modelAttaching: string;
+    modelAttachFailed: string;
+    modelClearSelection: string;
+    modelSelectionContext: string;
     goalLabel: string;
     goalContinuing: string;
     goalContinuationTooltip: string;
@@ -373,6 +383,8 @@ export interface Translations {
 
   // Uploads
   uploads: {
+    datasetsSaved: (saved: number, reused: number) => string;
+    datasetSaveFailed: (filename: string, errorCode: string) => string;
     uploading: string;
     uploadingFiles: string;
     limitsHint: (

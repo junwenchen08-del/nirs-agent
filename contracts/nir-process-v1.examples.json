@@ -1,0 +1,8 @@
+[
+  {"case": "success", "payload": {"step_execution_id": "step_success", "step_key": "validation", "execution_status": "succeeded", "evidence_status": "available", "facts": {"residual_definition": "prediction_minus_reference"}, "charts": [], "candidate_count": 0}},
+  {"case": "skipped", "payload": {"step_execution_id": "step_skipped", "step_key": "wavelength", "execution_status": "skipped", "evidence_status": "available", "facts": {"reason": "full_spectrum_retained"}, "charts": [], "candidate_count": 0}},
+  {"case": "failed", "payload": {"step_execution_id": "step_failed", "step_key": "model", "execution_status": "failed", "evidence_status": "not_recorded", "facts": {"reason": "tool_execution_failed"}, "charts": [], "candidate_count": 0}},
+  {"case": "missing_evidence", "payload": {"chart_schema_version": 1, "chart_id": "chart_missing", "evidence_status": "unavailable", "reason": "missing_or_corrupt"}},
+  {"case": "legacy", "payload": {"schema_version": 1, "run_id": "run_legacy", "revision": 0, "attempts": [], "shared_steps": [], "capabilities": {"can_view_raw_spectra": false, "can_view_sample_points": false}, "next_offset": null}},
+  {"case": "not_comparable", "payload": {"step_execution_id": "step_unknown_context", "step_key": "model", "execution_status": "succeeded", "evidence_status": "available", "facts": {}, "charts": [], "candidate_count": 0, "score": 0.5, "comparison_group_id": null, "comparison_reason": "missing_evaluation_context"}}
+]

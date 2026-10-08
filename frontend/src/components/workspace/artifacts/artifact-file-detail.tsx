@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { CodeEditor } from "@/components/workspace/code-editor";
+import { resolveReportImage } from "@/core/artifacts/delivery";
 import { useArtifactContent } from "@/core/artifacts/hooks";
 import {
   appendHtmlPreviewBaseHref,
@@ -507,7 +508,26 @@ export function ArtifactFilePreview({
         <SafeStreamdown
           className="size-full"
           {...artifactMarkdownPlugins}
-          components={{ a: ArtifactLink }}
+          components={{
+            a: ArtifactLink,
+            img: ({ src, alt }) => {
+              const resolved =
+                typeof src === "string"
+                  ? resolveReportImage(src, url)
+                  : undefined;
+              // Figures use the existing authenticated artifact route.
+
+              return resolved ? (
+                <img
+                  src={resolved}
+                  alt={alt ?? ""}
+                  className="my-4 max-w-full rounded-lg"
+                />
+              ) : (
+                <span>{alt ?? "图表不可用"}</span>
+              );
+            },
+          }}
         >
           {content ?? ""}
         </SafeStreamdown>

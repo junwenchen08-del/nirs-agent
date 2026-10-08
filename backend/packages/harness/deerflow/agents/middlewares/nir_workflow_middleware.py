@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -16,6 +17,9 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
 from deerflow.agents.thread_state import NIRWorkflowState
+from deerflow.community.nir.decision_facts import model_result_facts
+from deerflow.community.nir.model_autosave import failed_model_save, save_registered_model
+from deerflow.community.nir.process import bind_execution, finish_execution, reset_execution, start_execution
 from deerflow.community.nir.response_grounding import (
     render_grounded_nir_response,
     required_nir_workflow_action,
@@ -95,6 +99,7 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_predict": _ToolPolicy(frozenset({"execution"}), frozenset({"prediction"})),
     "nir_reflect": _ToolPolicy(frozenset({"evaluation"}), _MODEL_TASKS),
     "nir_search_knowledge": _ToolPolicy(frozenset({"execution", "knowledge"}), frozenset({"knowledge", *_MODEL_TASKS})),
+    "nir_search_method_knowledge": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
     "nir_register_model": _ToolPolicy(frozenset({"approved"}), _MODEL_TASKS),
     "nir_dataset_list": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
     "nir_dataset_get": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
@@ -104,7 +109,7 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_model_list": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
     "nir_model_get": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
     "nir_model_attach": _ToolPolicy(frozenset({"clarification"}), frozenset({"prediction"})),
-    "nir_model_promote": _ToolPolicy(frozenset({"registered"}), _MODEL_TASKS),
+    "nir_model_promote": _ToolPolicy(frozenset({"registered", "completed"}), _MODEL_TASKS),
     **{
         name: _ToolPolicy(
             frozenset({"planning", "execution", "evaluation", "knowledge", "approved"}),
@@ -913,20 +918,7 @@ def _model_attempt_update(
             {key: component.get(key) for key in ("name", "R2_val", "RPD", "RMSEP", "grade", "passed") if component.get(key) is not None} for component in result["per_component"][:20] if isinstance(component, Mapping)
         ]
         metrics_summary["component_count"] = len(result["per_component"])
-    result_fact_keys = (
-        "task_kind",
-        "label_name",
-        "classes",
-        "class_distribution",
-        "preprocessing",
-        "wavelength_selection",
-        "wavelength_selection_decision",
-        "model_selection_decision",
-        "candidate_results",
-        "model_candidates",
-        "method",
-    )
-    result_facts = {key: result.get(key) for key in result_fact_keys if result.get(key) is not None}
+    result_facts = model_result_facts(result)
     try:
         pipeline_steps, model_args, execution_signature = _request_execution_signature(request)
     except NIRWorkflowError:
@@ -1056,11 +1048,15 @@ def _next_workflow(
             notes="Knowledge retrieval completed successfully.",
         )
     if tool_name == "nir_register_model" and payload.get("status") == "registered":
-        return transition_workflow(
+        registered = transition_workflow(
             workflow,
             action="registered",
             notes=f"Registered model {payload.get('model_id', '')}".strip(),
         )
+        registered["registered_model"] = {"model_id": payload.get("model_id"), "version": payload.get("version")}
+        return registered
+    if tool_name == "nir_model_promote" and payload.get("library_status") == "ready":
+        return {**workflow, "model_library": {"status": "saved", "model_id": payload.get("model_id"), "version": payload.get("version")}}
     return None
 
 
@@ -1143,6 +1139,30 @@ def _advance(request: ToolCallRequest, result: ToolMessage | Command) -> ToolMes
     return _attach_workflow_update(result, updated) if updated is not None else result
 
 
+def _registration_save_context(request: ToolCallRequest, result: ToolMessage | Command) -> tuple[dict, dict] | None:
+    if request.tool_call.get("name") != "nir_register_model" or not isinstance(result, Command) or not isinstance(result.update, Mapping):
+        return None
+    workflow, payload = result.update.get("nir_workflow"), _success_payload(result)
+    if not isinstance(workflow, dict) or workflow.get("stage") != "registered" or payload is None or payload.get("status") != "registered":
+        return None
+    return workflow, payload
+
+
+def _with_model_library_save(result: Command, workflow: dict, payload: dict, outcome: dict) -> Command:
+    message = _tool_message(result)
+    if message is None:
+        return result
+    updated_message = message.model_copy(update={"content": json.dumps({**payload, "model_library": outcome}, ensure_ascii=False)})
+    return replace(
+        result,
+        update={
+            **result.update,
+            "nir_workflow": {**workflow, "model_library": outcome},
+            "messages": [updated_message if item is message else item for item in result.update.get("messages", [])],
+        },
+    )
+
+
 def _workflow_completion_reminder(
     required_action: str,
     workflow: Mapping[str, Any],
@@ -1181,7 +1201,27 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         if denied is not None:
             return _record_observation(request, denied)
         bound_request = _bind_reflection_request(request)
-        return _record_observation(bound_request, _advance(bound_request, handler(bound_request)))
+        execution = self._start_process(bound_request)
+        token = bind_execution(execution)
+        try:
+            result = _record_observation(bound_request, _advance(bound_request, handler(bound_request)))
+            context = _registration_save_context(bound_request, result)
+            if context is not None:
+                workflow, payload = context
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    outcome = asyncio.run(save_registered_model(bound_request.runtime, workflow, payload))
+                else:
+                    outcome = failed_model_save("async_runtime_required")
+                result = _with_model_library_save(result, workflow, payload, outcome)
+            self._finish_process(bound_request, execution, result)
+            return result
+        except BaseException as exc:
+            self._finish_process(bound_request, execution, None, status="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed" if isinstance(exc, Exception) else "interrupted")
+            raise
+        finally:
+            reset_execution(token)
 
     @override
     async def awrap_tool_call(
@@ -1193,10 +1233,39 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         if denied is not None:
             return _record_observation(request, denied)
         bound_request = _bind_reflection_request(request)
-        return _record_observation(
-            bound_request,
-            _advance(bound_request, await handler(bound_request)),
-        )
+        execution = await asyncio.to_thread(self._start_process, bound_request)
+        token = bind_execution(execution)
+        try:
+            result = _record_observation(bound_request, _advance(bound_request, await handler(bound_request)))
+            context = _registration_save_context(bound_request, result)
+            if context is not None:
+                workflow, payload = context
+                outcome = await save_registered_model(bound_request.runtime, workflow, payload)
+                result = _with_model_library_save(result, workflow, payload, outcome)
+            await asyncio.to_thread(self._finish_process, bound_request, execution, result)
+            return result
+        except BaseException as exc:
+            status = "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed" if isinstance(exc, Exception) else "interrupted"
+            await asyncio.shield(asyncio.to_thread(self._finish_process, bound_request, execution, None, status=status))
+            raise
+        finally:
+            reset_execution(token)
+
+    @staticmethod
+    def _start_process(request):
+        try:
+            return start_execution(request.runtime, str(request.tool_call.get("name")), str(request.tool_call.get("id")))
+        except Exception:
+            logger.exception("Unable to record NIR process start")
+            return None
+
+    @staticmethod
+    def _finish_process(request, execution, result, *, status=None):
+        payload = _success_payload(result) if result is not None else None
+        workflow = _state_from_request(request).get("nir_workflow") or {}
+        if isinstance(result, Command) and isinstance(result.update, Mapping):
+            workflow = result.update.get("nir_workflow") or workflow
+        finish_execution(request.runtime, execution, str(request.tool_call.get("name")), str(request.tool_call.get("id")), payload, workflow, status or ("succeeded" if payload else "failed"))
 
     def _guard_final_response(self, state: AgentState) -> dict | None:
         messages = state.get("messages") or []

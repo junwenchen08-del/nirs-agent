@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { type PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { ArtifactTrigger } from "@/components/workspace/artifacts";
 import {
@@ -37,6 +36,7 @@ import {
 } from "@/core/threads/hooks";
 import { threadTokenUsageToTokenUsage } from "@/core/threads/token-usage";
 import { textOfMessage } from "@/core/threads/utils";
+import type { ThreadInputMessage } from "@/core/uploads/mounted-dataset";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
@@ -156,9 +156,13 @@ export default function ChatPage() {
   ]);
 
   const handleSubmit = useCallback(
-    (message: PromptInputMessage) => {
+    (message: ThreadInputMessage) => {
       const sendPromise = sendMessage(threadId, message);
-      if (message.files.length > 0) {
+      if (
+        message.files.length > 0 ||
+        message.mountedDataset ||
+        message.mountedModel
+      ) {
         return sendPromise;
       }
       void sendPromise;
@@ -200,7 +204,7 @@ export default function ChatPage() {
               <ThreadTitle threadId={threadId} thread={thread} />
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <NIRWorkflowPanel workflow={nirWorkflow} />
+              <NIRWorkflowPanel workflow={nirWorkflow} threadId={threadId} />
               <TokenUsageIndicator
                 threadId={isNewThread ? undefined : threadId}
                 backendUsage={backendTokenUsage}
@@ -285,6 +289,7 @@ export default function ChatPage() {
                     )}
                     isWelcomeMode={isWelcomeMode}
                     enableDatasetCommand
+                    enableModelCommand
                     threadId={threadId}
                     autoFocus={isWelcomeMode}
                     status={

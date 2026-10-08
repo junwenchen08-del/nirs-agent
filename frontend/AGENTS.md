@@ -63,6 +63,15 @@ The frontend is a stateful chat application. Users create **threads** (conversat
 
 ### Data Flow
 
+The desktop process explorer's preprocessing step renders bounded official
+method evidence through `core/nir/method-knowledge.ts` and the matching
+`components/workspace/nir/method-knowledge.tsx` card. Missing historical evidence
+stays absent; guided, fallback, and unrecorded states are distinct. Only HTTPS
+`chemotools.org/methods/` source links become clickable; arbitrary fields and
+raw spectra are not projected. References are proposals, never adoption claims.
+Tests: `tests/unit/core/nir/method-knowledge.test.ts` and the evidence-backed
+`tests/e2e/nir-process-explorer.spec.ts`. No mobile-specific UI is added.
+
 1. User input → thread hooks (`core/threads/hooks.ts`) → LangGraph SDK streaming
 2. Stream events update thread state (messages, artifacts, todos, goal)
 3. Stop actions call the LangGraph SDK stream stop path; `core/threads/hooks.ts` invalidates current-thread, token-usage, and sidebar/search caches immediately and schedules one follow-up refetch because SDK stop may finish via abort + fire-and-forget cancel before backend title finalization commits
@@ -84,18 +93,35 @@ user-scoped localStorage keys; complete evidence remains in the current response
 exported as JSON.
 
 The default chat page projects live `thread.values.nir_workflow` through
-`core/nir/selectors.ts` into a bounded view model and conditionally renders the
+`core/nir/selectors.ts` and `core/nir/process-selectors.ts` into bounded view models and conditionally renders the
 `components/workspace/nir/` Sheet. When an older restored stream omits that
 field, `core/nir/hooks.ts` reads the owner-checked thread state endpoint; live
 state remains authoritative, and only same-project snapshots merge by revision.
 The projection allowlists metrics, caps strings and list sizes, shortens the
 dataset hash, and never passes artifact paths or the complete evidence object
-into the component. The panel groups modeling stages into four milestone cards,
-translates next-action codes, displays bounded metric cards, and opens the
-existing thread artifact drawer when artifacts are available. Milestones show
-workflow position, not elapsed time or a numeric completion percentage. This
-surface is the current thread's latest workflow summary, not a permanent
-experiment timeline; ordinary chats render no trigger.
+into the component. The desktop ChemAgent explanation panel has process,
+selection-evidence, and final-result tabs. Its process selector projects up to
+ten historical attempts, reflection/retry records, bounded audit facts,
+comparable metric trends, and candidate evidence from the checkpoint. Charts
+use only SVG and Tailwind. A trend compares attempts only when metric,
+protocol, and validation scope match. Selection scores come from training-only
+tuning/CV, never the final holdout. Missing evidence stays explicit, and
+registration is read from a recorded workflow event rather than inferred from
+`completed`. Ordinary chats render no trigger.
+`core/nir/presentation.ts` maps recorded method IDs and reason codes to short
+localized explanations. The selection tab leads with the chosen options and
+training-only comparison, while raw codes and candidate IDs stay in collapsed
+technical details. Unknown reasons remain explicitly unexplained.
+The durable process explorer also uses `core/nir/process-display.ts` and
+`process-facts.tsx` for Chinese metric/parameter labels, bounded number display
+and collapsed original records. Candidate configuration is linked only by an
+exact ID from the same step's recommendation; conflicting or absent records
+remain unnamed. Never infer methods from hash strings or change recorded
+scores/selection. Candidate row identity includes position to distinguish
+duplicate IDs; viewing and modeling adoption have separate badges. Workflow
+stage/tool names are localized while original codes remain expandable.
+Tests: `process-display.test.ts` and evidence-backed desktop browser QA in
+`nir-process-explorer.spec.ts` (including compact desktop windows).
 The custom-agent chat route does not mount this panel yet.
 
 The optional cross-session library lives at `/workspace/nir/datasets` and
@@ -121,6 +147,30 @@ editing; edits update descriptive catalog/chunk fields through Gateway without
 re-uploading or re-embedding the source document. The search test consumes
 Gateway retrieval diagnostics and distinguishes a calibrated abstention from
 an empty result, showing the rejection reason and top similarity score.
+
+The knowledge page has separate paper and method tabs. Method management
+(`method-knowledge-settings-page.tsx`, `core/knowledge/method-api.ts`) uses
+`/api/method-knowledge` directly, remaining available with paper RAG offline.
+The server's `can_edit` controls management buttons; writes include the visible
+catalog revision and surface HTTP 409 instead of retrying stale changes.
+Candidate fields use runtime schemas and omit blank values for defaults; the
+backend validates cross-parameter bounds. Draft saves, publication, retirement,
+confirmed default restoration, source links and audit history are desktop web
+flows. New cards only bind installed methods. Browser tests exercise a real
+synthetic-only API with no user catalog mutations.
+The 94-card catalog covers 70 official navigation documents and 84 installed
+Chemotools MCP exports, reusing existing algorithm cards. Type/category/name
+filters keep utilities, constants and example datasets distinct. MCP references
+show live sanitized parameter schemas (non-finite defaults as explicit text),
+required inputs, operations and separate website parameters read-only; website
+presence never grants execution. New MCP references do not enter automatic
+preprocessing grids. Browser QA exercises real catalog API coverage and MCP
+parameter rendering without changing production knowledge state.
+The catalog includes preprocessing and regression-model types with a
+list filter, accurate provider labels, applicability/limitations/parameter
+guidance details and editors. Model parameter combinations are marked as
+planning references that do not edit automatic training grids. When all
+installed algorithms already have cards, adding another is disabled.
 Document listings also consume `publication_readiness`; the publish action is
 disabled when required citation metadata (title, authors, year, or source) is
 missing, while the server remains the authoritative enforcement point.
@@ -128,9 +178,44 @@ DOI warnings do not disable publication; the publish action exposes the
 server-provided readiness message so users can verify genuinely DOI-less
 papers before continuing.
 
-`/goal` is a built-in composer command, not a skill activation. `src/components/workspace/input-box.tsx` intercepts `/goal`, `/goal clear`, and `/goal <condition>` before normal chat submission, calling Gateway `GET/PUT/DELETE /api/threads/{thread_id}/goal`. Setting `/goal <condition>` also submits the condition text as the next user task so the agent starts running immediately; status and clear do not start a run. Goal requests are tied to the current `threadId` with an `AbortController`, so switching threads or unmounting the composer aborts in-flight goal requests and stale responses cannot update the new thread's goal state. The chat pages render `GoalStatus` above the composer from `AgentThreadState.goal`, with local optimistic state until the next stream `values` update arrives. `/datasets` is another built-in composer command, enabled only in the default chat when the library feature flag is on: with no attachments pending, it lists owner-scoped saved datasets through `core/nir-library/api.ts`. Choosing a ready dataset submits an explicit attach-and-inspect user message, allowing the backend agent to create a new thread before attaching; the picker never reads raw spectra into browser state.
+`/goal` is a built-in composer command, not a skill activation. `src/components/workspace/input-box.tsx` intercepts `/goal`, `/goal clear`, and `/goal <condition>` before normal chat submission, calling Gateway `GET/PUT/DELETE /api/threads/{thread_id}/goal`. Setting `/goal <condition>` also submits the condition text as the next user task so the agent starts running immediately; status and clear do not start a run. Goal requests are tied to the current `threadId` with an `AbortController`, so switching threads or unmounting the composer aborts in-flight goal requests and stale responses cannot update the new thread's goal state. The chat pages render `GoalStatus` above the composer from `AgentThreadState.goal`, with local optimistic state until the next stream `values` update arrives. `/datasets` is another built-in composer command, enabled only in the default chat when the library feature flag is on: with no attachments pending, it lists owner-scoped saved datasets through `core/nir-library/api.ts`. Choosing a ready dataset ensures an owned thread exists, then calls the Dataset attach API without starting a run or sending a synthetic message. The composer displays a thread-scoped mounted selection; only the next manual submission includes its validated upload path in additional_kwargs.files, without re-uploading it. Mount requests abort on thread switch, unmount, or picker close. Clearing the selection does not delete the server-side thread copy. Mounted submissions return the send promise so a failure retains the selection. The picker never reads raw spectra into browser state.
 
 ### Key Patterns
+
+- **Saved-model command (desktop web)**: the default chat enables `/models`
+  separately from `/datasets`. `nir/model-command-dialog.tsx` reads owner-scoped
+  model versions; archived rows cannot be attached. `attachModelForComposer`
+  prepares an owned thread and invokes the existing verified model attachment
+  API without starting a run. `core/nir-library/mounted-model.ts` validates the
+  exact version/path before appending localized selection context to the next
+  manually sent human message. This is user selection, not execution evidence.
+  The composer retains new data files when the command opens, supports clearing
+  and replacement, aborts pending mounts on close/thread change, and retains
+  selections on submission failure. Model artifacts are never uploaded as input
+  datasets. Browser anchor: `model-command.spec.ts`.
+
+- **NIR deliveries (desktop web)**: `core/artifacts/delivery.ts` recognizes NIR
+  report/model/metrics sets and folds supporting cards without deleting files.
+  Ordinary artifact lists remain unchanged. New tools primarily present HTML and
+  ZIP. Relative Markdown figures resolve within the current artifact directory;
+  reject parent traversal. Actual offline HTML browser QA uses
+  `NIR_DELIVERY_QA_HTML` with `tests/e2e/nir-delivery.spec.ts`.
+
+- **NIR process explorer**: `/workspace/nir/process/[thread_id]` renders the
+  explorer; the chat Sheet links to it with `threadId`. APIs live in
+  `core/nir/process-{api,hooks,contract}.ts`, rendering in
+  `components/workspace/nir/process-{workspace,chart}.tsx`. Cache keys contain
+  owner, thread and full resource/version; abort obsolete requests and remove
+  owner cache on exit. Summary polling pauses in hidden tabs and uses ETags and
+  revision checks. Plot data is immutable and lazily fetched; zoom never changes
+  model evidence. Shared sample IDs link prediction/residual selections. Only
+  recorded ordered methods label candidates; hashes remain in explicit details.
+  matching server comparison groups form tuning trends; minima are limited to
+  the current page. Legacy summaries cannot rank attempts.
+  `NEXT_PUBLIC_NIR_PROCESS_ENABLED=false` hides the entry at build time. Browser
+  tests consume actual backend training exports; optional scale QA measures
+  browser rendering separately from backend latency. See the implementation
+  document and `tests/e2e/nir-process-explorer.spec.ts`.
 
 - **Server Components by default**, `"use client"` only for interactive components
 - **Thread hooks** (`useThreadStream`, `useSubmitThread`, `useThreads`) are the primary API interface
@@ -143,6 +228,12 @@ papers before continuing.
 - `src/app/workspace/chats/[thread_id]/page.tsx` owns composer busy-state wiring.
 - `src/app/workspace/chats/[thread_id]/page.tsx` and `src/app/workspace/agents/[agent_name]/chats/[thread_id]/page.tsx` own active-goal display state for their composer overlays.
 - `src/core/threads/hooks.ts` owns pre-submit upload state and thread submission.
+  Upload responses carry optional `dataset_library` saved/reused/failed outcomes.
+  `core/uploads/dataset-library.ts` counts distinct saved assets; the composer
+  displays localized success or failure feedback before starting the run. An
+  archive failure never claims restoration and failed library writes leave the
+  current upload usable. `/datasets` continues to fetch actual owner-scoped
+  library rows when opened. Browser anchor: `dataset-command.spec.ts`.
 
 ## Code Style
 

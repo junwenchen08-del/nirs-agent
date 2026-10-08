@@ -4,6 +4,35 @@ This file provides guidance to AI coding agents (Claude Code, Codex, and others)
 
 ## Project Overview
 
+### Durable NIR process evidence
+
+Single-target regression and MAT collections return `deliverables` containing an
+offline HTML report and `delivery.zip`. `_report.py` reads actual metric scopes;
+never infer wavelength units or production approval. `delivery.py` packages an
+explicit file allowlist, preserves model/metrics manifest bytes, rejects symlinks,
+and hashes exactly the archived bytes. It never recursively scans outputs or includes
+uploads. Markdown references images; only HTML embeds image bytes. Never read that
+HTML into agent context. Test anchors: `test_nir_delivery.py` and the real four-entry
+`test_nir_process_training.py`. Existing paths and scientific bindings remain valid.
+
+`community/nir/process.py` stores process attempts, step evidence, immutable SHA-256
+chart JSON and runtime-run links in owner/thread-local `nir-process/`, outside
+sandbox-visible `user-data`. The standalone SQLite index uses transactional
+`PRAGMA user_version` migration (currently 2, including upgrade from 1); it is not
+an application ORM table and does not change the central database schema. Thread
+deletion removes the index and blobs together. Never put chart arrays in workflow
+checkpoints, refit a model or resplit data to make charts.
+
+`NIRWorkflowMiddleware` allocates attempts before authorized model tools execute,
+binds their evidence context and records failure/cancellation. Gateway startup
+only interrupts attempts linked to runs confirmed orphaned by `RunManager`.
+`routers/nir_process.py` checks thread ownership on every read, uses bounded offset
+pagination/revision ETags, and verifies chart membership/version/hash. Point
+capabilities apply to owner-only access; no restricted viewer route exists.
+`NIR_PROCESS_ENABLED=false` disables recording/reads. Contracts and six examples
+are in `contracts/nir-process-v1.*`; actual producer output is validated by
+`test_nir_process_training.py`. See the implementation document for QA commands.
+
 DeerFlow is a LangGraph-based AI super agent system with a full-stack architecture. The backend provides a "super agent" with sandbox execution, persistent memory, subagent delegation, and extensible tool integration - all operating in per-thread isolated environments.
 
 **Architecture**:
@@ -65,6 +94,57 @@ deer-flow/
 ```
 
 ## Important Development Guidelines
+
+### Official method references before regression preprocessing
+
+`/api/method-knowledge` manages references independently of the paper HTTP
+server. `nir_core.knowledge.method_store.MethodCatalogStore` persists whole
+catalog snapshots and a 30-entry audit view in `knowledge/methods.sqlite3`
+under `get_paths().base_dir`. Packaged JSON is the read-only revision-0 seed.
+Writes require an admin caller, an expected revision, and validated editable
+fields; SQLite `BEGIN IMMEDIATE` prevents lost updates. Provider bindings,
+algorithm implementations and runtime bounds are immutable from this API.
+`knowledge/method_registry.py` binds all 21 installed preprocessors (verified
+Chemotools or native) and four scikit-learn regression references. Model cards
+are planning-only and never enter preprocessing profile results or override
+model-family grids. Native cards cite primitive documentation honestly.
+Snapshot reads/writes merge missing packaged cards/fields, preserving existing
+managed values and retirement/draft state; no read-triggered database writes.
+Sources allow only HTTPS Chemotools methods, scikit-learn module docs or SciPy
+generated references. Expansion anchors: `test_nir_method_expansion.py`.
+`knowledge/method_inventory.py` binds a reviewed 70-document website inventory
+and all 84 public pinned MCP exports. The 94 cards reuse existing preprocessing
+classes; utilities, constants and dataset loaders remain labeled references.
+New `mcp_reference` cards are planning-only for explicit MCP calls, never Cal
+automatic candidates. Live allowlisted MCP schemas/required inputs/operations
+are read-only, separate from website signatures; non-finite defaults use
+`default_repr`. Published documentation-only references may be retrieved but
+cannot execute. Coverage, immutable-schema checks and legacy edit preservation
+are anchored in `test_nir_method_full_catalog.py`; actual stdio and fit/apply
+behavior remain covered by `nir_core/tests/test_mcp`.
+Published cards alone enter retrieval; drafts and retired cards are excluded.
+`community/nir/method_catalog.py` supplies a lazy managed retriever to the
+planning tool, exploratory helper and four primary regression entry points;
+resolve the persistent snapshot inside search so IO failure retains rule
+fallback. Old metrics/model evidence is never rewritten by management edits.
+Anchors: `test_nir_method_catalog.py` and real process-training tests.
+
+`nir_core.knowledge.methods` searches 94 reviewed packaged method cards with
+offline FTS5 BM25 plus bilingual diagnostic expansion. It is independent from
+the optional Chroma paper collection and never satisfies its two-study decision
+gate. `nir_search_method_knowledge` is read-only and allowed in planning; it does
+not advance the knowledge/retry workflow. Only published cards with a matching
+catalog provider class/version can propose candidates. Runtime parameter,
+axis, explicit-only, and low-SNR guards apply to both retrieved and rule candidates.
+`_preprocessing_plan.select_preprocessing` receives Cal/Tuning, never Test,
+retrieves before fitting, and selects by Cal RMSECV with the 1% simplicity rule.
+CSV auto/named trainers default to `pipeline_steps="auto"`; NPZ single-target
+requires the explicit sentinel to preserve legacy already-preprocessed `None`.
+Explicit JSON steps and raw `[]` remain authoritative. Full card hashes and CV
+evidence persist in metrics/model preprocessing selection; bounded citations are
+shown in process facts and reports. Cards are package data in nir-core wheels.
+See `docs/nir-method-knowledge.md`, `test_nir_method_knowledge.py`, and the real
+four-entry regressions in `test_nir_process_training.py`.
 
 ### Documentation Update Policy
 **CRITICAL: Always update README.md and AGENTS.md after every code change**
@@ -196,6 +276,12 @@ from deerflow.config import get_app_config
 - Extends `AgentState` with: `sandbox`, `thread_data`, `title`, `artifacts`, `todos`, `uploaded_files`, `viewed_images`, `goal`, `promoted`, `delegations`, `skill_context`, `summary_text`
 - Uses custom reducers: `merge_artifacts` (deduplicate), `merge_viewed_images` (merge/clear), `merge_goal` (preserve the active goal across ordinary state updates unless the goal writer replaces it), `merge_promoted` (catalog-hash-scoped deferred tool promotions), `merge_delegations` (append task delegation entries, same id latest wins, terminal status never downgraded, capped to the most recent entries), and `merge_skill_context` (dedupe active-skill references by path, keep the most recently read entries; entries store a name/path/description reference, not the SKILL.md body). `summary_text` is a LastValue channel updated by summarization and projected into model requests as durable context data instead of being stored as a `messages` item.
 - NIR domain runs use the checkpointed `nir_workflow` channel. The
+  process explanation panel receives a bounded `result_facts` projection from
+  `decision_facts.py` (preprocessing, wavelength, and model candidate choices)
+  in `attempt_evidence`. `record_attempt` copies only the decision facts into
+  each historical attempt, along with the tool-selected method, preserving
+  earlier rounds after later tools run.
+  This projection excludes artifact paths, wavelength index arrays, and raw spectra.
   `deerflow.community.nir.workflow:nir_workflow_tool` applies validated stage
   transitions, retry budgets, required-input checks, and the user approval gate
   before model registration. Modeling tasks inspect available data before asking
@@ -891,6 +977,15 @@ remain isolated. The Gateway exposes owner-scoped save/list/get/rename/archive,
 Profile create/list/confirm, and storage-usage endpoints. Profile mappings are
 size-bounded JSON, versioned separately from the original bytes, and
 `needs_user_mapping` cannot be confirmed. `nir_inspect` remains read-only.
+HTTP upload completion now automatically calls the same immutable save service
+for CSV/TXT/MAT when `nir_library.enabled` and `auto_save_uploads` (default true)
+are on. It runs after all upload validation and sandbox sync, outside agent stage
+gates. New conversations acquire an explicit owner thread row; a concurrent
+creation rechecks ownership and legacy NULL owners are never claimed. Per-file
+`dataset_library` outcomes distinguish saved/reused/failed without failing a
+successful thread upload; setup errors also remain explicit. Manual saves still
+require confirmed intent, profiles are not auto-confirmed, and archive state is
+preserved. Integration anchor: `test_upload_dataset_autosave.py`.
 The owner-only reconciliation endpoint compares active SQL sizes with exact
 asset directories and reports missing/untracked/stale counts without returning
 host paths; it does not mutate files.
@@ -922,15 +1017,29 @@ thread/run/attempt plus the exact existing `validation_scope`; null Dataset
 lineage remains valid for older direct uploads.
 
 `nir_model_list/get/promote/attach` are bounded Agent tools and the Gateway
-exposes matching owner-scoped endpoints. Promotion requires explicit current
-user intent and the `registered` workflow stage. The intent matcher accepts
+exposes matching owner-scoped endpoints. Manual promotion requires explicit current
+user intent and an approved `registered/completed` workflow. Completed workflows
+still need the actual thread registry to match the current approved evidence.
+The intent matcher accepts
 natural Chinese/English confirmation even when a long model identity separates
 the save action from the cross-session scope, while explicit negation fails
 closed. Attach re-verifies the library
 package, copies it to `/mnt/user-data/outputs/models/{model_id}/{version}/` in
 an owner-matched target thread, re-verifies the copy, and returns the model path
-accepted by `nir_predict`; remote sandbox sync copies the whole bundle. Model
-promotion is distinct from thread registration and is never automatic.
+accepted by `nir_predict`; remote sandbox sync copies the whole bundle.
+After successful approved agent registration, `NIRWorkflowMiddleware` calls
+`community/nir/model_autosave.py` when the library and its default-on
+`auto_save_registered_models` policy are enabled. It reuses `ModelService`'s
+owner, scientific, hash, signing, lineage, quota and atomic-copy gates; it never
+promotes a raw upload or unapproved attempt. Explicit visible user refusal skips
+storage. The exact `registered_model` identity and bounded `model_library` outcome
+persist in workflow state and the tool response; saved/reused, failed, disabled
+and skipped are distinct. Storage failure preserves scientific registration,
+and an explicit manual retry may run even after workflow completion. Async agent
+execution awaits persistence before returning; a sync wrapper inside a running
+event loop reports a separate storage failure instead of nesting event loops.
+Tests: `test_nir_model_autosave.py`, `test_nir_model_service.py` and
+`test_nir_models_router.py`.
 
 Cross-session prediction attaches both assets before starting a prediction
 workflow, then runs inspect/load while the workflow is still in `data_audit`,

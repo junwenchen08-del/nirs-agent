@@ -156,6 +156,20 @@ async def test_promote_is_verified_owner_scoped_and_idempotent(model_library) ->
 
 
 @pytest.mark.asyncio
+async def test_completed_approved_registration_can_be_saved_later(model_library) -> None:
+    service, paths = model_library
+    version, workflow = _registered_package(paths)
+    workflow["stage"] = "completed"
+    saved = await service.promote_registered("alice", "source-thread", "tablet_assay", version, workflow=workflow)
+    assert saved["status"] == "ready"
+    assert len(await service.list_models("alice")) == 1
+    workflow["approval_status"] = "rejected"
+    with pytest.raises(ModelError) as exc:
+        await service.promote_registered("alice", "source-thread", "tablet_assay", version, workflow=workflow)
+    assert exc.value.code == "registration_required"
+
+
+@pytest.mark.asyncio
 async def test_promote_rejects_unregistered_or_scientifically_invalid_state(model_library) -> None:
     service, paths = model_library
     version, workflow = _registered_package(paths)

@@ -989,6 +989,9 @@ tools:
   - name: nir_search_knowledge
     group: nir
     use: deerflow.community.nir.knowledge:nir_search_knowledge_tool
+  - name: nir_search_method_knowledge
+    group: nir
+    use: deerflow.community.nir.knowledge:nir_search_method_knowledge_tool
 
 # ============================================================================
 # Tool Search Configuration (Deferred Tool Loading)
@@ -1539,6 +1542,8 @@ database:
 # sandbox output. Enabling requires a persistent sqlite/postgres DB.
 nir_library:
   enabled: false
+  auto_save_uploads: true
+  auto_save_registered_models: true
   max_dataset_file_size: 52428800
   max_user_dataset_bytes: 5368709120
   max_user_model_bytes: 5368709120

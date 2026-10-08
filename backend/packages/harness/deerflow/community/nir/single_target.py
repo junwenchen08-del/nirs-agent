@@ -27,6 +27,7 @@ from ._common import (
     _write_trusted_model_artifact,
 )
 from ._knowledge_hint import _build_knowledge_hint
+from ._preprocessing_plan import method_knowledge_summary, pipeline_records, select_preprocessing
 from ._resources import budget_for_runtime, resource_error
 from ._science_gate import (
     dataset_science_gate,
@@ -786,7 +787,10 @@ def nir_train_model_tool(
             a method name and optional hyper-parameters dict. When provided,
             the tool internally splits data first, then fits the pipeline on
             train only (leakage-safe), then transforms all sets.
-            If None, assumes input is already preprocessed.
+            ``auto`` retrieves official method references from calibration
+            diagnostics and chooses a bounded pipeline by calibration-only CV.
+            ``[]`` explicitly uses raw spectra. If None, assumes input is
+            already preprocessed (legacy behavior; no automatic processing).
         test_ratio: Fraction of data reserved as the independent test set.
         val_ratio: Fraction reserved as validation.
         max_components: Upper bound for the PLS/PCR component search.
@@ -873,11 +877,22 @@ def nir_train_model_tool(
         if validation_error := science_gate_error(split_validation):
             return _err(validation_error)
 
+        process_partitions = {"calibration": (X_tr, y_tr), "tuning": (X_val, y_val), "holdout": (X_te, y_te)}
+
         # ★ v3: Leakage-safe inline preprocessing when pipeline_steps given.
         best_pipe = None
         preprocessing_desc = "none"
         steps_list: list = []
-        if pipeline_steps is not None:
+        preprocessing_selection = None
+        if pipeline_steps == "auto":
+            budget.checkpoint("method_knowledge_preprocessing")
+            best_pipe, preprocessing_selection = select_preprocessing(X_tr, y_tr, X_val, y_val, wv, max_components=max_components)
+            steps_list = pipeline_records(best_pipe)
+            X_tr = best_pipe.transform(X_tr, wv)
+            X_val = best_pipe.transform(X_val, wv)
+            X_te = best_pipe.transform(X_te, wv)
+            preprocessing_desc = best_pipe.description() or "raw"
+        elif pipeline_steps is not None:
             budget.checkpoint("preprocessing")
             try:
                 from nir_core.models import PreprocessingStep  # noqa: F401
@@ -906,6 +921,7 @@ def nir_train_model_tool(
                 X_te = best_pipe.transform(X_te, wv)
                 preprocessing_desc = best_pipe.description()
 
+        process_preprocessed = X_tr
         budget.checkpoint("wavelength_selection")
         X_tr, X_val, X_te, model_wv, wavelength_selection_meta = _apply_wavelength_selection(
             X_tr,
@@ -957,6 +973,7 @@ def nir_train_model_tool(
             "n_wavelengths_model": int(wavelength_selection_meta["n_selected"]),
             "preprocessing": preprocessing_desc,
             "preprocessing_steps": steps_list if pipeline_steps is not None else [],
+            "preprocessing_selection": preprocessing_selection,
             "wavelength_selection": wavelength_selection_meta,
             "train": compute_metrics(y_tr, y_pred_tr),
             "val": compute_metrics(y_val, y_pred_val),
@@ -1018,6 +1035,7 @@ def nir_train_model_tool(
                 model,
                 method=method,
                 preprocessing_pipeline=best_pipe,
+                preprocessing_selection=preprocessing_selection,
                 preprocessing_desc=preprocessing_desc,
                 wavelength_selection=wavelength_selection_meta,
                 X_reference=X_tr,
@@ -1041,10 +1059,13 @@ def nir_train_model_tool(
         spec_data = SpectralData(X=X, y=y, wv=wv)
 
         out_dir = os.path.dirname(real_model)
+        from ._report import report_context
+
+        report_metrics = report_context(runtime, metrics, {"calibration": len(y_tr), "tuning": len(y_val), "holdout": len(y_te)})
         raw_b64, pred_b64, resid_b64, cv_b64, vip_b64, coef_b64 = _write_plots_and_report(
             out_dir=out_dir,
             spec_data=spec_data,
-            metrics=metrics,
+            metrics=report_metrics,
             quality=quality,
             best_pipe=best_pipe,
             y_te=y_te,
@@ -1059,6 +1080,19 @@ def nir_train_model_tool(
         )
 
         out_virtual = os.path.dirname(model_output)
+        from .delivery import delivery_payload
+
+        delivery = delivery_payload(
+            os.path.join(out_dir, "report.md"),
+            real_model,
+            real_metrics,
+            virtual_dir=out_virtual,
+            figures=[
+                os.path.join(out_dir, name)
+                for name, present in [("raw_spectra.png", raw_b64), ("predicted_vs_reference.png", pred_b64), ("residuals.png", resid_b64), ("cv_curve.png", cv_b64), ("vip_scores.png", vip_b64), ("regression_coefficients.png", coef_b64)]
+                if present
+            ],
+        )
 
         # ★ Knowledge-base hint: when the domain is non-standard or R² is low,
         # suggest a concrete retrieval query so the LLM can pull relevant
@@ -1071,14 +1105,41 @@ def nir_train_model_tool(
             diagnostics=metrics.get("diagnostics"),
         )
 
+        from .process import publish_regression
+
+        process_evidence = publish_regression(
+            runtime,
+            tool="nir_train_model",
+            call_id=tool_call_id,
+            X=X,
+            y=y,
+            wv=wv,
+            partitions=process_partitions,
+            processed_cal=process_preprocessed,
+            predictions={"holdout": y_pred_te, "tuning": y_pred_val},
+            metrics=metrics,
+            pipeline=steps_list,
+            fitted_model=model,
+        )
         return _ok(
             {
                 "status": "ok",
+                "process_evidence": process_evidence,
                 "protocol": "random_three_way_holdout",
                 "validation_scope": "independent_holdout_not_external",
                 "method": method,
                 "n_components": best_n,
                 "preprocessing": preprocessing_desc,
+                "preprocessing_selection": {
+                    "method_knowledge": method_knowledge_summary(preprocessing_selection["recommendation"]["method_knowledge"]),
+                    "calibration_samples": len(y_tr),
+                    "candidate_count": len(preprocessing_selection["recommendation"]["candidates"]),
+                    "selected_candidate_id": preprocessing_selection["evaluation"]["best_candidate_id"],
+                    "selected_pipeline": steps_list,
+                    "selection_rule": "rmsecv_1pct",
+                }
+                if preprocessing_selection
+                else None,
                 "wavelength_selection": wavelength_selection_meta,
                 "R2_val": round(metrics["R2_val"], 4),
                 "RPD": round(metrics["RPD"], 4),
@@ -1103,6 +1164,7 @@ def nir_train_model_tool(
                 ),
                 "resource_budget": budget.evidence(),
                 "report": out_virtual + "/report.md",
+                **delivery,
                 "knowledge_hint": knowledge_hint,
                 "plots": {
                     "raw_spectra": out_virtual + "/raw_spectra.png",

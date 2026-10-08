@@ -121,9 +121,21 @@ export const enUS: Translations = {
     goalCommandDescription: "Set, show, or clear an active goal",
     datasetCommandDescription: "Browse and use saved datasets",
     datasetPickerDescription:
-      "Choose a dataset to attach it to this chat and check its structure.",
-    datasetUsePrompt:
-      "Attach dataset {id} ({name}) from my saved dataset library to this chat. Check its structure and tell me which analyses it supports. Do not start modeling yet.",
+      "Attach a file without sending a message. Enter your request and send it when ready.",
+    datasetAttached: "Attached. Enter your request and send when ready.",
+    datasetAttaching: "Attaching dataset, please wait",
+    datasetAttachFailed: "Dataset was not attached. Please retry.",
+    datasetClearSelection: "Clear this dataset selection",
+    modelCommandDescription: "Select a saved model to predict new data",
+    modelPickerDescription:
+      "Select a model version to attach it to this chat. Upload new data or select it with /datasets, enter your prediction request, and send when ready.",
+    modelAttached:
+      "Model attached. Add new data, enter your prediction request, and send.",
+    modelAttaching: "Attaching model. Please wait.",
+    modelAttachFailed: "Could not attach the model. Please retry.",
+    modelClearSelection: "Clear this model selection",
+    modelSelectionContext:
+      "Manually selected prediction model (inspect the new data first, then reuse this model for prediction; attachment does not mean inference has run):",
     goalLabel: "Goal",
     goalContinuing: "Continuing {count}/{max}",
     goalContinuationTooltip:
@@ -477,6 +489,24 @@ export const enUS: Translations = {
 
   // Subtasks
   uploads: {
+    datasetsSaved: (saved: number, reused: number) =>
+      `${saved ? `${saved} dataset(s) saved automatically. ` : ""}${reused ? `${reused} dataset(s) already in the library; existing records reused. ` : ""}Use /datasets to select them next time.`,
+    datasetSaveFailed: (filename: string, errorCode: string) => {
+      const reasons: Record<string, string> = {
+        quota_exceeded: "dataset library capacity exceeded",
+        library_write_limit: "library write limit reached",
+        insufficient_free_space: "insufficient free disk space",
+        file_too_large: "file exceeds the library file-size limit",
+        dataset_archived:
+          "identical dataset is archived; restore it in the library",
+        dataset_unavailable: "existing dataset is unavailable",
+        source_hash_mismatch: "existing dataset failed verification",
+        source_changed: "file changed during saving",
+        database_unavailable: "dataset library is temporarily unavailable",
+        thread_not_owned: "this chat has no valid ownership record",
+      };
+      return `“${filename}” was uploaded but not saved to the dataset library: ${reasons[errorCode] ?? "save failed; retry from the dataset library later"}. It remains available in this chat.`;
+    },
     uploading: "Uploading...",
     uploadingFiles: "Uploading files, please wait...",
     limitsHint: (maxFiles: number, maxFileSize: string, maxTotalSize: string) =>

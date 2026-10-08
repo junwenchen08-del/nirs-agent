@@ -343,7 +343,7 @@ class ModelService:
         """Promote exactly one workflow-approved and thread-registered bundle."""
 
         self._enabled()
-        if workflow.get("stage") != "registered" or workflow.get("approval_status") != "approved":
+        if workflow.get("stage") not in {"registered", "completed"} or workflow.get("approval_status") != "approved":
             raise ModelError("registration_required", "Only an approved, registered workflow model can be promoted")
         evidence = workflow.get("attempt_evidence")
         if not isinstance(evidence, Mapping):

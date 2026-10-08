@@ -315,6 +315,39 @@ def test_complete_calibration_requires_explicit_approval_before_registration():
     assert state["approval_status"] == "approved"
 
 
+def test_attempt_keeps_bounded_historical_selection_snapshot():
+    state = start_workflow(
+        task_type="calibration",
+        data_path="/mnt/user-data/uploads/corn.npz",
+        analyte="protein",
+        unit="%",
+        domain="food_protein",
+        validation_goal="internal_holdout",
+    )
+    state = transition_workflow(state, action="record_audit", audit_passed=True)
+    state = transition_workflow(state, action="plan_ready")
+    state = transition_workflow(
+        state,
+        action="record_attempt",
+        attempt_passed=True,
+        attempt_evidence={
+            "result_facts": {
+                "preprocessing_selection": {
+                    "selected_candidate_id": "snv",
+                    "selected_pipeline": [{"method": "snv", "params": {"private_path": "/mnt/private"}}],
+                    "candidates": [{"candidate_id": "snv", "cv_rmse": 1.2, "selected": True}],
+                },
+                "wavelength_selection": {"method": "cars", "selected_indices": list(range(1000))},
+                "method": "ridge",
+            }
+        },
+    )
+    assert state["attempts"][0]["decision_facts"]["preprocessing_selection"]["selected_candidate_id"] == "snv"
+    assert state["attempts"][0]["decision_facts"]["preprocessing_selection"]["selected_pipeline"] == [{"method": "snv"}]
+    assert state["attempts"][0]["selected_method"] == "ridge"
+    assert "selected_indices" not in state["attempts"][0]["decision_facts"]["wavelength_selection"]
+
+
 def test_retry_execution_signature_ignores_transport_paths() -> None:
     steps, model_args, signature = retry_execution_signature(
         tool_name="nir_train_partitioned_model",

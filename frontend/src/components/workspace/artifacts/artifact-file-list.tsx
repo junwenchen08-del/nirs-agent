@@ -10,6 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { groupDeliveryFiles } from "@/core/artifacts/delivery";
 import { urlOfArtifact } from "@/core/artifacts/utils";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { useI18n } from "@/core/i18n/hooks";
@@ -32,11 +33,12 @@ export function ArtifactFileList({
   files: string[];
   threadId: string;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { user } = useAuth();
   const isAdmin = user?.system_role === "admin";
   const { select: selectArtifact, setOpen } = useArtifacts();
   const [installingFile, setInstallingFile] = useState<string | null>(null);
+  const { primary, supporting } = groupDeliveryFiles(files);
 
   const handleClick = useCallback(
     (filepath: string) => {
@@ -78,9 +80,9 @@ export function ArtifactFileList({
     [threadId, installingFile, t],
   );
 
-  return (
-    <ul className={cn("flex w-full flex-col gap-4", className)}>
-      {files.map((file) => (
+  const renderFiles = (items: string[]) => (
+    <ul className="flex w-full flex-col gap-4">
+      {items.map((file) => (
         <Card
           key={file}
           className="relative cursor-pointer p-3"
@@ -88,7 +90,13 @@ export function ArtifactFileList({
         >
           <CardHeader className="grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 pr-2 pl-1">
             <CardTitle className="relative min-w-0 pl-8 leading-tight [overflow-wrap:anywhere] break-words">
-              <div className="min-w-0">{getFileName(file)}</div>
+              <div className="min-w-0">
+                {getFileName(file) === "delivery.zip"
+                  ? locale === "zh-CN"
+                    ? "完整建模交付包"
+                    : "Complete modeling package"
+                  : getFileName(file)}
+              </div>
               <div className="absolute top-2 -left-0.5">
                 {getFileIcon(file, "size-6")}
               </div>
@@ -131,5 +139,20 @@ export function ArtifactFileList({
         </Card>
       ))}
     </ul>
+  );
+  return (
+    <div className={cn("flex w-full flex-col gap-4", className)}>
+      {renderFiles(primary)}
+      {supporting.length > 0 && (
+        <details className="rounded-xl border p-3">
+          <summary className="text-muted-foreground cursor-pointer text-sm">
+            {locale === "zh-CN"
+              ? `模型、指标与辅助文件（${supporting.length}）`
+              : `Models, metrics and supporting files (${supporting.length})`}
+          </summary>
+          <div className="mt-3">{renderFiles(supporting)}</div>
+        </details>
+      )}
+    </div>
   );
 }

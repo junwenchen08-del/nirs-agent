@@ -43,7 +43,9 @@ def _wavelength_axis(data: SpectralData) -> np.ndarray:
     return np.arange(data.X.shape[1], dtype=float)
 
 
-def plot_raw_spectra(data: SpectralData, n_highlight: int = 5) -> str:
+def plot_raw_spectra(
+    data: SpectralData, n_highlight: int = 5, *, wavelength_unit: str | None = "nm"
+) -> str:
     """Plot raw NIR spectra with a few highlighted samples.
 
     All spectra are drawn in light gray; the first ``n_highlight`` samples are
@@ -52,6 +54,7 @@ def plot_raw_spectra(data: SpectralData, n_highlight: int = 5) -> str:
     Args:
         data: SpectralData containing the spectra to plot.
         n_highlight: Number of spectra to highlight with distinct colors.
+        wavelength_unit: Explicit axis unit; None labels an unknown unit.
 
     Returns:
         Base64-encoded PNG string of the figure.
@@ -81,7 +84,15 @@ def plot_raw_spectra(data: SpectralData, n_highlight: int = 5) -> str:
         ax.legend(loc="best", fontsize=8, ncol=min(n_highlight, 5))
 
     ax.set_title("Raw Spectra", fontsize=13)
-    ax.set_xlabel("Wavelength (nm)" if data.wv is not None else "Column index")
+    ax.set_xlabel(
+        (
+            f"Spectral axis ({wavelength_unit})"
+            if wavelength_unit
+            else "Spectral axis (unit not recorded)"
+        )
+        if data.wv is not None
+        else "Column index"
+    )
     ax.set_ylabel("Absorbance")
     ax.grid(True, linestyle="--", alpha=0.4)
 

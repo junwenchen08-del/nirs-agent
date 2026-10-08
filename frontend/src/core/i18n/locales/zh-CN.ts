@@ -115,9 +115,20 @@ export const zhCN: Translations = {
     goalCommandDescription: "设置、查看或清除当前目标",
     datasetCommandDescription: "查看并使用已保存的数据集",
     datasetPickerDescription:
-      "选择数据集后，将在当前对话中发起挂载和数据检查。",
-    datasetUsePrompt:
-      "从数据集库挂载编号为 {id} 的数据集（{name}）到当前对话，检查文件结构并告诉我可以用于哪些分析；先不要建模。",
+      "选择数据集后只挂载文件。输入分析要求并点击发送后，智能体才开始处理。",
+    datasetAttached: "已挂载，输入要求后点击发送",
+    datasetAttaching: "正在挂载数据集，请稍候",
+    datasetAttachFailed: "挂载未成功，请重试",
+    datasetClearSelection: "取消本次数据集选择",
+    modelCommandDescription: "选择已保存的模型用于新数据预测",
+    modelPickerDescription:
+      "选择模型版本后只挂载到当前对话。上传新数据或用 /datasets 选择数据，输入预测要求并手动发送后开始预测。",
+    modelAttached: "模型已挂载，添加新数据并输入预测要求后发送",
+    modelAttaching: "正在挂载模型，请稍候",
+    modelAttachFailed: "模型挂载未成功，请重试",
+    modelClearSelection: "取消本次模型选择",
+    modelSelectionContext:
+      "本次手动选择的预测模型（请先审查新数据，并复用该模型进行预测；挂载不代表预测已执行）：",
     goalLabel: "目标",
     goalContinuing: "续跑中 {count}/{max}",
     goalContinuationTooltip:
@@ -458,6 +469,23 @@ export const zhCN: Translations = {
   },
 
   uploads: {
+    datasetsSaved: (saved: number, reused: number) =>
+      `${saved ? `${saved} 个数据集已自动保存至数据集库。` : ""}${reused ? `${reused} 个数据集已在库中，已复用现有记录。` : ""}下次输入 /datasets 即可选择使用。`,
+    datasetSaveFailed: (filename: string, errorCode: string) => {
+      const reasons: Record<string, string> = {
+        quota_exceeded: "数据集库容量不足",
+        library_write_limit: "已达到资料库存储写入上限",
+        insufficient_free_space: "磁盘剩余空间不足",
+        file_too_large: "文件超过数据集库的单文件限制",
+        dataset_archived: "相同数据集已归档，请在数据集库中恢复",
+        dataset_unavailable: "已有数据集暂不可用",
+        source_hash_mismatch: "已有数据集校验失败",
+        source_changed: "保存期间文件发生变化",
+        database_unavailable: "数据集库服务暂不可用",
+        thread_not_owned: "当前对话缺少有效的数据归属记录",
+      };
+      return `“${filename}”已上传，但未保存至数据集库：${reasons[errorCode] ?? "保存失败，请稍后从数据集库重试"}。当前对话仍可使用此文件。`;
+    },
     uploading: "上传中...",
     uploadingFiles: "文件上传中，请稍候...",
     limitsHint: (maxFiles: number, maxFileSize: string, maxTotalSize: string) =>

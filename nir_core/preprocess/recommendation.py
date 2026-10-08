@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -63,6 +63,7 @@ class PreprocessingCandidate:
     candidate_id: str
     steps: tuple[PreprocessingStep, ...]
     reasons: tuple[str, ...]
+    evidence_ids: tuple[str, ...] = ()
 
     def to_pipeline(self) -> PreprocessingPipeline:
         return PreprocessingPipeline(list(self.steps))
@@ -77,6 +78,7 @@ class PreprocessingCandidate:
             ],
             "description": pipeline.description() if self.steps else "raw",
             "reasons": list(self.reasons),
+            "evidence_ids": list(self.evidence_ids),
             "providers": pipeline.provider_manifest(),
         }
 
@@ -89,6 +91,7 @@ class PreprocessingRecommendation:
     candidates: tuple[PreprocessingCandidate, ...]
     manual_recommendations: tuple[str, ...]
     exclusions: tuple[dict[str, str], ...]
+    method_knowledge: dict[str, Any] = field(default_factory=dict)
 
     def pipelines(self) -> list[PreprocessingPipeline]:
         return [candidate.to_pipeline() for candidate in self.candidates]
@@ -103,6 +106,7 @@ class PreprocessingRecommendation:
                 "max_steps": self.limits.max_steps,
             },
             "profile": self.profile.as_dict(),
+            "method_knowledge": self.method_knowledge,
             "candidates": [candidate.as_dict() for candidate in self.candidates],
             "manual_recommendations": list(self.manual_recommendations),
             "exclusions": list(self.exclusions),
@@ -229,6 +233,8 @@ def recommend_preprocessing(
     wv: np.ndarray | None = None,
     *,
     budget: str = "standard",
+    knowledge_mode: str = "rules",
+    knowledge_base: Any = None,
 ) -> PreprocessingRecommendation:
     """Generate deterministic candidates from calibration spectra only."""
     normalized_budget = str(budget).strip().lower()
@@ -239,6 +245,8 @@ def recommend_preprocessing(
             f"budget must be one of {sorted(BUDGETS)}, got {budget!r}."
         ) from exc
 
+    if knowledge_mode not in {"rules", "auto"}:
+        raise ValueError("knowledge_mode must be 'rules' or 'auto'")
     profile = profile_preprocessing_data(X_calibration, wv)
     tags = set(profile.tags)
     window = _sg_window(profile.n_wavelengths)
@@ -383,6 +391,71 @@ def recommend_preprocessing(
             }
         )
 
+    method_knowledge: dict[str, Any] = {
+        "mode": "disabled",
+        "reason": "rule_based_requested",
+        "profile_scope": "calibration_only",
+        "results": [],
+    }
+    evidence_by_id: dict[str, tuple[str, ...]] = {}
+    if knowledge_mode == "auto":
+        from nir_core.knowledge.methods import retrieve_method_plan
+
+        method_knowledge = retrieve_method_plan(
+            profile.as_dict(), knowledge_base=knowledge_base
+        )
+        exclusions.extend(method_knowledge.get("exclusions", []))
+        references = [
+            item for item in method_knowledge["results"] if item["auto_eligible"]
+        ]
+        retrieved = []
+        # Round-robin parameter variants prevents one method exhausting the budget.
+        variant_count = min(
+            8,
+            max(
+                (len(card.get("candidate_params", [])) for card in references),
+                default=0,
+            ),
+        )
+        for variant_index in range(variant_count):
+            for card in references:
+                if normalized_budget != "extended" and card["method_id"] in {
+                    "airpls",
+                    "arpls",
+                    "rnv",
+                }:
+                    continue
+                variants = card.get("candidate_params", [])
+                if variant_index >= len(variants):
+                    continue
+                params = dict(variants[variant_index])
+                if params.get("window", 0) > profile.n_wavelengths:
+                    continue
+                steps = _steps((card["method_id"], params))
+                valid, _ = validate_pipeline(list(steps))
+                if not valid:
+                    exclusions.append(
+                        {
+                            "method": card["method_id"],
+                            "reason": "invalid_reference_parameters",
+                        }
+                    )
+                    continue
+                retrieved.append(
+                    (steps, ("method_reference_retrieved", *card["matched_tags"]))
+                )
+                evidence_by_id[_candidate_id(steps)] = (card["evidence_id"],)
+        if retrieved:
+            # Knowledge candidates execute first; raw stays in the SAME batch.
+            # Reserve room for raw and existing rule-based controls.
+            proposed = retrieved[: max(1, limits.max_candidates - 2)] + proposed
+        elif method_knowledge["mode"] == "retrieval_guided":
+            method_knowledge = {
+                **method_knowledge,
+                "mode": "rule_fallback",
+                "reason": "no_executable_reference_candidates",
+            }
+
     candidates: list[PreprocessingCandidate] = []
     seen: set[str] = set()
     for steps, reasons in proposed:
@@ -399,6 +472,34 @@ def recommend_preprocessing(
                     {"method": method, "reason": "not_enabled_for_automatic_selection"}
                 )
             continue
+        # These methods assume equally spaced feature indices. Apply the same
+        # guard to rule controls so rejected RAG proposals cannot re-enter.
+        if profile.has_wavelength_axis and not profile.regular_wavelength_axis:
+            irregular_methods = [
+                step.method
+                for step in steps
+                if step.method
+                in {
+                    "sg_smooth",
+                    "whittaker_smooth",
+                    "derivative1",
+                    "detrend",
+                    "asls",
+                    "airpls",
+                    "arpls",
+                }
+            ]
+            if irregular_methods:
+                exclusions.extend(
+                    {"method": method, "reason": "irregular_wavelength_axis"}
+                    for method in irregular_methods
+                )
+                continue
+        if any(step.params.get("window", 0) > profile.n_wavelengths for step in steps):
+            exclusions.append(
+                {"method": "pipeline", "reason": "window_exceeds_feature_count"}
+            )
+            continue
         is_valid, reason = validate_pipeline(list(steps))
         if not is_valid:
             exclusions.append({"method": "pipeline", "reason": reason})
@@ -412,6 +513,7 @@ def recommend_preprocessing(
                 candidate_id=candidate_id,
                 steps=steps,
                 reasons=reasons,
+                evidence_ids=evidence_by_id.get(candidate_id, ()),
             )
         )
         if len(candidates) >= limits.max_candidates:
@@ -429,6 +531,7 @@ def recommend_preprocessing(
                 (entry["method"], entry["reason"]): entry for entry in exclusions
             }.values()
         ),
+        method_knowledge=method_knowledge,
     )
 
 
