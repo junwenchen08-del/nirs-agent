@@ -1,0 +1,2012 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-10",
+  "phase": 6,
+  "provider": "DeepSeek",
+  "model": "deepseek-flash",
+  "agent": "actual DeerFlow Lead Agent through existing Gateway and web entry; original production middleware stack",
+  "auth_mode": "isolated localhost development owner=default; production browser auth not exercised",
+  "thread_id": "97d5ac14-d4a8-4585-865c-480b97011fa2",
+  "session_id": "search_16f80da7bc014f7484032b16f99ba223",
+  "agent_run_id": "18e8faec-3181-4504-8d01-f45b77c7e144",
+  "dataset_manifest": "Corn/m5 Oil, accepted public historical-data functionality validation; target unit unspecified",
+  "authorized_attempts": 1,
+  "attempts_performed": 1,
+  "additional_attempt_authorized": false,
+  "authorized_bounds": {
+    "max_experiments": 8,
+    "max_fits": 160,
+    "max_decisions": 24,
+    "max_wall_seconds": 1800,
+    "max_llm_calls": 36,
+    "max_llm_tokens": 2700000,
+    "max_output_tokens": 4096,
+    "max_invalid_decision_repairs": 2,
+    "final_llm_calls": 6,
+    "final_llm_tokens": 500000,
+    "final_wall_seconds": 300
+  },
+  "actual_policy": {
+    "final_llm_calls": 6,
+    "final_llm_tokens": 500000,
+    "final_wall_seconds": 300,
+    "max_decisions": 24,
+    "max_experiments": 8,
+    "max_fits": 160,
+    "max_invalid_decision_repairs": 2,
+    "max_llm_calls": 30,
+    "max_llm_tokens": 1200000,
+    "max_output_tokens": 4096,
+    "max_wall_seconds": 1800,
+    "monetary_limit": null,
+    "profile": "development",
+    "schema_version": 1,
+    "server_ceilings": {
+      "final_llm_calls": 6,
+      "final_llm_tokens": 500000,
+      "final_wall_seconds": 300,
+      "max_decisions": 24,
+      "max_experiments": 8,
+      "max_fits": 160,
+      "max_invalid_decision_repairs": 2,
+      "max_llm_calls": 36,
+      "max_llm_tokens": 2700000,
+      "max_output_tokens": 4096,
+      "max_wall_seconds": 1800
+    },
+    "token_enforcement": "estimated_admission_and_actual_usage",
+    "wall_enforcement": "cooperative_checkpoints"
+  },
+  "actual_guard_active": false,
+  "guard_limitation": "Verification launcher initially patched a module global; Lead build_middlewares imports the class locally. Actual ledger limits remained enforced. Launcher fixed and zero-call stack binding verified afterward.",
+  "actual_calls_within_authorized_upper_bound": true,
+  "lead_model_responses": 13,
+  "lead_actual_input_tokens": 418368,
+  "lead_actual_output_tokens": 10378,
+  "lead_actual_total_tokens": 428746,
+  "request_profiles": [
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 61939,
+        "serialization_overhead": 37,
+        "system": 35285,
+        "tools": 3095
+      },
+      "context_subsets_non_additive": [],
+      "input_utf8_bytes": 100356,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 3,
+      "message_groups_bytes": {
+        "assistant_history": 326,
+        "decision_context": 0,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 0
+      },
+      "schema_version": 1,
+      "tool_count": 1
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 66095,
+        "serialization_overhead": 37,
+        "system": 35783,
+        "tools": 499
+      },
+      "context_subsets_non_additive": [],
+      "input_utf8_bytes": 102414,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 5,
+      "message_groups_bytes": {
+        "assistant_history": 1981,
+        "decision_context": 0,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 2497
+      },
+      "schema_version": 1,
+      "tool_count": 1
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 67954,
+        "serialization_overhead": 37,
+        "system": 35821,
+        "tools": 537
+      },
+      "context_subsets_non_additive": [],
+      "input_utf8_bytes": 104349,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 7,
+      "message_groups_bytes": {
+        "assistant_history": 2941,
+        "decision_context": 0,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 3392
+      },
+      "schema_version": 1,
+      "tool_count": 1
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 98391,
+        "serialization_overhead": 37,
+        "system": 35851,
+        "tools": 14504
+      },
+      "context_subsets_non_additive": [
+        {
+          "context_id": "ctx_b190f424876160a061066f1d61c71ed5",
+          "history_bytes": 316,
+          "knowledge_bytes": 6349,
+          "phase": "initial",
+          "schema_bytes": 0
+        }
+      ],
+      "input_utf8_bytes": 148783,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 9,
+      "message_groups_bytes": {
+        "assistant_history": 4046,
+        "decision_context": 29328,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 3392
+      },
+      "schema_version": 1,
+      "tool_count": 2
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 72452,
+        "serialization_overhead": 37,
+        "system": 35851,
+        "tools": 537
+      },
+      "context_subsets_non_additive": [],
+      "input_utf8_bytes": 108877,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 5,
+      "message_groups_bytes": {
+        "assistant_history": 9081,
+        "decision_context": 0,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 1754
+      },
+      "schema_version": 1,
+      "tool_count": 1
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 91211,
+        "serialization_overhead": 37,
+        "system": 35851,
+        "tools": 14504
+      },
+      "context_subsets_non_additive": [
+        {
+          "context_id": "ctx_355985aa66905fb5f32403563873fced",
+          "history_bytes": 316,
+          "knowledge_bytes": 5310,
+          "phase": "initial",
+          "schema_bytes": 0
+        }
+      ],
+      "input_utf8_bytes": 141603,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 5,
+      "message_groups_bytes": {
+        "assistant_history": 1355,
+        "decision_context": 28239,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 0
+      },
+      "schema_version": 1,
+      "tool_count": 2
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 79572,
+        "serialization_overhead": 37,
+        "system": 35893,
+        "tools": 512
+      },
+      "context_subsets_non_additive": [],
+      "input_utf8_bytes": 116014,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 5,
+      "message_groups_bytes": {
+        "assistant_history": 8270,
+        "decision_context": 0,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 9685
+      },
+      "schema_version": 1,
+      "tool_count": 1
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 88041,
+        "serialization_overhead": 37,
+        "system": 35827,
+        "tools": 537
+      },
+      "context_subsets_non_additive": [],
+      "input_utf8_bytes": 124442,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 7,
+      "message_groups_bytes": {
+        "assistant_history": 9292,
+        "decision_context": 0,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 17128
+      },
+      "schema_version": 1,
+      "tool_count": 1
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 102002,
+        "serialization_overhead": 37,
+        "system": 35857,
+        "tools": 14935
+      },
+      "context_subsets_non_additive": [
+        {
+          "context_id": "ctx_81838521da4e615f966d692e9bf16907",
+          "history_bytes": 8269,
+          "knowledge_bytes": 6362,
+          "phase": "feedback",
+          "schema_bytes": 0
+        }
+      ],
+      "input_utf8_bytes": 152831,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 5,
+      "message_groups_bytes": {
+        "assistant_history": 2477,
+        "decision_context": 37908,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 0
+      },
+      "schema_version": 1,
+      "tool_count": 2
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 61939,
+        "serialization_overhead": 37,
+        "system": 36413,
+        "tools": 537
+      },
+      "context_subsets_non_additive": [],
+      "input_utf8_bytes": 98926,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 3,
+      "message_groups_bytes": {
+        "assistant_history": 326,
+        "decision_context": 0,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 0
+      },
+      "schema_version": 1,
+      "tool_count": 1
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 77062,
+        "serialization_overhead": 37,
+        "system": 35871,
+        "tools": 5516
+      },
+      "context_subsets_non_additive": [
+        {
+          "context_id": "ctx_848e5c8f02f051f7bea69046d2641eb5",
+          "history_bytes": 7605,
+          "knowledge_bytes": 75,
+          "phase": "final_selection",
+          "schema_bytes": 0
+        }
+      ],
+      "input_utf8_bytes": 118486,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 5,
+      "message_groups_bytes": {
+        "assistant_history": 1327,
+        "decision_context": 14118,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 0
+      },
+      "schema_version": 1,
+      "tool_count": 2
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 90870,
+        "serialization_overhead": 37,
+        "system": 35871,
+        "tools": 5516
+      },
+      "context_subsets_non_additive": [
+        {
+          "context_id": "ctx_848e5c8f02f051f7bea69046d2641eb5",
+          "history_bytes": 7605,
+          "knowledge_bytes": 75,
+          "phase": "final_selection",
+          "schema_bytes": 0
+        }
+      ],
+      "input_utf8_bytes": 132294,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 7,
+      "message_groups_bytes": {
+        "assistant_history": 2509,
+        "decision_context": 14118,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 12622
+      },
+      "schema_version": 1,
+      "tool_count": 2
+    },
+    {
+      "actual_tokens_source": "provider_usage_metadata_separately_recorded",
+      "components_bytes": {
+        "messages": 79038,
+        "serialization_overhead": 37,
+        "system": 35917,
+        "tools": 271
+      },
+      "context_subsets_non_additive": [],
+      "input_utf8_bytes": 115263,
+      "measurement": "utf8_bytes_proxy_not_tokenizer",
+      "message_count": 5,
+      "message_groups_bytes": {
+        "assistant_history": 7924,
+        "decision_context": 0,
+        "task_messages": 61607,
+        "tool_results_and_corrections": 9497
+      },
+      "schema_version": 1,
+      "tool_count": 1
+    }
+  ],
+  "llm_budget": {
+    "finalization": {
+      "actual_input_tokens": 131281,
+      "actual_output_tokens": 2291,
+      "calls": 4,
+      "charged_tokens": 481353,
+      "seconds": 17.718999999808148,
+      "unknown_usage_calls": 0
+    },
+    "inflight": null,
+    "search": {
+      "actual_input_tokens": 287087,
+      "actual_output_tokens": 8087,
+      "calls": 9,
+      "charged_tokens": 1136533,
+      "seconds": 47.42200000002049,
+      "unknown_usage_calls": 0
+    }
+  },
+  "actual_tool_counts": {
+    "nir_workflow": 1,
+    "nir_prepare_search": 1,
+    "nir_decision_context": 4,
+    "nir_submit_decision": 4,
+    "nir_execute_decision": 1,
+    "nir_decision_history": 1,
+    "nir_freeze_search": 1
+  },
+  "checkpoints_inspected": 164,
+  "accepted_decisions": [
+    {
+      "accepted_spec": {
+        "max_components": 20,
+        "method": "pls",
+        "parameter_plan": {
+          "fixed_params": {
+            "max_iter": 500,
+            "n_components": 8,
+            "scale": false,
+            "tol": 1e-06
+          },
+          "max_fits": 6,
+          "max_trials": 1,
+          "search_space": {},
+          "strategy": "fixed"
+        },
+        "steps": [
+          {
+            "method": "asls",
+            "params": {
+              "lambda_": 100000.0,
+              "p": 0.001
+            }
+          },
+          {
+            "method": "mean_center",
+            "params": {}
+          }
+        ]
+      },
+      "action": "EXPLORE",
+      "base_experiment_id": null,
+      "context_id": "ctx_355985aa66905fb5f32403563873fced",
+      "context_sha256": "6af09852d5ebe5da41b8d3b56ccddc6fe22bfc51fe2ba04825aab928ff556067",
+      "cv_manifest_id": "cv_f8d479ce3cdfb72c8c58f3408a8a07503dde244c240842d80a50b3c6793f1c19",
+      "decision_id": "decision_5a252d6d72704a1094e22de97fed6b25",
+      "decision_time": "2026-10-10T07:01:18.657197+00:00",
+      "execution_signature": "ed5182fb93f75df5686d875c05f4c8ad2fffe9a6cc0128ade81988b029c0764c",
+      "experiment_id": "exp_9edd47b199101f19a842571fc9d94245",
+      "origin": {
+        "agent_run_id": "18e8faec-3181-4504-8d01-f45b77c7e144",
+        "issued_at": "2026-10-10T07:01:18.602758+00:00",
+        "message_id": "lc_run--01a1249d-9196-7563-abeb-6f56d2262b0c",
+        "model_class": "PatchedChatDeepSeek",
+        "model_name": "deepseek-flash",
+        "model_type": "chat-deepseek",
+        "response_sha256": "423e7640b7cc22fefb91573284669961a0f61fc6bb557eecb6e811ba2c2525b3",
+        "source": "lead_agent_model_call",
+        "token_usage": {
+          "input_token_details": {
+            "cache_read": 7552
+          },
+          "input_tokens": 37469,
+          "output_token_details": {},
+          "output_tokens": 2150,
+          "total_tokens": 39619
+        },
+        "tool_call_id": "call_00_bPix9hEaLouFDlAdGFGn2182",
+        "verification_kind": "provider_model"
+      },
+      "proposal": {
+        "action": "EXPLORE",
+        "alternatives": [
+          {
+            "action": "EXPLORE",
+            "comparison": "直接针对已确认的基线漂移：先做 AsLS 基线校正再 mean_center，并用中等潜变量数（n_components=8）的 PLS 线性建模。相较 Raw 对照，这是对诊断最贴合的物理方向，且 PLS 是共线高维定量数据的方法学基线。",
+            "id": "alt_asls_pls",
+            "optimization": {
+              "max_fits": 6,
+              "max_trials": 1,
+              "objective": "train_cv_rmse",
+              "search_space": {},
+              "strategy": "fixed"
+            },
+            "pipeline": {
+              "fixed_params": {
+                "n_components": 8
+              },
+              "model_method": "pls",
+              "preprocessing": [
+                {
+                  "method": "asls",
+                  "params": {
+                    "lambda_": 100000.0,
+                    "p": 0.001
+                  }
+                },
+                {
+                  "method": "mean_center",
+                  "params": {}
+                }
+              ],
+              "wavelength_selection": "none"
+            }
+          },
+          {
+            "action": "EXPLORE",
+            "comparison": "Raw（无预处理）PLS 同批对照，用于检验基线校正是否真的带来 Cal CV 改善，而不是把『检测到漂移』直接当作必须预处理。",
+            "id": "alt_raw_pls",
+            "optimization": {
+              "max_fits": 6,
+              "max_trials": 1,
+              "objective": "train_cv_rmse",
+              "search_space": {},
+              "strategy": "fixed"
+            },
+            "pipeline": {
+              "fixed_params": {
+                "n_components": 8
+              },
+              "model_method": "pls",
+              "preprocessing": [],
+              "wavelength_selection": "none"
+            }
+          },
+          {
+            "action": "EXPLORE",
+            "comparison": "一号 SG 导数同时削弱基线漂移与加性偏移，再配 L2 正则化 Ridge，提供不同于基线扣除的家族/预处理器组合，作为机制上互补的探索方向。",
+            "id": "alt_deriv1_ridge",
+            "optimization": {
+              "max_fits": 6,
+              "max_trials": 1,
+              "objective": "train_cv_rmse",
+              "search_space": {},
+              "strategy": "fixed"
+            },
+            "pipeline": {
+              "fixed_params": {
+                "alpha": 1.0
+              },
+              "model_method": "ridge",
+              "preprocessing": [
+                {
+                  "method": "derivative1",
+                  "params": {
+                    "order": 2,
+                    "spacing_mode": "wavelength",
+                    "window": 11
+                  }
+                },
+                {
+                  "method": "mean_center",
+                  "params": {}
+                }
+              ],
+              "wavelength_selection": "none"
+            }
+          }
+        ],
+        "base_experiment_id": null,
+        "context_id": "ctx_355985aa66905fb5f32403563873fced",
+        "context_sha256": "6af09852d5ebe5da41b8d3b56ccddc6fe22bfc51fe2ba04825aab928ff556067",
+        "difference": null,
+        "evidence_refs": [
+          "profile:calibration",
+          "capabilities:runtime",
+          "protocol:sealed_holdout",
+          "budget:session",
+          "history:session",
+          "method:chemotools.baseline.SubtractReference:21549385653f3006",
+          "method:model_pls:40b7b293c678d774",
+          "method:model_ridge:9d84fa74f68e2aec",
+          "method:model_svr:3900dcf94ca02b3b",
+          "method:model_extra_trees:096a1b6c43e5f973"
+        ],
+        "expected_fits": 6,
+        "expected_improvement": {
+          "comparison": "previous",
+          "metric": "val_rmse",
+          "minimum_change": 0.0
+        },
+        "expected_outcome": "预期 AsLS+mean_center+PLS(n_components=8) 在 5 折 Cal CV 上给出较低 train_cv_rmse，且在 Val 上优于 Raw PLS 对照；若基线漂移确实是主要误差来源，导数方向应给出相近或更好的信号。实际数值以执行返回为准，未执行前不视为观测结果。",
+        "expected_revision": 2,
+        "hypotheses": [
+          "基线漂移是当前主要误差来源，先做 AsLS 基线校正再 PLS 应比 Raw PLS 降低 Cal CV 与 Val RMSE。",
+          "若基线校正收益有限，则一号 SG 导数（削弱基线与加性偏移）可能提供互补改善，值得作为对照方向。",
+          "噪声与尖峰可忽略，因此平滑/去尖峰/散射校正不是当前优先方向。"
+        ],
+        "not_selected_reasons": {
+          "alt_deriv1_ridge": "作为机制互补的次选：导数+Ridge 是合理的备选方向，但 Ridge 的内部缩放与正则化在该阶段不如 PLS 直接，先建立 PLS 基线再据此决定是否转向。",
+          "alt_raw_pls": "作为对照而非首选：Raw PLS 不处理已确认的基线漂移，预期 Cal CV/Val 劣于 AsLS 方向，但用于验证预处理是否真有增益。"
+        },
+        "observations": [
+          {
+            "claim": "Cal 诊断显示 baseline_drift_score=0.4205 且标签为 baseline_drift，说明 48 条校准光谱存在明显基线漂移；该分数是描述性代理，不强制预处理。",
+            "evidence_refs": [
+              "profile:calibration"
+            ]
+          },
+          {
+            "claim": "high_frequency_noise_score=0.00019 与 spike_row_fraction=0.0 表明高频噪声与尖峰可忽略，scatter_variation_score=0.0643 也较低，因此去噪/去尖峰/散射校正不是主要矛盾。",
+            "evidence_refs": [
+              "profile:calibration"
+            ]
+          },
+          {
+            "claim": "波长轴为 regular（1100–2498 nm，700 点），因此 detrend、norris_derivative 等要求规则轴的方法均可用。",
+            "evidence_refs": [
+              "profile:calibration",
+              "capabilities:runtime"
+            ]
+          },
+          {
+            "claim": "目标 Oil 在校准集 mean=3.5008、std=0.1788、range≈[3.088,3.822]，为窄范围连续量，属于共线高维线性回归的典型场景。",
+            "evidence_refs": [
+              "profile:calibration"
+            ]
+          },
+          {
+            "claim": "运行时能力显示 pls/ridge/svr/et 均支持 fixed 与 grid，preprocessing 全部 autonomous_supported，且仅允许对模型参数做有界搜索。",
+            "evidence_refs": [
+              "capabilities:runtime"
+            ]
+          },
+          {
+            "claim": "已向会话方法知识检索基线漂移与四个模型族，返回的 SubtensReference/PLS/Ridge/SVR/ExtraTrees 卡片均为参考证据而非执行指令。",
+            "evidence_refs": [
+              "method:chemotools.baseline.SubtractReference:21549385653f3006",
+              "method:model_pls:40b7b293c678d774",
+              "method:model_ridge:9d84fa74f68e2aec",
+              "method:model_svr:3900dcf94ca02b3b",
+              "method:model_extra_trees:096a1b6c43e5f973"
+            ]
+          },
+          {
+            "claim": "当前为 initial 阶段，history 为空，尚未执行任何实验，8 个实验/160 次拟合/24 动作预算均未使用。",
+            "evidence_refs": [
+              "history:session",
+              "budget:session"
+            ]
+          }
+        ],
+        "phase": "initial",
+        "rationale": "Cal 诊断首要问题是基线漂移（0.4205），噪声与尖峰极低、散射偏低，因此最合理的首个方向是基线校正而非平滑或散射校正。AsLS 非对称最小二乘基线校正是对缓慢漂移的标准手段，且参数仅为 lambda/p，可在 Cal 内无泄漏拟合。选 PLS 作为首个模型族：Oil 为窄范围连续量、700 个强共线波长，PLS 潜变量回归是此类高维共线数据的方法学基线，n_components=8 在 48 样本内规避过拟合。同时保留 Raw PLS 对照与导数+Ridge 探索，用真实 Cal CV/Val 反馈而不是诊断标签决定后续方向。选择在单个已选 alternative 上以 fixed 策略评估（1 候选 × 5 折 + 1 次全 Cal 重拟合 = 6 fits），先建立可信基线再决定是否投入有界搜索。",
+        "replication_reason": null,
+        "retained_experiment_id": null,
+        "selected_alternative_id": "alt_asls_pls",
+        "stop_evidence": null,
+        "uncertainties": [
+          "AsLS 的 lambda 默认 1e5 是否适配本数据漂移尺度未知，可能需要后续调整。",
+          "n_components=8 是基于 48 样本的经验选择，实际最优潜变量数需由 Cal CV 反馈确定。",
+          "单位未注明且目标范围窄，Val 结果可能存在较大方差，需谨慎区分 Cal CV OOF RMSE 与折均值 RMSE。"
+        ]
+      },
+      "proposal_sha256": "bc2430e977e43625b5b96781031f98768cdc5bcb0fcd0ec0eb1c2a55dd8998ef",
+      "reserved_fits": 6,
+      "retained_experiment_id": null,
+      "round_index": 1,
+      "runtime_snapshot": {
+        "models_sha256": "2cbe0e3d59d26bf85ddb2476df40648030cbd72052b1a6e65e4e591675178a19",
+        "preprocessing_providers": [
+          {
+            "compatibility": "verified",
+            "has_fitted_state": false,
+            "implementation_version": "chemotools-adapter-v1",
+            "is_default": false,
+            "provider": "chemotools",
+            "provider_class": "chemotools.baseline.AsLs",
+            "provider_version": "0.4.4"
+          },
+          {
+            "compatibility": "verified",
+            "has_fitted_state": true,
+            "implementation_version": "chemotools-adapter-v2",
+            "is_default": false,
+            "provider": "chemotools",
+            "provider_class": "chemotools.scale.ParetoScaler",
+            "provider_version": "0.4.4"
+          }
+        ],
+        "preprocessing_sha256": "4bde60cefeb7a3d9ce5d5a0025cf755f70f17ae844e6f0783e17d12517b2b156",
+        "provider_policy": "catalog_default"
+      },
+      "selection_origin": "llm",
+      "session_id": "search_16f80da7bc014f7484032b16f99ba223",
+      "status": "succeeded",
+      "feedback": {
+        "actual_configuration": {
+          "max_components": 20,
+          "method": "pls",
+          "parameter_plan": {
+            "fixed_params": {
+              "max_iter": 500,
+              "n_components": 8,
+              "scale": false,
+              "tol": 1e-06
+            },
+            "max_fits": 6,
+            "max_trials": 1,
+            "search_space": {},
+            "strategy": "fixed"
+          },
+          "steps": [
+            {
+              "method": "asls",
+              "params": {
+                "lambda_": 100000.0,
+                "p": 0.001
+              }
+            },
+            {
+              "method": "mean_center",
+              "params": {}
+            }
+          ]
+        },
+        "actual_parameters": {
+          "copy": true,
+          "max_iter": 500,
+          "n_components": 8,
+          "scale": false,
+          "tol": 1e-06
+        },
+        "budget": {
+          "accepted_actions_used": 1,
+          "actions_remaining": 23,
+          "execution_seconds": 0.2190000000409782,
+          "experiments_remaining": 7,
+          "experiments_used": 1,
+          "fits_remaining": 154,
+          "fits_used": 6,
+          "source": "persisted_session_budget",
+          "stage": "searching",
+          "stop_reason": null,
+          "stop_source": null
+        },
+        "comparisons": {
+          "previous": {
+            "available": false,
+            "experiment_id": null
+          },
+          "retained": {
+            "available": false,
+            "experiment_id": null
+          }
+        },
+        "configuration": {
+          "max_components": 20,
+          "method": "pls",
+          "parameter_plan": {
+            "fixed_params": {
+              "max_iter": 500,
+              "n_components": 8,
+              "scale": false,
+              "tol": 1e-06
+            },
+            "max_fits": 6,
+            "max_trials": 1,
+            "search_space": {},
+            "strategy": "fixed"
+          },
+          "steps": [
+            {
+              "method": "asls",
+              "params": {
+                "lambda_": 100000.0,
+                "p": 0.001
+              }
+            },
+            {
+              "method": "mean_center",
+              "params": {}
+            }
+          ]
+        },
+        "context_id": "ctx_355985aa66905fb5f32403563873fced",
+        "cv_manifest": {
+          "folds": [
+            {
+              "train": [
+                0,
+                1,
+                2,
+                3,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                13,
+                14,
+                15,
+                16,
+                17,
+                18,
+                20,
+                21,
+                22,
+                23,
+                28,
+                29,
+                30,
+                31,
+                32,
+                33,
+                34,
+                35,
+                36,
+                38,
+                39,
+                41,
+                42,
+                44,
+                45,
+                46,
+                47
+              ],
+              "validation": [
+                4,
+                12,
+                19,
+                24,
+                25,
+                26,
+                27,
+                37,
+                40,
+                43
+              ]
+            },
+            {
+              "train": [
+                0,
+                1,
+                2,
+                4,
+                5,
+                7,
+                10,
+                11,
+                12,
+                14,
+                16,
+                18,
+                19,
+                20,
+                21,
+                22,
+                23,
+                24,
+                25,
+                26,
+                27,
+                28,
+                29,
+                30,
+                31,
+                32,
+                34,
+                35,
+                36,
+                37,
+                38,
+                40,
+                41,
+                42,
+                43,
+                44,
+                46,
+                47
+              ],
+              "validation": [
+                3,
+                6,
+                8,
+                9,
+                13,
+                15,
+                17,
+                33,
+                39,
+                45
+              ]
+            },
+            {
+              "train": [
+                1,
+                2,
+                3,
+                4,
+                6,
+                7,
+                8,
+                9,
+                10,
+                12,
+                13,
+                14,
+                15,
+                17,
+                18,
+                19,
+                20,
+                21,
+                22,
+                23,
+                24,
+                25,
+                26,
+                27,
+                28,
+                33,
+                35,
+                36,
+                37,
+                38,
+                39,
+                40,
+                41,
+                42,
+                43,
+                44,
+                45,
+                47
+              ],
+              "validation": [
+                0,
+                5,
+                11,
+                16,
+                29,
+                30,
+                31,
+                32,
+                34,
+                46
+              ]
+            },
+            {
+              "train": [
+                0,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                17,
+                18,
+                19,
+                20,
+                22,
+                24,
+                25,
+                26,
+                27,
+                28,
+                29,
+                30,
+                31,
+                32,
+                33,
+                34,
+                37,
+                38,
+                39,
+                40,
+                42,
+                43,
+                45,
+                46,
+                47
+              ],
+              "validation": [
+                1,
+                2,
+                10,
+                21,
+                23,
+                35,
+                36,
+                41,
+                44
+              ]
+            },
+            {
+              "train": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                15,
+                16,
+                17,
+                19,
+                21,
+                23,
+                24,
+                25,
+                26,
+                27,
+                29,
+                30,
+                31,
+                32,
+                33,
+                34,
+                35,
+                36,
+                37,
+                39,
+                40,
+                41,
+                43,
+                44,
+                45,
+                46
+              ],
+              "validation": [
+                7,
+                14,
+                18,
+                20,
+                22,
+                28,
+                38,
+                42,
+                47
+              ]
+            }
+          ],
+          "manifest_id": "cv_f8d479ce3cdfb72c8c58f3408a8a07503dde244c240842d80a50b3c6793f1c19",
+          "n_splits": 5,
+          "random_state": 42,
+          "scope": "calibration_cv",
+          "sha256": "f8d479ce3cdfb72c8c58f3408a8a07503dde244c240842d80a50b3c6793f1c19",
+          "splitter": "KFold"
+        },
+        "cv_settings": {
+          "manifest_id": "cv_f8d479ce3cdfb72c8c58f3408a8a07503dde244c240842d80a50b3c6793f1c19",
+          "n_splits": 5,
+          "random_state": 42,
+          "scope": "calibration_cv",
+          "shuffle": true,
+          "source": "frozen_manifest_and_safe_search_splitter_implementation",
+          "splitter": "KFold"
+        },
+        "decision_id": "decision_5a252d6d72704a1094e22de97fed6b25",
+        "elapsed_seconds": 0.2190000000409782,
+        "execution_origin": {
+          "agent_run_id": "18e8faec-3181-4504-8d01-f45b77c7e144",
+          "issued_at": "2026-10-10T07:01:30.525509+00:00",
+          "message_id": "lc_run--01a1249d-e03d-7bf1-92b1-0e749aac34b6",
+          "model_class": "PatchedChatDeepSeek",
+          "model_name": "deepseek-flash",
+          "model_type": "chat-deepseek",
+          "response_sha256": "8ed5caeb6beb73edaa9af6b304251a4182f247f389c4ef688068647a15d41ee6",
+          "source": "lead_agent_model_call",
+          "token_usage": {
+            "input_token_details": {
+              "cache_read": 7552
+            },
+            "input_tokens": 31605,
+            "output_token_details": {},
+            "output_tokens": 73,
+            "total_tokens": 31678
+          },
+          "tool_call_id": "call_00_oFymhyhTzzOMqoRvjANA2505",
+          "verification_kind": "provider_model"
+        },
+        "expected_improvement": {
+          "goal": {
+            "comparison": "previous",
+            "metric": "val_rmse",
+            "minimum_change": 0.0
+          },
+          "source": "persisted_validation_metrics",
+          "status": "not_evaluable",
+          "text_expectation": "预期 AsLS+mean_center+PLS(n_components=8) 在 5 折 Cal CV 上给出较低 train_cv_rmse，且在 Val 上优于 Raw PLS 对照；若基线漂移确实是主要误差来源，导数方向应给出相近或更好的信号。实际数值以执行返回为准，未执行前不视为观测结果。"
+        },
+        "experiment_id": "exp_9edd47b199101f19a842571fc9d94245",
+        "feedback_id": "feedback_801c3ebf3ac7bd9c4c93d41b7c149b19",
+        "fits": 6,
+        "metrics": {
+          "RMSECV": 0.06256341601893364,
+          "diagnostics": {
+            "outlier_count": 1,
+            "outlier_ratio": 0.0625,
+            "residual_std": 0.07775,
+            "residual_trend": "upward",
+            "residual_variance": "low",
+            "scope": "validation"
+          },
+          "domain": "default",
+          "evaluation_scope": "validation",
+          "method": "pls",
+          "n_components": 8,
+          "n_samples": 48,
+          "quality": {
+            "action": "retry_preprocessing",
+            "details": {
+              "R2_status": "good",
+              "RPD_status": "fair",
+              "bias_issue": false,
+              "bias_limit": 0.03931744711710104,
+              "overfitting_risk": false
+            },
+            "evaluation_scope": "validation",
+            "grade": "fair",
+            "passed": false,
+            "recommendation": "模型质量处于临界水平，建议更换预处理组合后重试。",
+            "thresholds_used": {
+              "domain": "default",
+              "max_retries": 3,
+              "min_r2": 0.8,
+              "min_rpd": 3.0,
+              "n_samples": null,
+              "small_sample_relaxation": false
+            }
+          },
+          "test_status": "sealed",
+          "train": {
+            "MAE": 0.036820351003986555,
+            "R2": 0.9385969367163572,
+            "RMSE": 0.04430070845017339,
+            "RPD": 4.078276537238174,
+            "bias": 5.458596537740353e-16,
+            "n": 48,
+            "reference_mean": 3.500833333333334,
+            "reference_std": 0.18067053985537104,
+            "scope": "calibration",
+            "slope": 0.9385969367163567
+          },
+          "train_cv": {
+            "MAE": 0.051851164007984535,
+            "R2": 0.8769817433252721,
+            "RMSE": 0.06270474941837403,
+            "RPD": 2.881289559901026,
+            "bias": -0.005062641829920139,
+            "n": 48,
+            "reference_mean": 3.500833333333334,
+            "reference_std": 0.18067053985537104,
+            "scope": "calibration_cv",
+            "slope": 0.9245201055394158
+          },
+          "val": {
+            "MAE": 0.0628679914821125,
+            "R2": 0.8280166438487182,
+            "RMSE": 0.07863489423420209,
+            "RPD": 2.4904117226644322,
+            "bias": -0.011760444946973342,
+            "n": 16,
+            "reference_mean": 3.4935,
+            "reference_std": 0.19583326241133464,
+            "scope": "validation",
+            "slope": 0.7329627530106748
+          }
+        },
+        "parameters": {
+          "copy": true,
+          "max_iter": 500,
+          "n_components": 8,
+          "scale": false,
+          "tol": 1e-06
+        },
+        "previous_experiment_id": null,
+        "retained_experiment_id": null,
+        "runtime_snapshot": {
+          "models_sha256": "2cbe0e3d59d26bf85ddb2476df40648030cbd72052b1a6e65e4e591675178a19",
+          "preprocessing_providers": [
+            {
+              "compatibility": "verified",
+              "has_fitted_state": false,
+              "implementation_version": "chemotools-adapter-v1",
+              "is_default": false,
+              "provider": "chemotools",
+              "provider_class": "chemotools.baseline.AsLs",
+              "provider_version": "0.4.4"
+            },
+            {
+              "compatibility": "verified",
+              "has_fitted_state": true,
+              "implementation_version": "chemotools-adapter-v2",
+              "is_default": false,
+              "provider": "chemotools",
+              "provider_class": "chemotools.scale.ParetoScaler",
+              "provider_version": "0.4.4"
+            }
+          ],
+          "preprocessing_sha256": "4bde60cefeb7a3d9ce5d5a0025cf755f70f17ae844e6f0783e17d12517b2b156",
+          "provider_policy": "catalog_default"
+        },
+        "spectra_sha256": "aa59bc17dbbc7f88e6c90daad345aac98b481c368f8a42c9a89bc27f3c78bb1f",
+        "status": "succeeded",
+        "trials": [
+          {
+            "RMSECV": 0.06256341601893364,
+            "fold_rmse": [
+              0.057963079650661824,
+              0.06555911736957105,
+              0.06681364352883458,
+              0.06069946594646704,
+              0.06178177359913378
+            ],
+            "parameters": {
+              "max_iter": 500,
+              "n_components": 8,
+              "scale": false,
+              "tol": 1e-06
+            },
+            "scope": "calibration_cv"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_spec": null,
+      "action": "RETAIN",
+      "choice_kind": "budget_final_retention",
+      "context_id": "ctx_848e5c8f02f051f7bea69046d2641eb5",
+      "context_sha256": "78a81dd25189a99c5c9257ecb73c97d43b63f6f2658a3508097d79d5fafad6ca",
+      "decision_id": "decision_c8de5da76cb775b33c6ee89ecbd95189",
+      "decision_time": "2026-10-10T07:02:28.379799+00:00",
+      "experiment_id": null,
+      "origin": {
+        "agent_run_id": "18e8faec-3181-4504-8d01-f45b77c7e144",
+        "issued_at": "2026-10-10T07:02:28.351429+00:00",
+        "message_id": "lc_run--01a1249e-a04c-7e53-b4ee-a0114ecc85cb",
+        "model_class": "PatchedChatDeepSeek",
+        "model_name": "deepseek-flash",
+        "model_type": "chat-deepseek",
+        "response_sha256": "854f435f5718bc87756e01c8f8426716ad416d80029f07f3ba8431a57e1dc2e5",
+        "source": "lead_agent_model_call",
+        "token_usage": {
+          "input_token_details": {
+            "cache_read": 13952
+          },
+          "input_tokens": 37082,
+          "output_token_details": {},
+          "output_tokens": 2041,
+          "total_tokens": 39123
+        },
+        "tool_call_id": "call_00_W7ztYai3einFgwE3VCyg2890",
+        "verification_kind": "provider_model"
+      },
+      "proposal": {
+        "action": "RETAIN",
+        "alternatives": [
+          {
+            "action": "RETAIN",
+            "comparison": "唯一成功实验：AsLS+mean_center+PLS(n=8)。在因模型调用额度耗尽而进入的终态 final_selection 中，它是唯一具备真实 Cal CV/Val 证据的成功候选，且其执行与已接受规格完全一致，故被显式保留。",
+            "id": "retain_asls_pls8",
+            "optimization": null,
+            "pipeline": null
+          },
+          {
+            "action": "RETAIN",
+            "comparison": "不保留任何实验：虽然会避免以一个 fair 级别、Val RPD<3 的模型进入 Test，但这将使本会话无任何可冻结/交付的产物，且不符合本轮必须以 RETAIN 选择已有成功实验的终态要求，因此不选。",
+            "id": "no_op_no_retain",
+            "optimization": null,
+            "pipeline": null
+          }
+        ],
+        "base_experiment_id": "exp_9edd47b199101f19a842571fc9d94245",
+        "context_id": "ctx_848e5c8f02f051f7bea69046d2641eb5",
+        "context_sha256": "78a81dd25189a99c5c9257ecb73c97d43b63f6f2658a3508097d79d5fafad6ca",
+        "difference": null,
+        "evidence_refs": [
+          "experiment:exp_9edd47b199101f19a842571fc9d94245",
+          "profile:calibration",
+          "budget:session",
+          "protocol:sealed_holdout",
+          "history:session"
+        ],
+        "expected_fits": 0,
+        "expected_improvement": null,
+        "expected_outcome": "冻结并保留 exp_9edd47b199101f19a842571fc9d94245 的原始 Cal 拟合产物，随后对 Test 集做一次评价；不进行任何再拟合或再搜索。Test 结果按实际值如实报告，无论好坏都不重开搜索。",
+        "expected_revision": 4,
+        "hypotheses": [
+          "在该终态下保留唯一成功实验并以原始 Cal 拟合冻结，是对已有证据最忠实且可审计的选择，不会有任何未执行的假想结果被当作观测值。",
+          "忠实传递已观测的 Cal CV/Val 指标（含 fair 级别与 Val RPD<3）而不夸大，可为用户后续审批提供诚实的证据基础。"
+        ],
+        "not_selected_reasons": {
+          "no_op_no_retain": "不保留会使本会话缺失可冻结交付物，且违背 final_selection 必须以 RETAIN 选定一个真实成功实验的要求。"
+        },
+        "observations": [
+          {
+            "claim": "会话模型调用 token 预算已耗尽（stop_source=budget，stop_reason=llm_tokens，charged≈1.14M/1.2M），搜索进入终态 final_selection，new_fits_allowed=false，只允许 RETAIN。",
+            "evidence_refs": [
+              "budget:session",
+              "protocol:sealed_holdout"
+            ]
+          },
+          {
+            "claim": "Cal 诊断确认基线漂移为主导（baseline_drift_score=0.4205），高频噪声(0.00019)与尖峰(0.0)可忽略，散射变异(0.0643)较低，波长轴规则(1100–2498 nm, 700 点)。",
+            "evidence_refs": [
+              "profile:calibration"
+            ]
+          },
+          {
+            "claim": "唯一成功实验 exp_9edd47b199101f19a842571fc9d94245（AsLS(lambda=1e5,p=0.001)+mean_center+PLS(n_components=8)）实际执行且 execution_matches_accepted_spec=true：Cal CV OOF RMSE=0.0627047（折均值 RMSECV=0.0625634），R²=0.87698，RPD=2.881；Val RMSE=0.078635，R²=0.82802，RPD=2.4904，slope=0.733；Test 保持 sealed。",
+            "evidence_refs": [
+              "experiment:exp_9edd47b199101f19a842571fc9d94245",
+              "history:session"
+            ]
+          },
+          {
+            "claim": "质量门禁 grade=fair、passed=false（min_r2=0.8 达标为 good，min_rpd=3.0 仅 fair），无偏置问题、无过拟合风险；这是当前证据下唯一可用且已成功执行的候选。",
+            "evidence_refs": [
+              "experiment:exp_9edd47b199101f19a842571fc9d94245"
+            ]
+          },
+          {
+            "claim": "剩余资源 experiments_used=1、fits_remaining=154、fits_used=6，但因模型调用额度耗尽而不可再执行任何训练计划。",
+            "evidence_refs": [
+              "budget:session"
+            ]
+          }
+        ],
+        "phase": "final_selection",
+        "rationale": "会话模型调用额度耗尽，搜索以 stop_source=budget 终止并进入 final_selection，此时不允许任何新拟合或新计划。在已持久化的真实证据中，exp_9edd47b199101f19a842571fc9d94245 是唯一成功（succeeded）实验，指标完整（Cal CV OOF RMSE=0.0627、Val RMSE=0.0786、Val RPD=2.49），且执行与接受规格一致。它不是性能最优意义上的强模型（grade=fair、passed=false），但在该终态下是可核查、可复现的最佳可用证据，因此显式保留它用于后续冻结与一次性 Test 评价，并如实记录其局限，不把它当作质量达标或生产批准。",
+        "replication_reason": null,
+        "retained_experiment_id": "exp_9edd47b199101f19a842571fc9d94245",
+        "selected_alternative_id": "retain_asls_pls8",
+        "stop_evidence": {
+          "retained_advantages": [
+            "本会话唯一成功执行且 execution_matches_accepted_spec=true 的实验，指标完整、可复现、可审计。",
+            "Cal CV OOF RMSE=0.0627、R²=0.877、RPD=2.88，R² 门禁达标（status=good），无明显偏置与过拟合风险。",
+            "AsLS 基线校正与 Cal 诊断的主导问题（baseline_drift_score=0.4205）方向一致。"
+          ],
+          "retained_limitations": [
+            "Val RPD=2.4904 < 3.0 门禁，grade=fair、passed=false，精度对该应用偏低。",
+            "Val slope=0.733，对留出集外推稳定性欠佳（预测被压缩）。",
+            "仅一次实验，未做预处理/模型族对比或超参数搜索，n_components=8 与 AsLS lambda=1e5 未调优。"
+          ],
+          "search_coverage": "仅覆盖一个方向：AsLS 基线校正 + mean_center + PLS(n=8) 的单点固定组合（1 候选 × 5 折 + 1 次全 Cal 重拟合 = 6 fits，1 个实验，1 个高层动作）。Raw 对照、导数与散射校正、Ridge/SVR/ET 家族、以及任何网格搜索均未执行，因模型调用额度提前耗尽。",
+          "unverified_directions": [
+            {
+              "direction": "更换/叠加预处理：arpls/airpls/detrend 或系数导数 (derivative1/norris_derivative1)，以及 SNV/MSC 散射校正。",
+              "reason": "理论上更贴合窄范围 Oil 与残余基线/散射结构，但因模型调用额度耗尽未获执行。"
+            },
+            {
+              "direction": "切换模型族：带内部缩放的 Ridge、RBF SVR、Extra Trees，对小样本非线性/正则化可能提升 Val 泛化。",
+              "reason": "未执行，无法与 PLS 基线做真实对比。"
+            },
+            {
+              "direction": "PLS 潜变量数与 AsLS 参数的有界网格搜索（提升 Val RPD 至 ≥3.0）。",
+              "reason": "预算允许拟合但模型调用额度不足，未执行。"
+            }
+          ]
+        },
+        "uncertainties": [
+          "AsLS 的 lambda=1e5 与 n_components=8 未在 Cal CV 上系统调优，Val RPD=2.49 与 slope=0.733 提示对留出集外推不足，冻结后 Test 可能落在 RPD≈2–3 区间。",
+          "Oil 单位未注明，Val 只有 16 个样本，Val 指标方差较大。",
+          "同批公开 Corn 光谱曾用于其他目标建模，本会话不构成从未暴露的独立确认实验，结论限于内部独立留出。",
+          "模型调用额度已耗尽，无法再探索导数/散射校正或 Ridge/SVR/ET 等更可能提升泛化的方向。"
+        ]
+      },
+      "proposal_sha256": "2be5c3e7fd1672d1830ab848e49aac5bf7dcd1188bfe5caf64dc3b4a46e73db4",
+      "reserved_fits": 0,
+      "round_index": 2,
+      "selection_origin": "llm",
+      "session_id": "search_16f80da7bc014f7484032b16f99ba223",
+      "stop_budget_snapshot": {
+        "experiments_used": 1,
+        "fits_remaining": 154,
+        "fits_used": 6,
+        "llm_usage": {
+          "finalization": {
+            "actual_input_tokens": 28062,
+            "actual_output_tokens": 41,
+            "calls": 1,
+            "charged_tokens": 103022,
+            "seconds": 1.9219999999040738,
+            "unknown_usage_calls": 0
+          },
+          "inflight": null,
+          "search": {
+            "actual_input_tokens": 287087,
+            "actual_output_tokens": 8087,
+            "calls": 9,
+            "charged_tokens": 1136533,
+            "seconds": 47.42200000002049,
+            "unknown_usage_calls": 0
+          }
+        },
+        "new_fits_allowed": false,
+        "reserved_finalization": {
+          "final_llm_calls": 6,
+          "final_llm_tokens": 500000,
+          "final_wall_seconds": 300,
+          "max_decisions": 24,
+          "max_experiments": 8,
+          "max_fits": 160,
+          "max_invalid_decision_repairs": 2,
+          "max_llm_calls": 30,
+          "max_llm_tokens": 1200000,
+          "max_output_tokens": 4096,
+          "max_wall_seconds": 1800,
+          "monetary_limit": null,
+          "profile": "development",
+          "schema_version": 1,
+          "server_ceilings": {
+            "final_llm_calls": 6,
+            "final_llm_tokens": 500000,
+            "final_wall_seconds": 300,
+            "max_decisions": 24,
+            "max_experiments": 8,
+            "max_fits": 160,
+            "max_invalid_decision_repairs": 2,
+            "max_llm_calls": 36,
+            "max_llm_tokens": 2700000,
+            "max_output_tokens": 4096,
+            "max_wall_seconds": 1800
+          },
+          "token_enforcement": "estimated_admission_and_actual_usage",
+          "wall_enforcement": "cooperative_checkpoints"
+        },
+        "stop_reason": [
+          "llm_tokens"
+        ],
+        "stop_source": "budget"
+      },
+      "status": "stopped",
+      "feedback": {
+        "decision_id": "decision_c8de5da76cb775b33c6ee89ecbd95189",
+        "experiment_id": null,
+        "model_executed": false,
+        "pending_final_confirmation": false,
+        "retained_experiment_id": "exp_9edd47b199101f19a842571fc9d94245",
+        "status": "stopped",
+        "stop_source": "budget",
+        "test_status": "sealed"
+      }
+    }
+  ],
+  "rejected_proposals": [
+    {
+      "call_id": "call_00_qyeCPfIJUy1JrFrZYRVR4926",
+      "code": "nir_decision_rejected",
+      "created_at": "2026-10-10T07:00:58.174632+00:00",
+      "errors": [
+        {
+          "field": "evidence_refs",
+          "message": "evidence_refs: unknown evidence; use context evidence IDs",
+          "type": "ValueError"
+        }
+      ],
+      "model_executed": false,
+      "origin": {
+        "model_name": "deepseek-flash",
+        "source": "lead_agent_model_call",
+        "verification_kind": "provider_model"
+      },
+      "proposal_summary": {
+        "action": "EXPLORE",
+        "expected_outcome": "SG first-derivative + SG smoothing + mean_center PLS should reduce Cal CV RMSE (OOF) relative to the raw and SNV-only directions for the drift-flagged spectra; a mid-range n_components should be selected in-fold. Val RMSE should track the Cal CV OOF ranking, and this experiment establishes the baseline direction for later TUNE/CHANGE_PREPROCESS/SWITCH_MODEL rounds.",
+        "phase": "initial",
+        "rationale": "The only strong Cal diagnostic is baseline drift, so I select a pipeline whose primary mechanism removes smooth additive baseline (SG first derivative) rather than assuming scatter, while pairing SG smoothing to control derivative noise inflation. Keeping the model family (PLS) and the n_components grid identical across alternatives makes the comparison a clean preprocessing ablation. PLS is chosen as the first family because the data are high-dimensional and strongly collinear and the target is compact, making latent-variable regression a principled, low-variance starting point; nonlinear families (SVR/ET) will be considered only if CV evidence indicates linear underfitting. Raw and SNV pipelines are retained as alternative directions to falsify my assumption that drift correction helps.",
+        "selected_alternative_id": "alt_b_sg_d1_pls"
+      }
+    },
+    {
+      "call_id": "call_00_OKle56FrSu4wkwY5AjdE9272",
+      "code": "nir_decision_rejected",
+      "created_at": "2026-10-10T07:01:59.998744+00:00",
+      "errors": [
+        {
+          "field": "pipeline.preprocessing",
+          "message": "pipeline.preprocessing: 方法 'airpls' 包含未知参数 ['ratio']，允许参数: ['lambda_', 'max_iters', 'porder']",
+          "type": "ValueError"
+        }
+      ],
+      "model_executed": false,
+      "origin": {
+        "model_name": "deepseek-flash",
+        "source": "lead_agent_model_call",
+        "verification_kind": "provider_model"
+      },
+      "proposal_summary": {
+        "action": "CHANGE_PREPROCESS",
+        "expected_outcome": "预期 airPLS+SG 一阶导+PLS(n=8) 相比 AsLS+mean_center+PLS(n=8) 降低 Val RMSE 并提升 RPD（目标 ≥3.0）、提高 Val slope 接近 1；若残差 upward 趋势缓解则支持基线漂移假设。实际数值以执行返回为准，未执行前不视为已观测结果。",
+        "phase": "feedback",
+        "rationale": "上一实验的失败签名是：Val 明显差于 Cal CV、slope=0.733、残差 upward —— 与残留基线漂移一致，而非噪声或尖峰（两者诊断分极低）。因此方向应继续强化基线去除而不是加平滑。选择 airPLS（自适应重加权，无需人工非对称参数，可能比 AsLS 的固定 p 更彻底地去除缓慢漂移），再叠加 SG 一阶导抵消残余加性偏移；保留 PLS 族与 mean_center，使本轮仅改变一个主因子（预处理），便于归因。同时以 SNV+一阶导、Ridge 作为对照 alternative，用真实 Cal CV/Val 反馈判断散射方向与模型族是否有额外收益。每个 alternative 采用 fixed 策略评估单一配置（1 候选 × 5 折 + 1 全 Cal 重拟合 = 6 fits），在预算内先建立可比证据，再决定是否投入有界网格搜索。",
+        "selected_alternative_id": "alt_airpls_d1_pls"
+      }
+    }
+  ],
+  "experiment_results": [
+    {
+      "experiment_id": "exp_9edd47b199101f19a842571fc9d94245",
+      "configuration": {
+        "max_components": 20,
+        "method": "pls",
+        "parameter_plan": {
+          "fixed_params": {
+            "max_iter": 500,
+            "n_components": 8,
+            "scale": false,
+            "tol": 1e-06
+          },
+          "max_fits": 6,
+          "max_trials": 1,
+          "search_space": {},
+          "strategy": "fixed"
+        },
+        "steps": [
+          {
+            "method": "asls",
+            "params": {
+              "lambda_": 100000.0,
+              "p": 0.001
+            }
+          },
+          {
+            "method": "mean_center",
+            "params": {}
+          }
+        ]
+      },
+      "cv_manifest": {
+        "folds": [
+          {
+            "train": [
+              0,
+              1,
+              2,
+              3,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              20,
+              21,
+              22,
+              23,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              38,
+              39,
+              41,
+              42,
+              44,
+              45,
+              46,
+              47
+            ],
+            "validation": [
+              4,
+              12,
+              19,
+              24,
+              25,
+              26,
+              27,
+              37,
+              40,
+              43
+            ]
+          },
+          {
+            "train": [
+              0,
+              1,
+              2,
+              4,
+              5,
+              7,
+              10,
+              11,
+              12,
+              14,
+              16,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              34,
+              35,
+              36,
+              37,
+              38,
+              40,
+              41,
+              42,
+              43,
+              44,
+              46,
+              47
+            ],
+            "validation": [
+              3,
+              6,
+              8,
+              9,
+              13,
+              15,
+              17,
+              33,
+              39,
+              45
+            ]
+          },
+          {
+            "train": [
+              1,
+              2,
+              3,
+              4,
+              6,
+              7,
+              8,
+              9,
+              10,
+              12,
+              13,
+              14,
+              15,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              33,
+              35,
+              36,
+              37,
+              38,
+              39,
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              47
+            ],
+            "validation": [
+              0,
+              5,
+              11,
+              16,
+              29,
+              30,
+              31,
+              32,
+              34,
+              46
+            ]
+          },
+          {
+            "train": [
+              0,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              22,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              37,
+              38,
+              39,
+              40,
+              42,
+              43,
+              45,
+              46,
+              47
+            ],
+            "validation": [
+              1,
+              2,
+              10,
+              21,
+              23,
+              35,
+              36,
+              41,
+              44
+            ]
+          },
+          {
+            "train": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              15,
+              16,
+              17,
+              19,
+              21,
+              23,
+              24,
+              25,
+              26,
+              27,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              39,
+              40,
+              41,
+              43,
+              44,
+              45,
+              46
+            ],
+            "validation": [
+              7,
+              14,
+              18,
+              20,
+              22,
+              28,
+              38,
+              42,
+              47
+            ]
+          }
+        ],
+        "manifest_id": "cv_f8d479ce3cdfb72c8c58f3408a8a07503dde244c240842d80a50b3c6793f1c19",
+        "n_splits": 5,
+        "random_state": 42,
+        "scope": "calibration_cv",
+        "sha256": "f8d479ce3cdfb72c8c58f3408a8a07503dde244c240842d80a50b3c6793f1c19",
+        "splitter": "KFold"
+      },
+      "decision_id": "decision_5a252d6d72704a1094e22de97fed6b25",
+      "fits": 6,
+      "metrics": {
+        "RMSECV": 0.06256341601893364,
+        "diagnostics": {
+          "outlier_count": 1,
+          "outlier_ratio": 0.0625,
+          "residual_std": 0.07775,
+          "residual_trend": "upward",
+          "residual_variance": "low",
+          "scope": "validation"
+        },
+        "domain": "default",
+        "evaluation_scope": "validation",
+        "method": "pls",
+        "n_components": 8,
+        "n_samples": 48,
+        "quality": {
+          "action": "retry_preprocessing",
+          "details": {
+            "R2_status": "good",
+            "RPD_status": "fair",
+            "bias_issue": false,
+            "bias_limit": 0.03931744711710104,
+            "overfitting_risk": false
+          },
+          "evaluation_scope": "validation",
+          "grade": "fair",
+          "passed": false,
+          "recommendation": "模型质量处于临界水平，建议更换预处理组合后重试。",
+          "thresholds_used": {
+            "domain": "default",
+            "max_retries": 3,
+            "min_r2": 0.8,
+            "min_rpd": 3.0,
+            "n_samples": null,
+            "small_sample_relaxation": false
+          }
+        },
+        "test_status": "sealed",
+        "train": {
+          "MAE": 0.036820351003986555,
+          "R2": 0.9385969367163572,
+          "RMSE": 0.04430070845017339,
+          "RPD": 4.078276537238174,
+          "bias": 5.458596537740353e-16,
+          "n": 48,
+          "reference_mean": 3.500833333333334,
+          "reference_std": 0.18067053985537104,
+          "scope": "calibration",
+          "slope": 0.9385969367163567
+        },
+        "train_cv": {
+          "MAE": 0.051851164007984535,
+          "R2": 0.8769817433252721,
+          "RMSE": 0.06270474941837403,
+          "RPD": 2.881289559901026,
+          "bias": -0.005062641829920139,
+          "n": 48,
+          "reference_mean": 3.500833333333334,
+          "reference_std": 0.18067053985537104,
+          "scope": "calibration_cv",
+          "slope": 0.9245201055394158
+        },
+        "val": {
+          "MAE": 0.0628679914821125,
+          "R2": 0.8280166438487182,
+          "RMSE": 0.07863489423420209,
+          "RPD": 2.4904117226644322,
+          "bias": -0.011760444946973342,
+          "n": 16,
+          "reference_mean": 3.4935,
+          "reference_std": 0.19583326241133464,
+          "scope": "validation",
+          "slope": 0.7329627530106748
+        }
+      },
+      "parameters": {
+        "copy": true,
+        "max_iter": 500,
+        "n_components": 8,
+        "scale": false,
+        "tol": 1e-06
+      },
+      "spectra_sha256": "aa59bc17dbbc7f88e6c90daad345aac98b481c368f8a42c9a89bc27f3c78bb1f",
+      "trials": [
+        {
+          "RMSECV": 0.06256341601893364,
+          "fold_rmse": [
+            0.057963079650661824,
+            0.06555911736957105,
+            0.06681364352883458,
+            0.06069946594646704,
+            0.06178177359913378
+          ],
+          "parameters": {
+            "max_iter": 500,
+            "n_components": 8,
+            "scale": false,
+            "tol": 1e-06
+          },
+          "scope": "calibration_cv"
+        }
+      ]
+    }
+  ],
+  "freeze": {
+    "configuration": {
+      "max_components": 20,
+      "method": "pls",
+      "parameter_plan": {
+        "fixed_params": {
+          "max_iter": 500,
+          "n_components": 8,
+          "scale": false,
+          "tol": 1e-06
+        },
+        "max_fits": 6,
+        "max_trials": 1,
+        "search_space": {},
+        "strategy": "fixed"
+      },
+      "steps": [
+        {
+          "method": "asls",
+          "params": {
+            "lambda_": 100000.0,
+            "p": 0.001
+          }
+        },
+        {
+          "method": "mean_center",
+          "params": {}
+        }
+      ]
+    },
+    "cv_manifest_id": "cv_f8d479ce3cdfb72c8c58f3408a8a07503dde244c240842d80a50b3c6793f1c19",
+    "decision_id": "decision_5a252d6d72704a1094e22de97fed6b25",
+    "experiment_id": "exp_9edd47b199101f19a842571fc9d94245",
+    "fit_scope": "calibration",
+    "frozen_at": "2026-10-10T07:02:46.659577+00:00",
+    "model_hash": "3c5601d8d950819dc63b7de8a34195880960a6cedf0da38438d46ad105321512",
+    "parameters": {
+      "copy": true,
+      "max_iter": 500,
+      "n_components": 8,
+      "scale": false,
+      "tol": 1e-06
+    },
+    "preprocessing_state_hash_scope": "serialized_full_pipeline_artifact",
+    "preprocessing_state_sha256": "3c5601d8d950819dc63b7de8a34195880960a6cedf0da38438d46ad105321512",
+    "search_data_sha256": "b461d7644db2fb16bf0dce25896b6a4ba4e4c73c40aab9f681287dbe10ede19d",
+    "stop_decision_id": "decision_c8de5da76cb775b33c6ee89ecbd95189",
+    "stop_source": "budget"
+  },
+  "stop_source": "budget",
+  "stop_reason": [
+    "llm_tokens"
+  ],
+  "successful_experiments": 1,
+  "actual_fits": 6,
+  "high_level_accepted_decisions": 2,
+  "final_test_evaluations": 0,
+  "final_test_status": "sealed_unconsumed",
+  "final": null,
+  "active_llm_stop_observed": false,
+  "multiple_successful_numeric_experiments_observed": false,
+  "business_result": "failed_delivery_after_budget_retain_and_successful_freeze",
+  "orchestration_result": "blocked",
+  "report_exported": false,
+  "model_exported": false,
+  "user_approved": false,
+  "registered": false,
+  "internal_frozen_model_load_and_cal_prediction_verified": true,
+  "prediction_rows": 3,
+  "cal_spectra_caches": [
+    {
+      "n_total": 48,
+      "n_returned": 12,
+      "axis_total": 700,
+      "axis_returned": 512,
+      "sampling": "even_cal_rows_and_ordered_original_axis_indices_v1",
+      "x_unit": "nm"
+    }
+  ],
+  "post_failure_provider_calls": 0,
+  "private_evidence": [
+    ".tmp/phase6-gateway-real.log",
+    ".tmp/phase6-web-20261010-home",
+    ".tmp/phase6-real-run-authorization.json"
+  ],
+  "follow_up_fixes": "Validated locally only; no second real provider attempt made"
+}

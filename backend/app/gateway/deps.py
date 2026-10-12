@@ -231,6 +231,18 @@ async def langgraph_runtime(app: FastAPI, startup_config: AppConfig) -> AsyncGen
                     try:
                         process_store = ProcessStore(get_paths().thread_dir(record.thread_id, user_id=record.user_id) / "nir-process")
                         await asyncio.to_thread(process_store.recover, record.run_id)
+                        from types import SimpleNamespace
+
+                        from deerflow.community.nir.automatic_delivery import recover_orphan_terminal
+
+                        owned_paths = get_paths()
+                        thread_data = {
+                            "workspace_path": str(owned_paths.sandbox_work_dir(record.thread_id, user_id=record.user_id)),
+                            "uploads_path": str(owned_paths.sandbox_uploads_dir(record.thread_id, user_id=record.user_id)),
+                            "outputs_path": str(owned_paths.sandbox_outputs_dir(record.thread_id, user_id=record.user_id)),
+                        }
+                        runtime = SimpleNamespace(config={"configurable": {"thread_id": record.thread_id}}, context={"user_id": record.user_id, "run_id": record.run_id}, state={"thread_data": thread_data})
+                        await asyncio.to_thread(recover_orphan_terminal, runtime, process_store, record.run_id)
                     except Exception:
                         logger.warning("Unable to reconcile orphaned process evidence", exc_info=True)
 

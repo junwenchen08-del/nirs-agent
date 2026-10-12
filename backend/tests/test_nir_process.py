@@ -154,7 +154,7 @@ def test_v1_index_upgrade_preserves_finished_attempts(tmp_path):
     assert snapshot["attempts"][0]["execution_status"] == "succeeded"
     assert len(snapshot["attempts"][0]["steps"]) == 1
     with sqlite3.connect(store.db) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
 
 
 def test_descending_axis_selection_retains_correct_intervals():

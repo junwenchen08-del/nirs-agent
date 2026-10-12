@@ -1,3 +1,49 @@
+import type { Message } from "@langchain/langgraph-sdk";
+
+import { parseSummary } from "@/core/nir/autonomous";
+
+/** Discover only a server-generated delivery's session, never infer success. */
+export function nirDeliverySession(message: Message): string | null {
+  if (
+    message.type !== "ai" ||
+    message.additional_kwargs?.nir_deterministic_delivery !== true
+  )
+    return null;
+  const session = message.additional_kwargs.nir_delivery_session_id;
+  if (typeof session === "string" && /^search_[A-Za-z0-9]+$/.test(session))
+    return session;
+  // Older immutable messages have links but no session metadata. Actual file
+  // availability is still checked by the owner-scoped read-only publication API.
+  if (typeof message.content !== "string") return null;
+  return (
+    /\]\(\/mnt\/user-data\/outputs\/(search_[A-Za-z0-9]+)\/delivery_[A-Za-z0-9]+\/delivery\.zip\)/.exec(
+      message.content,
+    )?.[1] ?? null
+  );
+}
+
+export function nirDeliveryFiles(raw: unknown, session: string): string[] {
+  const summary = parseSummary(raw);
+  if (
+    summary?.session_id !== session ||
+    summary.stage !== "finalized" ||
+    summary.export_status !== "succeeded"
+  )
+    return [];
+  const prefix = `mnt/user-data/outputs/${session}/`;
+  return [
+    ...new Set(
+      summary.downloads
+        .filter(
+          (file) =>
+            file.path.startsWith(prefix) &&
+            file.path.slice(file.path.lastIndexOf("/") + 1) === file.name,
+        )
+        .map((file) => `/${file.path}`),
+    ),
+  ];
+}
+
 /** Fold only recognizable NIR output sets; unrelated artifacts stay visible. */
 export function groupDeliveryFiles(files: string[]) {
   const unique = [...new Set(files)];

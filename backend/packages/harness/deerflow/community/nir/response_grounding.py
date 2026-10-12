@@ -95,6 +95,20 @@ def required_nir_workflow_action(
 
     if not isinstance(workflow, Mapping):
         return None
+    if workflow.get("search_protocol") == "sealed_holdout":
+        if workflow.get("autonomous_delivery"):
+            if workflow.get("stage") == "budget_exhausted":
+                return "submit_final_selection" if workflow.get("decision_context_id") else "read_final_selection_context"
+            if workflow.get("stage") == "awaiting_final_confirmation":
+                return "freeze_selected_model"
+        if workflow.get("decision_strategy") == "llm_autonomous" and workflow.get("autonomous_rounds"):
+            if workflow.get("stage") == "execution":
+                return "execute_decision" if workflow.get("active_decision_id") else "submit_decision" if workflow.get("decision_context_id") else "read_decision_context"
+            if workflow.get("stage") == "decision_review":
+                return "submit_decision" if workflow.get("decision_context_id") else "read_decision_context"
+        if workflow.get("decision_strategy") == "llm_autonomous" and workflow.get("stage") == "execution":
+            return "execute_initial_decision" if workflow.get("initial_decision_id") else "submit_initial_decision" if workflow.get("decision_context_id") else "read_initial_context"
+        return {"data_audit": "prepare_sealed_search", "planning": "prepare_sealed_search", "execution": "search_or_freeze", "frozen": "finalize_search"}.get(str(workflow.get("stage")))
     stage = str(workflow.get("stage") or "")
     next_action = str(workflow.get("next_action") or "")
     if next_action in _MANDATORY_WORKFLOW_ACTIONS.get(stage, set()):
@@ -235,6 +249,11 @@ _EXTERNAL_VALIDATION_RE = re.compile(
     r"独立外部验证|外部验证|external\s+validation|externally\s+validated",
     re.IGNORECASE,
 )
+_SEALED_TEST_PERFORMANCE_RE = re.compile(
+    r"(?:(?:最终)?测试集|(?:final\s+)?test(?:\s+set)?).{0,24}(?:R[²2]|RMSE|RPD|MAE|Bias)\s*[=:：为]|"
+    r"(?:R[²2]|RMSE|RPD|MAE|Bias)[_\s]*(?:test|测试)\s*[=:：为]",
+    re.IGNORECASE,
+)
 _DEPLOYMENT_READY_RE = re.compile(
     r"生产可用|可用于生产|可以用于生产|可部署|可以部署|生产部署|production[-\s]+ready|deployment[-\s]+ready|ready\s+for\s+production",
     re.IGNORECASE,
@@ -361,7 +380,8 @@ def _attempt_evidence_records(workflow: Mapping[str, Any]) -> list[Mapping[str, 
     latest = workflow.get("attempt_evidence")
     if isinstance(latest, Mapping):
         latest_path = _normalized_path(latest.get("metrics_path"))
-        already_present = any(latest_path and _normalized_path(item.get("metrics_path")) == latest_path for item in records)
+        latest_experiment = latest.get("experiment_id")
+        already_present = any(latest_experiment and item.get("experiment_id") == latest_experiment or latest_path and _normalized_path(item.get("metrics_path")) == latest_path or item == latest for item in records)
         if not already_present:
             records.append(latest)
     return records[-10:]
@@ -450,6 +470,8 @@ def validate_nir_response(
     attempt_records = _attempt_evidence_records(workflow)
     allowed_metrics = _allowed_metric_values(attempt_records)
     violations: list[str] = []
+    if workflow.get("search_protocol") == "sealed_holdout" and summary.get("test_status") == "sealed" and _has_positive_marker(response_text, _SEALED_TEST_PERFORMANCE_RE):
+        violations.append("validation_scope_overclaim:sealed_test")
     required_action = required_nir_workflow_action(workflow)
     if required_action:
         violations.append(f"workflow_incomplete:{required_action}")
@@ -620,6 +642,29 @@ def render_grounded_nir_response(
     violations: tuple[str, ...] = (),
 ) -> str:
     """Build a bounded, deterministic response from the attempt ledger."""
+
+    if workflow.get("search_protocol") == "sealed_holdout" and workflow.get("decision_strategy") == "llm_autonomous" and workflow.get("stage") in {"execution", "decision_review", "budget_exhausted", "initial_result", "blocked"}:
+        records = _attempt_evidence_records(workflow)
+        failure = workflow.get("continuation_failure") or {}
+        lines = ["自主建模流程尚未完成。"]
+        if failure:
+            detail = "决策工具 JSON 无法解析" if failure.get("invalid_json") else "LLM 未完成必要工具操作"
+            lines.append(f"- 中断原因：{detail}，已达到有限续接次数；并非模型质量门禁自动停止。")
+            lines.append(f"- 未完成的操作：`{failure['required_action']}`")
+        lines.append(f"- 已记录 {len(records)} 个模型实验；验证协议：`sealed_holdout`。")
+        lines.append("- 以下指标来自 Cal CV / Val；同一数据集内部验证，不是外部验证。")
+        for index, record in enumerate(records, 1):
+            summary = record.get("metrics_summary") or {}
+            values = []
+            if isinstance(summary.get("RMSECV"), int | float):
+                values.append(f"Cal CV mean-fold RMSE={summary['RMSECV']}")
+            for scope, label in (("train_cv", "Cal CV OOF"), ("val", "Val")):
+                metrics = summary.get(scope) or {}
+                values.extend(f"{label} {key}={metrics[key]}" for key in ("RMSE", "R2", "RPD") if isinstance(metrics.get(key), int | float))
+            lines.append(f"- 尝试 {index}：`{record.get('experiment_id') or 'unknown'}`，{record.get('method') or 'unknown'}；" + "；".join(values))
+        if failure or workflow.get("stage") in {"blocked", "decision_review", "execution", "budget_exhausted"}:
+            lines.append("- 尚无合法最终保留选择或交付；Test 保持封存，未生成最终测试评价。")
+        return "\n".join(lines)
 
     audit_evidence = workflow.get("audit_evidence")
     audit_evidence = audit_evidence if isinstance(audit_evidence, Mapping) else {}

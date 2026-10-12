@@ -977,7 +977,37 @@ tools:
   - name: nir_reflect
     group: nir
     use: deerflow.community.nir.reflect:nir_reflect_tool
-
+  # Phase-1 safe regression tools require search_protocol: sealed_holdout.
+  - name: nir_prepare_search
+    group: nir
+    use: deerflow.community.nir.search_tools:nir_prepare_search_tool
+  - name: nir_search_model
+    group: nir
+    use: deerflow.community.nir.search_tools:nir_search_model_tool
+  - name: nir_freeze_search
+    group: nir
+    use: deerflow.community.nir.search_tools:nir_freeze_search_tool
+  - name: nir_finalize_search
+    group: nir
+    use: deerflow.community.nir.search_tools:nir_finalize_search_tool
+  - name: nir_decision_context
+    group: nir
+    use: deerflow.community.nir.decision_tools:nir_decision_context_tool
+  - name: nir_submit_decision
+    group: nir
+    use: deerflow.community.nir.decision_tools:nir_submit_decision_tool
+  - name: nir_execute_decision
+    group: nir
+    use: deerflow.community.nir.decision_tools:nir_execute_decision_tool
+  - name: nir_decision_history
+    group: nir
+    use: deerflow.community.nir.decision_tools:nir_decision_history_tool
+  # Phase 4 reuses these tools: nir_workflow(... autonomous_delivery=true,
+  # budget_profile=development|autonomous, task_budget='<JSON>') fixes a policy.
+  # Operator env ceilings: NIR_AUTONOMOUS_MAX_EXPERIMENTS=40, MAX_FITS=1000,
+  # MAX_DECISIONS=100, MAX_WALL_SECONDS=7200 (each with NIR_AUTONOMOUS_ prefix).
+  # Search call/token ceilings plus reserved final call/token allowances are
+  # documented in backend/AGENTS.md. No unlimited mode; old budgets unchanged.
   - name: nir_compare
     group: nir
     use: deerflow.community.nir.modeling:nir_compare_tool

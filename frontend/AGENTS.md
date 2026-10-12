@@ -1,5 +1,23 @@
 # AGENTS.md
 
+messages/nir-delivery-files.tsx adds existing ArtifactFileList cards under
+server-generated NIR delivery messages. It uses owner-scoped process hooks and
+requires a finalized, successfully published exact-session summary. Older message
+links recover only a session reference, never prove publication. Refresh only
+reads immutable publication metadata. Download URLs keep existing authentication;
+ordinary/human text cannot discover files. Tests cover projection and actual cards.
+
+The unified supplement removes autonomous-mode.tsx and the default composer's
+NIR mode/budget props. modelingChatContext drops obsolete NIR control fields from
+submission without mutating browser settings; model/chat preferences remain.
+Default natural-language regression entry is server-owned. Historical threads
+retain their actual modes. Existing process hooks/read-only Cal and Test caches,
+charts, timeline and downloads are reused. autonomous-process.tsx displays bounded
+automatic_delivery facts from the API, including audit-required/cancelled states;
+chat prose is never completion evidence. Publication polling does not need a final
+LLM message. Existing budget adapter functions remain internal compatibility
+helpers, not UI controls. Tests: core/nir/unified-entry.test.ts and autonomous.test.ts.
+
 This file provides guidance to AI coding agents (Claude Code, Codex, and others) when working with the DeerFlow frontend. It is the source of truth; the sibling `CLAUDE.md` imports it via `@AGENTS.md`.
 
 ## Project Overview
@@ -123,6 +141,50 @@ stage/tool names are localized while original codes remain expandable.
 Tests: `process-display.test.ts` and evidence-backed desktop browser QA in
 `nir-process-explorer.spec.ts` (including compact desktop windows).
 The custom-agent chat route does not mount this panel yet.
+
+The phase-5 desktop autonomous entry was opt-in; the unified supplement above
+replaces that control for new default-chat regression tasks.
+`components/workspace/nir/autonomous-mode.tsx` submits the structured
+`context.nir_autonomous` selection through the existing thread hooks; it does
+not append policy flags to the user prompt. Gateway owns the four autonomous
+flags and validates the four exposed custom budget fields. The mode control
+locks after workflow start. Standard and custom-agent chats retain their prior
+entry behavior. `core/nir/autonomous.ts` is the bounded adapter for the
+owner-checked `/nir-process/autonomous` API, not a new workflow state store.
+`autonomous-process.tsx` is reused by the chat Sheet and existing process route.
+Decision summaries page ten records; expanded details load proposals and trial
+feedback on demand. Accepted/pending, executed, failed, rejected, STOP and RETAIN
+remain distinct; alternatives never become trained models. Reasons, comparisons
+and retention are recorded evidence, never inferred from metric changes.
+Val RMSE/R2 trends use successful same-session experiments. The best Val RMSE
+marker is informational and never changes the LLM-retained model. Test metrics
+and lazily fetched cached points require finalized state and final_test scope;
+old missing charts are not recomputed. Phase-5 Test views do not load raw spectra.
+Downloads use `urlOfArtifact` and the existing owner-checked artifact service.
+Approval/registration are read from actual workflow evidence or explicitly shown
+as unrecorded; completion/export is never approval. Existing process hooks keep
+owner/thread/resource cache keys, ETags, aborted stale reads, hidden-tab pause
+and bounded 3–30 second retry/poll intervals. Anchors:
+`tests/unit/core/nir/autonomous.test.ts` and the phase-5 implementation report;
+unit projection tests alone do not establish browser/provider acceptance.
+
+ProcessWorkspace owns shared autonomous query cleanup. Unmounting its legacy
+child must clear only nir-process-legacy queries; deleting the owner's shared
+nir-process cache there erases the parent's session discovery during the
+legacy-to-autonomous transition. This was reproduced on the real process route
+and verified after browser reload with unchanged persisted session/decision,
+fit counts, final cache and Lead receipts. See the phase-5 report for evidence.
+
+Phase 6 adds cal-spectra.tsx within that autonomous chart view. It lazily reads the
+owner-scoped immutable Cal cache via existing process hooks and renders two
+ProcessChart SVGs with actual ordered methods/parameters, sample and channel counts,
+and explicit wavelength units. The adapter bounds/validates identity, finite rows,
+axis order and before/after alignment (12 rows, 512 channels maximum); old missing
+evidence stays unavailable. View/refresh/zoom never trains or recomputes preprocessing.
+Cal CV is labeled OOF; parameter trial RMSECV is labeled mean-fold. Custom budget
+help reflects the server-bounded autonomous LLM allowance and separate terminal
+reserve. Source anchors: tests/unit/core/nir/cal-spectra.test.ts and the phase-6
+implementation report; real multi-experiment/active-STOP delivery remains unverified.
 
 The optional cross-session library lives at `/workspace/nir/datasets` and
 `/workspace/nir/models`. The sidebar reads `/api/features` and exposes these

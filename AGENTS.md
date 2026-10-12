@@ -1,6 +1,37 @@
 # AGENTS.md
 
+NIR automatic publication appends trusted model/HTML/ZIP references via the
+existing artifact reducer and labels the deterministic message with its session.
+Chat restores old published deliveries through the existing owner-scoped GET;
+it never forges present_files tool calls, changes prior checkpoints, trains or
+evaluates Test to display download cards. See the Docker download fix report.
+
+Malformed autonomous tool JSON is never executed or silently repaired. The
+existing finite continuation guard supplies parser errors, preserves provider
+finish/invalid-call metadata, and durably closes an incomplete search on failure.
+Do not select a model or label this closure LLM STOP/budget RETAIN. Evidence
+summaries deduplicate experiment IDs and identify Cal CV/Val scopes. Tests:
+backend/tests/test_nir_malformed_decision_recovery.py.
+
+The unified NIR supplement defaults new single-target web regression execution
+requests to a server-owned autonomous/sealed workflow after a model-issued Lead
+start. Conceptual QA and historical modes stay intact. The composer has no NIR
+mode/budget control. Unified v2 policies use explicit null cumulative token caps,
+retain true usage and numeric/time/call/repair protections, and never rewrite v1
+policy records. See docs/chemagent-unified-autonomous-mode-report.md.
+After persisted legal STOP/RETAIN, automatic_delivery.py composes the existing
+freeze/finalize/publication services without a provider call or model selection.
+Unknown Test/publication leases fail closed; Gateway-confirmed orphan recovery
+may resume completed freeze or report-only work. Approval remains a human gate.
+
 This file provides guidance to AI coding agents (Claude Code, Codex, and others) when working with code in this repository. It is the source of truth; the sibling `CLAUDE.md` imports it via `@AGENTS.md`.
+
+Unified regression accepts owned numeric MAT via the existing loader and sealed
+search service. Ambiguous matrix/target mappings require explicit correction.
+Only completed non-modeling inspection/knowledge workflows can hand off in the
+same thread; their immutable snapshots use existing ProcessStore receipts.
+Existing modeling/search bindings and budgets cannot restart. MAT inspection
+must preserve the orientation already resolved from target/axis evidence.
 
 It is the **monorepo orientation layer**: it maps the whole repo and points to the
 module guides that own the depth. For anything inside a module, read that module's
@@ -13,6 +44,78 @@ guide rather than expecting full detail here:
   thread/streaming data flow, code style, commands.
 
 ## What is DeerFlow
+
+The opt-in phase-1 `sealed_holdout` protocol adds a safe single-target regression
+search/freeze/final-Test path without replacing legacy entry points. Search models
+see only Cal/Val; private session state shares the owner/thread ProcessStore v5.
+PLS/Ridge/SVR/ET are adapted. Phase 2 adds opt-in `decision_strategy=llm_autonomous`
+with a Cal-only DecisionContext, immutable model-issued DecisionProposal and one
+initial execution. It must use sealed_holdout; direct search, legacy training,
+freeze/finalize are denied in that strategy. Fixed
+parameters and explicit Cartesian grids reuse safe_search, without a hidden baseline.
+Lead Agent model middleware captures exact tool-call provenance before execution;
+cross-task memory is suppressed. Phase 3 adds autonomous_rounds=true: each persisted
+experiment feeds a fresh bounded context; the LLM compares and selects TUNE,
+CHANGE_PREPROCESS, SWITCH_MODEL, EXPLORE or STOP. Execution reads only accepted
+decision IDs. Fit/experiment/action budgets accumulate; hard exhaustion and LLM
+STOP are distinct. STOP explicitly retains a successful experiment and waits for
+final confirmation with Test sealed. Default false preserves phase-2 one execution.
+See backend/AGENTS.md and docs/chemagent-phase3-implementation-report.md. Legacy
+per-call holdout outputs are not a sealed search protocol.
+
+Phase 4 is separately opt-in with autonomous_delivery=true (also requires
+autonomous_rounds/llm_autonomous/sealed_holdout). decision_budget.py resolves finite
+development/autonomous profiles and task_budget against NIR_AUTONOMOUS server
+ceilings. Existing operation/file/memory limits stay active; single grids remain
+40 candidates/200 fits. Durable call admission and actual usage share the existing
+session JSON ledger.
+Explicit delivery requests cannot downgrade to legacy; pre-prepare calls lease
+the existing receipt store and transfer their counters. Provider input retains
+the prepare evidence and current workflow state; obsolete schemas are pruned
+after STOP without altering persistent decisions. Normal STOP is LLM-controlled;
+budget-terminal RETAIN uses reserved resources, stop_source=budget, and no new
+fits or automatic best model.
+Terminal errors preserve an existing budget stop source and are recorded separately.
+They also preserve completed Test/cache for publication recovery.
+The original freeze/finalize tools bind the accepted retained Cal artifact and
+single Test lease, then decision_delivery.py reuses trusted artifacts, reports,
+ZIP delivery, prediction and registration gates. Approval remains a real user
+action. Uncertain leases fail closed; caught export failures retry publication
+only. Defaults preserve phases 1–3, and ProcessStore stays v5. Wall checks are
+cooperative, token admission estimated, currency limits unavailable. See the
+phase-4 implementation report for evidence and limits.
+
+Phase-4 acceptance repairs use decision_schema.py for current-phase provider views
+and object proposals (JSON strings stay compatible). Only process-step tools are
+exposed in delivery mode; model/action/STOP choice remains with the LLM. Unchanged
+contexts are cached against persisted history and runtime/knowledge versions.
+Search admission transitions rebuild the final request before reserving its call;
+complete converted tool schemas are included in byte-based token estimates.
+Provider failure class/status is persisted separately from budget stop provenance.
+
+Phase 5 adds the explicit desktop web entry and read-only autonomous process
+projection to existing chat/process components. Gateway binds policy and budget;
+ToolOutputBudgetMiddleware preserves atomic sealed protocol JSON. Charts and
+downloads use persisted evidence and the original finalized Test cache. See
+docs/chemagent-phase5-implementation-report.md for actual browser/provider results.
+
+Phase 6 reuses those paths for Corn/m5 Oil functional validation. The offline
+adapter in backend/scripts/prepare_nir_corn.py validates explicit source labels,
+axis and duplicates and writes a fixed split/manifest without overwriting files.
+Cal-only spectra are captured from the actual fitted preprocessor after execution;
+owner-scoped GET reads the bounded hash-checked cache, never data arrays or a model.
+decision_provider.py projects duplicate schemas, CV membership and legacy Skill
+instructions out of autonomous provider messages while keeping immutable evidence,
+constraints and actual model-call provenance. Custom web budgets use server-bounded
+autonomous defaults, not development LLM allowance. Real-provider verification
+remains per-run authorized; phase-6 real multi-experiment/active-STOP delivery is
+not established. See docs/chemagent-phase6-implementation-report.md.
+
+Governed NIR also skips the generic summary LLM for trusted web intake and active
+llm_autonomous state: that before-model helper otherwise runs outside the NIR
+admission ledger. Existing deterministic provider compaction and stored context
+remain authoritative; ordinary/legacy summarization stays enabled. Provider cost
+must distinguish Lead receipts from RunJournal totals including middleware calls.
 
 DeerFlow is a LangGraph-based AI super-agent system with a full-stack architecture. The
 backend runs a "super agent" with sandboxed execution, persistent memory, subagent
@@ -357,6 +460,12 @@ Rule of thumb: **root `make` = the full application**; **`backend/Makefile` and 
 ## Cross-Cutting Conventions
 
 These apply repo-wide; module guides own the module-specific detail.
+
+- **Docker updates** — production source is image-baked. Rebuild/recreate the
+  affected services with the existing Compose project and overlays; preserve
+  config and DEER_FLOW_HOME mounts and retain rollback image tags. `.tmp/` is
+  excluded from build context. Store deployment backups outside the repository
+  build context; restarting an old container does not update source.
 
 - **Documentation update policy** — keep docs in sync with code: update `README.md` for
   user-facing changes and the relevant `AGENTS.md` for development/architecture changes in

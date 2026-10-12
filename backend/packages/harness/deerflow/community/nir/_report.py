@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import math
 
+from .report_labels import label as _label
+from .report_labels import pipeline
+
 
 def _text(value) -> str:
     return str(value if value is not None else "未记录").replace("|", "\\|").replace("\n", " ").replace("\r", " ")[:800]
@@ -25,12 +28,17 @@ def report_context(runtime, metrics: dict, counts: dict, *, final_fit: str = "�
     return {**metrics, "report_context": {"target": workflow.get("analyte"), "unit": workflow.get("unit"), "partition_counts": counts, "final_fit": final_fit}}
 
 
-def _build_report(data, metrics: dict, quality: dict, best_pipe, raw_spectra_b64: str = "", predicted_vs_reference_b64: str = "", residuals_b64: str = "", cv_curve_b64: str = "", *, extra_plots: dict | None = None) -> str:
+def _build_report(
+    data, metrics: dict, quality: dict, best_pipe, raw_spectra_b64: str = "", predicted_vs_reference_b64: str = "", residuals_b64: str = "", cv_curve_b64: str = "", *, extra_plots: dict | None = None, report_figures: list | None = None
+) -> str:
     """Describe actual scopes, choices, diagnostics and limitations with figures."""
     context = metrics.get("report_context") or {}
     target = metrics.get("target") or context.get("target")
     unit = context.get("unit") or "单位未记录"
     pp = metrics.get("preprocessing") or (best_pipe.description() if best_pipe else "无（使用原始光谱）")
+    audit = metrics.get("autonomous_decision_audit")
+    if audit:
+        pp = pipeline(audit["freeze"]["configuration"]["steps"])
     external = metrics.get("validation_scope") == "independent_external_validation"
     holdout = "独立外部验证集" if external else "最终留出集"
     validation = "独立外部验证（按记录的来源与划分）" if external else "内部独立留出，不是外部验证"
@@ -43,15 +51,15 @@ def _build_report(data, metrics: dict, quality: dict, best_pipe, raw_spectra_b64
         "# 近红外光谱建模报告",
         "",
         "## 1. 结论摘要",
-        f"- 分析目标：{_text(target)}；参考值单位：{_text(unit)}。",
-        f"- 最终方案：{_text(metrics.get('method'))}；预处理：{_text(pp)}；成分数：{_text(metrics.get('n_components'))}。",
+        f"- 分析目标：{_text(_label(target))}；参考值单位：{_text(_label(unit))}。",
+        f"- 最终方案：{_text(_label(metrics.get('method')))}；预处理：{_text(pp)}。",
         f"- {holdout}：R²={_number(test.get('R2'))}，RMSEP={_number(test.get('RMSE'))}，RPD={_number(test.get('RPD'))}。误差单位与参考值一致。",
-        f"- 验证范围：{validation}；质量门禁{'通过' if quality.get('passed') else '未通过'}（{_text(quality.get('grade'))}）。",
+        f"- 验证范围：{validation}；质量门禁{'通过' if quality.get('passed') else '未通过'}（{_text(_label(quality.get('grade')))}）。",
         "- 质量达标不等同于生产批准；本报告不代表已完成审批、注册或实际部署。",
         "",
         "## 2. 数据概览与验证协议",
-        f"- 样本数：{_text(metrics.get('n_samples'))}；原始光谱变量数：{data.X.shape[1]}。",
-        f"- 协议：{_text(metrics.get('protocol'))}。",
+        f"- {'校准集（Cal）' if audit else '报告使用数据'}样本数：{data.X.shape[0]}；原始光谱变量数：{data.X.shape[1]}。",
+        f"- 协议：{_text(_label(metrics.get('protocol')))}。",
     ]
     if data.wv is not None:
         axis_unit = metrics.get("wavelength_unit") or "单位未记录"
@@ -59,13 +67,16 @@ def _build_report(data, metrics: dict, quality: dict, best_pipe, raw_spectra_b64
     else:
         lines.append("- 光谱轴：未提供，图表按变量序号展示。")
     if data.y is not None:
-        lines.append(f"- 参考值范围：{_number(data.y.min())}–{_number(data.y.max())}（{_text(unit)}）。")
+        lines.append(f"- {'校准集（Cal）' if audit else '报告使用数据'}参考值范围：{_number(data.y.min())}–{_number(data.y.max())}（{_text(unit)}）。")
+    cv = (metrics.get("reproducibility") or {}).get("cv_manifest") or {}
+    if cv:
+        lines.append(f"- 实际校准交叉验证：{_text(cv.get('splitter'))}，{_text(cv.get('n_splits'))} 折；划分清单及每折样本编号见 metrics.json。")
     lines += [
         "",
         "| 分区 | 样本数 | 用途 |",
         "|---|---:|---|",
-        f"| 校准集 | {_text(counts.get('calibration'))} | 拟合预处理、变量筛选和候选模型 |",
-        f"| 调参集 | {_text(counts.get('tuning'))} | 选择预处理、变量和模型方案 |",
+        f"| 校准集（Cal） | {_text(counts.get('calibration'))} | 模型拟合和内部交叉验证；状态型预处理在 CV 训练折内拟合 |",
+        f"| 验证集（Val） | {_text(counts.get('tuning'))} | 选择预处理、变量和模型方案 |",
         f"| {holdout} | {_text(counts.get('holdout'))} | 选择完成后的最终评估 |",
         "",
         f"- 最终拟合范围：{_text(context.get('final_fit'))}。训练拟合指标不能作为独立验证结果。",
@@ -93,6 +104,8 @@ def _build_report(data, metrics: dict, quality: dict, best_pipe, raw_spectra_b64
             lines.append(f"| {_text(item.get('method'))} | {_text(item.get('n_components'))} | {_number(item.get('RMSE_tuning'))} |")
         if len(candidates) > 30:
             lines.append(f"- 表格显示前30项，其余 {len(candidates) - 30} 项见 metrics.json。")
+    elif audit:
+        lines.append("- 各轮模型选择由 LLM 作出；仅执行被接受的方案，实际实验与验证表现见下方决策记录与趋势图。")
     else:
         lines.append("- 未记录模型族比较；不能由当前方案推断其他方法已经执行或较差。")
     wavelength_candidates = metrics.get("wavelength_selection_candidates") or metrics.get("candidate_results") or []
@@ -128,18 +141,23 @@ def _build_report(data, metrics: dict, quality: dict, best_pipe, raw_spectra_b64
             lines.append(f"| {_text(label)} | {_number(item.get('cv_rmse', item.get('rmsecv', item.get('mean_rmse_cv'))))} |")
         lines.append("- 预处理按记录的RMSECV与简洁性规则选择；完整候选与参数见 metrics.json。")
     lines += ["", "## 4. 分区指标与质量评估", "", "| 评估分区 | R² | RMSE | RPD | 偏差（预测−参考） |", "|---|---:|---:|---:|---:|"]
-    for label, values in [("最终拟合数据（非独立验证）", metrics.get("train") or {}), ("调参集（参与选择）", val), (holdout, test)]:
+    partitions = [("最终拟合数据（非独立验证）", metrics.get("train") or {}), ("调参集（参与选择）", val), (holdout, test)]
+    if metrics.get("selection_closed"):
+        partitions = [("校准集拟合（Cal，非独立验证）", metrics.get("train") or {}), ("校准交叉验证（Cal CV，折外预测 OOF）", metrics.get("train_cv") or {}), ("验证集（Val，参与选择）", val), ("最终测试集（Test，冻结后唯一评价）", test)]
+    for label, values in partitions:
         lines.append(f"| {label} | {_number(values.get('R2'))} | {_number(values.get('RMSE'))} | {_number(values.get('RPD'))} | {_number(values.get('bias'))} |")
     thresholds = quality.get("thresholds_used") or {}
     lines += [
         "",
         "- R²描述拟合解释能力；RMSE描述误差大小；RPD受参考值分布影响。三者应结合样本覆盖与偏差共同判断。",
         "- 表中指标读取实际计算结果；未记录字段不补算。RMSEP表示最终评估分区的RMSE，不能与调参误差混称。",
-        f"- 领域：{_text(thresholds.get('domain', metrics.get('domain')))}；质量等级：{_text(quality.get('grade'))}；门禁通过：{'是' if quality.get('passed') else '否'}。",
+        f"- 领域：{_text(_label(thresholds.get('domain', metrics.get('domain'))))}；质量等级：{_text(_label(quality.get('grade')))}；门禁通过：{'是' if quality.get('passed') else '否'}。",
         f"- 使用阈值：R²≥{_text(thresholds.get('min_r2'))}，RPD≥{_text(thresholds.get('min_rpd'))}；其他门禁约束见 metrics.json 的 quality 字段。",
         "",
         "## 5. 可视化与诊断解读",
     ]
+    if metrics.get("selection_closed"):
+        lines.append("- 本报告质量门禁依据冻结后的最终 Test；搜索期间各轮的 Val 质量评估另行记录，二者不能混称。")
     plots = [
         ("原始光谱", raw_spectra_b64, "raw_spectra.png", "查看基线、散射、噪声与样本覆盖；曲线差异本身不能证明存在异常样本。"),
         (f"预测 vs 参考值（{holdout}）", predicted_vs_reference_b64, "predicted_vs_reference.png", "点越接近1:1线，预测越接近参考值；检查低值/高值区是否偏离及误差覆盖。"),
@@ -151,12 +169,16 @@ def _build_report(data, metrics: dict, quality: dict, best_pipe, raw_spectra_b64
             lines += ["", f"### {title}", "", f"![{title}]({filename})", "", explanation]
     for filename, title in (extra_plots or {}).items():
         lines += ["", f"### {_text(title)}", "", f"![{_text(title)}]({filename})", "", "变量贡献是模型解释证据，不能单独证明化学归属或因果关系。"]
+    for figure in report_figures or []:
+        lines += ["", f"### {_text(figure['title'])}", "", f"![{_text(figure['title'])}]({figure['filename']})", "", _text(figure["explanation"])]
+    if audit and not any(figure["filename"] == "cal_spectra.png" for figure in report_figures or []):
+        lines.append("- Cal 光谱对照缓存未记录或不可用；不为绘图重读数据或重新拟合预处理。")
     diagnostics = metrics.get("diagnostics") or {}
     if diagnostics:
         lines += ["", "### 调参集残差诊断（与上方最终评估图分区不同）", "", "| 诊断字段 | 实际结果 |", "|---|---|"]
         for key in ["residual_trend", "residual_variance", "outlier_count", "bias"]:
             if key in diagnostics:
-                lines.append(f"| {_text(key)} | {_text(diagnostics[key])} |")
+                lines.append(f"| {_text(_label(key))} | {_text(diagnostics[key])} |")
     lines += [
         "",
         "## 6. 适用范围与后续建议",
@@ -165,16 +187,110 @@ def _build_report(data, metrics: dict, quality: dict, best_pipe, raw_spectra_b64
         "- 上线需独立完成用户批准与模型注册；使用时保留漂移监测和定期参考样本复测。",
     ]
     if not quality.get("passed"):
-        lines.append(f"- 当前未通过门禁；记录的行动建议：{_text(quality.get('action'))}。先复核数据覆盖和诊断，再决定是否调整方案。")
+        if metrics.get("selection_closed"):
+            lines.append("- 最终 Test 未通过质量门禁，搜索已经关闭；不能根据本次 Test 重新调参或重复评价同一 Test。不能注册为合格模型。")
+        else:
+            lines.append(f"- 当前未通过门禁；记录的行动建议：{_text(quality.get('action'))}。先复核数据覆盖和诊断，再决定是否调整方案。")
     repro = metrics.get("reproducibility") or {}
     lines += [
         "",
         "## 7. 复现与交付说明",
         f"- 数据SHA-256：{_text(metrics.get('training_data_hash'))}。",
-        f"- 随机种子：{_text(repro.get('random_state'))}；协议：{_text(metrics.get('protocol'))}。",
+        f"- 随机种子：{_text(repro.get('random_state'))}；协议：{_text(_label(metrics.get('protocol')))}。",
         "- report.html：可离线打开的完整图文报告；delivery.zip：报告、模型、指标、诊断图和文件校验清单。",
         "- 模型及原有安全清单保持原样；metrics.json保留完整结果与复现参数。下载包不包含原始上传数据。",
         "- 未记录的单位、样本数或诊断保持明确缺失；请勿将缺失字段解释为零或已通过。",
         "",
     ]
+    if audit:
+        lines.extend(_decision_report(audit))
     return "\n".join(lines)
+
+
+def _decision_report(audit):
+    reason = "LLM 主动停止" if audit["stop_source"] == "llm" else "预算终止；最终保留选择由 LLM 作出"
+    lines = [
+        "",
+        "## 8. LLM 自主决策与终结",
+        "",
+        f"- 停止来源：{reason}；资源原因：{_text(audit.get('stop_reason'))}。",
+        f"- 最终保留实验：{_text(audit['retained_experiment_id'])}；终结决策：{_text(audit['stop_decision_id'])}。",
+        "- 提出的候选不代表已训练；只有有成功／失败执行记录的决策才进入实际执行统计。",
+        "- 模型冻结直接使用 Cal 工件，没有 Cal+Val 重拟合；最终 Test 不再进入搜索或后续 DecisionContext。",
+        "",
+        "| 决策轮次 | LLM 选择动作 | 实际执行状态 | 实际拟合次数 | 验证集 RMSE（Val） | 原预期检验 |",
+        "|---|---|---|---:|---:|---|",
+    ]
+    for index, record in enumerate(audit["decisions"], 1):
+        feedback = record.get("execution") or {}
+        lines.append(
+            f"| 第 {index} 轮 | {_text(_label(record.get('action')))} | {_text(_label(record['status']))} | {_text(feedback.get('fits', 0))} | "
+            f"{_number(feedback.get('metrics', {}).get('val', {}).get('RMSE'))} | {_text(_label(feedback.get('expected_improvement', {}).get('status')))} |"
+        )
+    for index, record in enumerate(audit["decisions"], 1):
+        proposal = record["proposal"]
+        feedback = record.get("execution") or {}
+        config = feedback.get("actual_configuration") or {"method": proposal.get("method"), "steps": proposal.get("steps", [])}
+        lines += [
+            "",
+            f"### 第 {index} 轮：{_text(_label(record.get('action')))}",
+            "",
+            f"- 决策编号：{_text(record['decision_id'])}；实验编号：{_text(record.get('experiment_id'))}。",
+            f"- 方案：{_text(pipeline(config.get('steps', [])))} → {_text(_label(config.get('method')))}。" if config.get("method") else "- 本轮仅记录保留选择，不产生新的模型拟合。",
+            f"- 提出候选：{_text('；'.join(item['id'] + '（' + str(_label(item.get('action', 'EXPLORE'))) + '）' for item in proposal['alternatives']))}；选中 {_text(proposal['selected_alternative_id'])}。",
+        ]
+        # Existing English reasoning is kept verbatim in decisions.json. Do not
+        # invent translations or retrospectively change the LLM's rationale.
+        for field, title in (("rationale", "原始选择理由"), ("expected_outcome", "原始预期")):
+            value = proposal.get(field, "")
+            if any("\u3400" <= char <= "\u9fff" for char in value):
+                lines.append(f"- {title}：{_text(value)}。")
+            else:
+                lines.append(f"- {title}：历史记录为英文，原文保留在 decisions.json 的本轮 {field} 字段；此处不补造或改写理由。")
+        if feedback.get("metrics"):
+            result = feedback["metrics"]
+            lines.append(f"- 实际反馈：校准交叉验证折外误差（Cal CV OOF）={_number(result.get('train_cv', {}).get('RMSE'))}；验证集误差（Val）={_number(result.get('val', {}).get('RMSE'))}。")
+            lines.append(f"- 参数选择用交叉验证折均值 RMSECV={_number(result.get('RMSECV'))}；该值不等同于汇总折外预测的 RMSE。")
+            previous = feedback.get("comparisons", {}).get("previous", {})
+            if previous.get("available"):
+                lines.append(f"- 相比前一轮：验证 RMSE 变化={_number(previous.get('val_rmse_change'))}（负数表示改善），验证 R² 变化={_number(previous.get('val_r2_change'))}（正数表示改善）。")
+        if feedback.get("failure_reason"):
+            lines.append(f"- 失败原因（原始执行证据）：{_text(feedback['failure_reason'])}。")
+        lines.append("- 未选候选的原始比较理由、保留依据、预期检验和完整配置可按决策编号在 decisions.json 中追溯。")
+    frozen = audit["freeze"]
+    lines += [
+        "",
+        "## 9. 实际模型配置与资源",
+        "",
+        f"- 冻结模型 SHA-256：{_text(frozen['model_hash'])}。",
+        f"- 交叉验证划分清单编号：{_text(frozen['cv_manifest_id'])}。",
+        f"- 有序预处理：{_text(pipeline(frozen['configuration']['steps']))}。",
+        f"- 参数优化策略：{_text(_label(frozen['configuration']['parameter_plan']['strategy']))}；完整授权空间见 metrics.json 和 decisions.json。",
+        "- 可通过现有 nir_predict 加载带完整性 manifest 的 model.joblib；预处理状态已随工件保存。",
+        "- 配置、运行时 adapter 版本、原始候选、实际参数和完整决策证据见 decisions.json／metrics.json。",
+        "",
+        "| 实际模型参数 | 执行值 |",
+        "|---|---|",
+    ]
+    for key, value in frozen["parameters"].items():
+        shown = "未设置（null）" if value is None else "是" if value is True else "否" if value is False else _label(value)
+        lines.append(f"| {_text(_label(key))}（{_text(key)}） | {_text(shown)} |")
+    for step in frozen["configuration"]["steps"]:
+        lines += ["", f"### {_text(_label(step.get('method', step.get('name'))))}的实际参数", "", "| 参数 | 执行值 |", "|---|---|"]
+        for key, value in step.get("params", {}).items():
+            lines.append(f"| {_text(_label(key))}（{_text(key)}） | {_text(_label(value))} |")
+        if not step.get("params"):
+            lines.append("| 参数 | 本方法无额外参数 |")
+    lines += ["", "| 资源统计 | 实际记录 |", "|---|---|"]
+    for key, value in audit["cost"].items():
+        if key == "all_caller_provider_usage":
+            value = "完整用量快照见 decisions.json；不将估算当作真实计费"
+        elif isinstance(value, bool):
+            value = "是" if value else "否"
+        lines.append(f"| {_text(_label(key))} | {_text(_label(value))} |")
+    lines += [
+        "",
+        "- 输入／输出 Token 仅统计模型服务实际返回的用量；未知用量单独计数。准入估算不是准确计费或人民币金额。未实现金额硬上限。",
+        "- 交付时搜索已停止、模型已冻结、Test 已完成；质量门禁独立记录。用户尚未批准，模型尚未注册。后续审批状态见工作流／注册表，不回写本次交付证据。",
+    ]
+    return lines

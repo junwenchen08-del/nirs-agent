@@ -1,8 +1,319 @@
 # AGENTS.md
 
+Successful sealed publication passes explicit model/HTML/ZIP references to
+search_tools._result; other tool responses never infer attachments from payload
+claims. STOP/RETAIN automatic delivery shares this path. The artifact reducer
+preserves previous files; deterministic narration includes nir_delivery_session_id
+without fabricating a provider tool call. Unified sync/async tests cover both
+termination sources, preserved artifacts and one Test read.
+
+NIR malformed provider arguments use the existing bounded continuation guard:
+invalid_tool_calls trigger hidden JSON parser feedback, never an inferred plan.
+Raw malformed arguments stay in checkpoints; provider-only projection drops
+them. Model receipts preserve finish_reason and invalid-call identity/hash/size.
+On exhausted continuation, decision_budget.close_incomplete_workflow persists
+safety_closed and a distinct failure reason, preserving budget stop provenance
+and any existing frozen/final artifacts. No Test read or selection is performed.
+Evidence summaries use experiment identity to avoid duplicating latest evidence
+and label mean-fold RMSECV separately from OOF/Val. Regression coverage:
+test_nir_malformed_decision_recovery.py (actual sync/async Lead, Fake provider).
+
+MAT regression intake uses the existing numeric loader and sealed service.
+Ambiguous targets/matrices return a correctable field-level mapping error.
+A completed, unmodeled inspection/knowledge task may hand off to a model-issued
+unified start with its snapshot archived in existing immutable receipt storage;
+active tasks, prior experiments/searches and modeling bindings cannot restart.
+Regression tools remain denied during this handoff until the unified start.
+Tests: test_nir_mat_unified_entry.py (sync/async Lead with Fake LLM and real fits).
+
+Unified default web regression entry is implemented by web_entry.py's trusted
+pending-intent marker and the actual Lead nir_workflow start receipt. Client mode
+and budget fields cannot bind policy. ProcessStore persists the immutable binding
+before preparation; NIRWorkflowMiddleware restores it on resume. Custom agents,
+other tasks and existing v1 sessions retain their prior entry/policy contracts.
+Unified delivery policies (v2) disable both cumulative token caps with None and
+keep usage, per-call output and other hard protections. The first semantic start
+receipt seeds the intake ledger exactly once. All-caller RunJournal usage is a
+separate scoped snapshot; unavailable usage is never invented as zero.
+automatic_delivery.py runs only after accepted STOP/RETAIN is committed, selecting
+exactly the retained experiment through original freeze/finalize/export services.
+It persists events/leases in the existing session, emits a grounded deterministic
+terminal response and exposes read-only status. Startup recovery uses only runs
+RunManager confirms orphaned. Unknown Test/publication states require audit; no
+GET trains, finalizes or recovers. Tests: test_nir_unified_policy.py,
+test_nir_unified_agent.py, test_nir_automatic_delivery.py. Full evidence and known
+baseline failures: docs/chemagent-unified-autonomous-mode-report.md.
+
 This file provides guidance to AI coding agents (Claude Code, Codex, and others) when working with code in this repository. It is the source of truth; the sibling `CLAUDE.md` imports it via `@AGENTS.md`.
 
 ## Project Overview
+
+### Phase-5 desktop web entry and read-only process projection
+
+`community/nir/web_entry.py::bind_web_request` validates only an explicit
+`body.context.nir_autonomous` selection before Gateway creates a run. Writable
+web fields are enabled=true, development/autonomous/custom profile and optional
+max_experiments/max_fits/max_decisions/max_wall_seconds. The existing
+decision_budget.resolve_policy enforces server ceilings; custom resolves from
+server-bounded autonomous defaults with the four explicit training overrides.
+The development profile remains unchanged. Client input cannot supply nir_workflow, and arbitrary
+RunnableConfig context/configurable keys cannot forge the internal binding.
+The Gateway-owned nir_web_request binds sealed_holdout/llm_autonomous plus
+autonomous_rounds/autonomous_delivery; workflow start consumes that binding.
+It disables generic planning/subagent bypasses. Before workflow start, NIR
+middleware already denies legacy execution and applies delivery admission;
+DynamicContext/Memory/Uploads honor the web binding so first-turn cross-task
+memory and spectral row previews remain suppressed. No new Agent or selector.
+
+`autonomous_view.py::AutonomousView` opens the existing owner/thread ProcessStore
+v5 SQLite index with mode=ro and no bootstrap/migration/write connection. The
+existing nir_process router owner-checks sessions, summary, paged decisions,
+one decision detail, rejected submissions and cached chart reads. Summary ETags
+reflect persisted session/decision bytes. Detail exposes sanitized immutable
+proposal plus separately recorded execution/feedback. Rejections reuse bounded
+ProcessStore actions and require a real model-issued receipt; they are never
+accepted decisions or experiments. No array/model loader, fit or finalization
+service is reachable from these read methods. Allowlisted scopes exclude Test
+until finalized; private paths, raw spectra, secrets and full prompts are absent.
+Legacy threads return no autonomous sessions without creating storage.
+
+SearchSessionStore.finalize captures observed/predicted/residual plot evidence
+inside the original unique Test lease, stores at most 2000 deterministic points
+with explicit population/sampling metadata in the existing final session JSON,
+and returns that cache on replay. GET charts reads only that finalized cache;
+it never reopens holdout.npz or the frozen artifact. Old finalized sessions
+without points remain not_recorded. The browser's download allowlist uses
+published output artifact paths, never private session paths. Delivery snapshot,
+quality, genuine user approval and registered-model evidence remain separate.
+No ProcessStore or application ORM migration is added in this phase. Anchors:
+test_nir_web_entry.py, test_nir_autonomous_view.py and
+test_nir_autonomous_router.py. See docs/chemagent-phase5-implementation-report.md
+for browser/provider acceptance status; code presence is not an E2E pass.
+
+The named sealed protocol tools retain atomic JSON through both tool-result and
+history budgeting in ToolOutputBudgetMiddleware; a file preview cannot replace
+the context/version/provider schema when sealed mode correctly denies read_file.
+Generic outputs retain their prior limits, and NIR call admission still charges
+the complete context and schema. test_nir_web_protocol_output.py covers this
+production middleware interaction; the web-entry Fake Lead tests include it.
+CSV intake regression covers an explicit named target followed by numeric
+wavelength headers without mistaking that header for a sample. Intake integrity
+failures stop before prepare, without fabricated diagnostic or Test evidence.
+
+### Phase-4 autonomous final delivery (explicit opt-in)
+
+Phase-6 additions retain these protocols and v5 storage. cal_spectra.py captures
+at most 12 Cal rows and 512 original ordered channels with the actual fitted
+preprocessor; dataset_session.py persists a hash-bound cache at execution time.
+autonomous_view.py and GET /autonomous/{session_id}/spectra/{experiment_id} serve
+that cache only, with owner/thread/session/model identity checks and no recompute.
+Missing old caches stay unavailable. Explicit NPZ wv_unit metadata is validated;
+axis units are never inferred from numeric ranges. prepare_nir_corn.py is a local
+source adapter, not an Agent training entry or a replacement partition manager.
+
+decision_provider.py makes provider-only context and verified coordinator Skill
+projections. It retains all autonomous science/control sections, the exact user
+request and source hash, and omits legacy instructions only in autonomous mode.
+Framework activation messages cannot opt a legacy user task into delivery mode.
+Full context/hash and decisions remain persisted. Current submit schemas enumerate
+real evidence IDs; rejection contracts expose the same allowed IDs. Model receipts
+store serialized UTF-8 component sizes separately from provider token usage. These
+bytes are not tokenizer counts. Phase-6 real run failed final delivery; post-run
+repairs have local Fake LLM evidence only. See the phase-6 implementation report.
+
+SummarizationMiddleware checks the same trusted web binding / active autonomous
+state before sync or async compaction. Governed NIR skips its separate model call
+and retains existing bounded DecisionContext/provider compaction; legacy hooks
+and summary behavior are unchanged. test_nir_autonomous_summarization.py plus the
+web Fake lifecycle exercise this with the real summary middleware enabled.
+RunJournal token totals include auxiliary middleware usage; NIR model receipts
+cover governed Lead requests only. Never label the latter as all provider cost.
+
+Use autonomous_delivery=true only with llm_autonomous/sealed_holdout and
+autonomous_rounds. New budgets are budget_profile=development|autonomous plus
+task_budget JSON; old max_attempts/max_fits/max_decisions arguments remain for
+older modes and cannot silently override phase-4 budgets. Server ceilings are
+NIR_AUTONOMOUS_<FIELD.upper()> (e.g. MAX_FITS); profiles default to 5/50/15/600
+or 40/1000/100/7200 experiments/fits/actions/seconds. Search LLM allowance is
+30/1200000 or 150/3000000 calls/admission tokens, plus separately capped terminal
+6 calls/500000 tokens/300 seconds. Single plans remain 40 trials/200 fits.
+Existing per-operation ResourceBudget/file/memory/cancellation gates also apply.
+
+decision_budget.py stores immutable policy, accumulated fit/experiment/action
+and provider ledgers in existing v5 session payloads. Before each actual Lead
+request it leases a call and estimates input bytes + bounded output; accurate
+usage is tracked separately, unknown usage explicitly counted. Task-intake
+responses are linked by the actual workflow start call and charged at prepare.
+An explicit autonomous_delivery=true request also leases intake calls in the
+existing receipt table before prepare; its ledger transfers without resetting.
+Such requests cannot silently start legacy. Keep the prepare receipt and provide
+current workflow identity/required process action on every model request; after
+STOP remove obsolete search schemas from provider input, not persisted records.
+After delivery, narration/approval uses ordinary runtime limits and is outside
+the immutable delivery cost snapshot. Wall enforcement is cooperative; no fee
+or strict third-party-fit interruption guarantee exists.
+
+STOP requires concise stop_evidence, successful same-session retention and
+explicit retained experiment evidence. Normal optimization never stops on
+quality/plateau/failure counts. Budget exhaustion blocks fits but offers a
+read-only final_selection context for action=RETAIN; source stays budget and
+selection_source=llm. No success/invalid repairs/provider failure/terminal
+quota exhaustion yields an explicit closed, non-frozen outcome. No auto-best.
+If termination repairs/provider failure follows a budget stop, preserve the
+original stop_source/reason and separately persist terminal_failure_source/reason.
+
+The existing nir_freeze_search verifies terminal choice, owner/thread, actual
+configuration/parameters/artifact hash, split/CV bindings and budget ledger,
+then directly freezes Cal without refitting. nir_finalize_search obtains the
+existing unique Test lease, caches final results and never reopens search.
+decision_delivery.py is a publication adapter for _report/artifacts/delivery,
+not a second report system: unique staged generations, hashes, evidence JSON,
+Markdown/HTML/ZIP and compatible nir_predict artifacts. Caught export failures
+retry export only; uncertain in-flight leases require operator recovery.
+Finalized Test/cache survives invalid decision replays and terminal LLM resource
+or provider failures, so publication recovery cannot silently consume Test again.
+Final scope, quality, user approval and registration remain separate. Middleware
+allows genuine approval and exact-artifact registration only after final review;
+legacy/files/scripts/MCP-fit/restart bypasses remain denied. No new database
+schema or frontend change. Anchors: six test_nir_delivery_{budget,decisions,
+freeze,export,agent,recovery}.py modules and verify_nir_delivery_llm.py.
+Earlier phase behavior remains the default. See docs/chemagent-phase4-implementation-report.md.
+
+Phase-4 acceptance stability: decision_schema.py derives initial/feedback/RETAIN
+schemas from the strict contract and writable adapter parameters; the Lead uses
+current-step tool views without choosing modeling actions. nir_submit_decision
+accepts object or legacy JSON string, preserving exact model-call argument hashes.
+Context reuse is keyed to persisted history/stage and runtime/knowledge versions;
+live resource enforcement stays server-side. Budget transitions refresh the
+provider request before final admission; full converted schemas count in byte
+estimates, and failed provider calls retain exception class/status. Regression
+anchor: test_nir_delivery_contract_reliability.py.
+
+### Phase-1 sealed single-target regression
+
+`community/nir/dataset_session.py` and `search_tools.py` implement an opt-in
+`search_protocol="sealed_holdout"` for analysis/calibration with internal holdout.
+`nir_prepare_search` binds CSV/TXT or NPZ once; named partitions can carry isolated
+groups. Search and holdout NPZ files live below owner/thread `nir-process/sessions`,
+outside sandbox-visible user-data. Search loads only search.npz. All family CV in
+`nir_core.model.safe_search` refits preprocessing/scalers within each frozen Cal
+fold; duplicate spectra across folds fail closed. Only PLS/Ridge/SVR/ET are adapted.
+Phase 1 retains its bounded parameter grids for compatible manual search.
+
+ProcessStore now migrates transactionally to user_version=5, preserving v1/v2/v3/v4
+records and phase-1 search_sessions/search_experiments. Session data/split/CV policy
+are locked; request replay cannot refit. Freeze explicitly names a successful
+experiment. A durable testing lease precedes holdout IO; uncertain failure cannot
+reopen search or issue another lease. Exports use a unique session outputs directory
+and existing artifact integrity/prediction/report helpers. Registration of new
+session exports is not enabled yet; legacy registration retains its science and
+final-Test gates. Never claim that validation passed means final Test passed.
+
+Middleware denies every non-allowlisted tool (including scripts, task and MCP fit)
+for this protocol. Public tool signatures do not accept alternative data/Test paths.
+Spectral uploads and paired converted Markdown never inject row previews, including
+before workflow start. Active sealed workflows get metadata-only upload context.
+Use a fresh conversation; existing Test-containing history is not erased. Legacy
+entry points remain available outside this protocol and still evaluate holdout per
+call, so they must not be used as autonomous search. Regression reflect, LV advice,
+comparison and search quality now use explicit Val evidence, with no Test fallback.
+Anchors: test_nir_search_metrics.py, test_nir_safe_search_core.py,
+test_nir_test_sealing.py, test_nir_sealed_search_tools.py, test_nir_compare_validation.py
+and test_nir_upload_preview_isolation.py.
+See docs/chemagent-phase1-implementation-report.md for commands and scope limits.
+
+### Phase-2 LLM initial pipeline decisions
+
+`decision_strategy="llm_autonomous"` is opt-in and requires sealed_holdout.
+`decision_context.py` builds sourced task/Cal/managed-method/runtime/CV/budget
+snapshots without history or Test statistics. `decision_contracts.py` validates
+DecisionContext and strict initial EXPLORE proposals with at least two alternatives.
+The LLM alone selects ordered preprocessing (including Raw []), pls/ridge/svr/et
+and fixed parameters or a discrete Cartesian grid. No model-card priority, quality
+threshold or automatic family/pipe comparison selects or substitutes the plan.
+
+Lead Agent's existing NIR middleware now captures actual sync/async model responses
+before tools run; `decision_origin.py` persists model class/name, AI message and
+run/call IDs, exact argument hash, response hash and available token usage. Fake
+providers are explicitly labeled. Caller-supplied author labels cannot authorize
+execution. v4 adds decision_contexts, initial_decisions and model_issued_calls to
+the existing private ProcessStore, without a second execution/persistence platform.
+Only nir_decision_context → nir_submit_decision → nir_execute_decision is enabled
+after prepare. Direct nir_search_model, legacy entry points and restart/finish
+bypasses are denied; execute accepts only the accepted workflow decision_id.
+
+Acceptance validates context revision/hash, current knowledge/capability snapshots,
+evidence IDs, explicit user hard constraints, pipeline legality, parameter bounds
+and remaining fits. Defaults are disclosed then materialized into the accepted
+spec; preprocessing providers/model runtime versions are bound and rechecked before
+fit. The immutable payload records decision/session/predetermined experiment IDs;
+execution status/feedback are separate columns. A durable single-use lease precedes
+the shared SearchSessionStore search. Success/failure replay never refits.
+
+`nir_core.model.parameter_control` advertises only real adapter parameters. Fixed
+parameters evaluate one candidate across frozen Cal folds and refit once; grid cost
+is Cartesian candidates * n_splits + 1, with 40 trials/200 fits as hard caps and
+smaller session/proposal caps enforced. PLS latent variables are explicit, never
+clamped. Other supported parameters are passed to sklearn and full actual estimator
+params returned. Exact KFold/GroupKFold Cal row indices, seed/shuffle and manifest
+hash accompany context, decision identity and experiment feedback. These indices
+are local to Cal and do not expose Test members.
+
+With autonomous_rounds=false an execution returns Cal CV/Val and enters initial_result/await_next_phase regardless
+of quality; no later autonomous action or STOP is implemented. Response grounding
+rejects sealed-Test performance claims. DynamicContext/Memory middlewares omit
+cross-task memory injection/update for this strategy; use a fresh conversation.
+Default legacy mode and phase-1 manual freeze/finalization remain compatible.
+
+Anchors: test_nir_authorized_parameters.py, test_nir_initial_decisions.py and
+test_nir_autonomous_initial_agent.py (production Lead factory/prompt with Fake model,
+real governed tools and sync/async NIR middleware). Opt-in real-provider smoke:
+`backend/scripts/verify_nir_initial_llm.py --allow-real-provider`, with isolated
+DEER_FLOW_HOME under repo .tmp and configured credentials. It uses the real model
+factory and registered tool providers; unrelated Gateway/UI middleware services
+are omitted. See docs/chemagent-phase2-implementation-report.md for actual evidence.
+
+### Phase-3 task-local feedback decisions
+
+Set autonomous_rounds=true with llm_autonomous/sealed_holdout to use the same
+Lead context → submit → execute tools repeatedly. TUNE keeps family/pipeline;
+CHANGE_PREPROCESS keeps family but changes pipeline; SWITCH_MODEL changes family
+with the same pipeline; EXPLORE requires a different direction and reason. The
+LLM compares alternatives, supplies current observations/uncertainties, rejected
+candidate reasons, fit estimate, improvement goal and hypotheses. Quality, fixed
+thresholds, method-card rank and plateau counts never select actions or stop.
+
+The existing InitialDecisionService (name kept for compatibility) reads immutable
+decision payloads plus separate execution columns. Context contains current/best/
+LLM-retained evidence, four compact recent records, tried parameter regions and
+success/failure counts. nir_decision_history pages at most four full records;
+knowledge_query retrieves a small additional sourced card. Earlier complete
+governed call/response pairs are pruned only from model inputs once a new context
+exists; checkpoint messages and decision bytes remain unchanged. Model response
+receipts account calls, available tokens and elapsed time separately from accepted
+actions, Cartesian candidates, model fits and execution time.
+
+v5 removes only the per-session initial_decisions UNIQUE restriction, copying
+historical opaque payload/execution bytes and retaining the same index. No second
+Agent/search/experiment store is created. Initial defaults stay compatible. New
+accepted decisions hold a durable single-use execution lease; feedback associates
+decision/experiment/feedback IDs, actual configuration, full parameters, Cal CV/
+Val, deltas versus previous/retained, declared goal support, fits/time and failure.
+The pre-execution rationale is never rewritten. Exact duplicate regions require
+replication_reason; repeated grid candidates are rejected. Explicit user model/
+pipeline constraints persist; a failed LLM choice is free to switch legally.
+
+max_attempts/max_fits/max_decisions are cumulative. Hard exhaustion records its
+own reason without selecting a model. LLM STOP must explicitly name a successful
+retained_experiment_id and have null plan/zero fits, then enters
+awaiting_final_confirmation. Direct search, freeze/finalize, legacy/MCP fit/raw
+file/script/task/restart bypasses remain denied even in terminal stages. Test
+stays sealed; final confirmation/freeze/Test integration and crash recovery are
+later work. Anchors: test_nir_multiround_decisions.py, test_nir_multiround_agent.py,
+test_nir_multiround_context_cost.py and test_nir_multiround_legacy_replay.py
+(old opaque phase-2 payload replay/execution without rewriting). The bounded provider smoke is
+verify_nir_initial_llm.py --allow-real-provider --multi-round (two synthetic
+experiments, fourteen fits, at most nine provider requests). See phase-3 report.
 
 ### Durable NIR process evidence
 
@@ -18,7 +329,7 @@ HTML into agent context. Test anchors: `test_nir_delivery.py` and the real four-
 `community/nir/process.py` stores process attempts, step evidence, immutable SHA-256
 chart JSON and runtime-run links in owner/thread-local `nir-process/`, outside
 sandbox-visible `user-data`. The standalone SQLite index uses transactional
-`PRAGMA user_version` migration (currently 2, including upgrade from 1); it is not
+`PRAGMA user_version` migration (currently 5, including upgrade from 1/2/3/4); it is not
 an application ORM table and does not change the central database schema. Thread
 deletion removes the index and blobs together. Never put chart arrays in workflow
 checkpoints, refit a model or resplit data to make charts.

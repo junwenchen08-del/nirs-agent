@@ -410,7 +410,7 @@ def nir_train_auto_split_model_tool(
         metrics["RMSEC"] = metrics["train"]["RMSE"]
         metrics["RMSECV"] = metrics["val"]["RMSE"]
         metrics["RMSEP"] = metrics["test"]["RMSE"]
-        quality = evaluate_quality(metrics, domain=domain, n_samples=int(final_train_indices.size))
+        quality = evaluate_quality(metrics, domain=domain, n_samples=int(len(y_cal)), evaluation_scope="validation")
         metrics["quality"] = quality
 
         real_model = _resolve(runtime, model_output, read_only=False)
@@ -884,7 +884,7 @@ def nir_train_partitioned_model_tool(
         metrics["RMSEC"] = metrics["train"]["RMSE"]
         metrics["RMSECV"] = float(chosen_model["RMSE_tuning"])
         metrics["RMSEP"] = metrics["test"]["RMSE"]
-        quality = evaluate_quality(metrics, domain=domain, n_samples=int(final_train_mask.sum()))
+        quality = evaluate_quality(metrics, domain=domain, n_samples=int(len(y_cal)), evaluation_scope="validation")
         metrics["quality"] = quality
 
         real_model = _resolve(runtime, model_output, read_only=False)
@@ -1339,7 +1339,7 @@ def nir_analyze_tool(
         metrics["R2_val"] = metrics["val"]["R2"]
         metrics["RPD"] = metrics["test"]["RPD"]
         metrics["RMSEP"] = metrics["test"]["RMSE"]
-        quality = evaluate_quality(metrics, domain=domain, n_samples=int(X.shape[0]))
+        quality = evaluate_quality(metrics, domain=domain, n_samples=int(X_tr.shape[0]), evaluation_scope="validation")
         metrics["quality"] = quality
 
         try:
@@ -1887,7 +1887,7 @@ def nir_compare_tool(
         results = []
         summaries = []
         best_idx = 0
-        best_rpd = -1.0
+        best_rmse = float("inf")
 
         for i, methods in enumerate(pipe_list):
             budget.checkpoint(f"compare_pipeline_{i + 1}")
@@ -1900,10 +1900,9 @@ def nir_compare_tool(
                     pipe.fit(X_tr, data.wv)
                     X_tr_p = pipe.transform(X_tr, data.wv)
                     X_val_p = pipe.transform(X_val, data.wv)
-                    X_te_p = pipe.transform(X_te, data.wv)
                     pp_desc = pipe.description()
                 else:
-                    X_tr_p, X_val_p, X_te_p = X_tr, X_val, X_te
+                    X_tr_p, X_val_p = X_tr, X_val
                     pp_desc = "无（原始光谱）"
             except Exception as pp_exc:
                 summaries.append(
@@ -1919,7 +1918,6 @@ def nir_compare_tool(
             model, best_n, cv_results, predict_fn = _train_one_model(method, X_tr_p, y_tr, max_components=20, cv_folds=10, cv_strategy="auto")
             y_pred_tr = predict_fn(model, X_tr_p)
             y_pred_val = predict_fn(model, X_val_p)
-            y_pred_te = predict_fn(model, X_te_p)
 
             m = {
                 "method": method,
@@ -1936,16 +1934,19 @@ def nir_compare_tool(
                 "reproducibility": comparison_reproducibility,
                 "train": compute_metrics(y_tr, y_pred_tr),
                 "val": compute_metrics(y_val, y_pred_val),
-                "test": compute_metrics(y_te, y_pred_te),
                 "preprocessing": pp_desc,
                 "pipeline": methods,
             }
             m["R2_val"] = m["val"]["R2"]
-            m["RPD"] = m["test"]["RPD"]
-            m["RMSEP"] = m["test"]["RMSE"]
+            m["evaluation_scope"] = "validation"
+            m["test_status"] = "not_evaluated"
+            m["train"]["scope"] = "calibration"
+            m["val"]["scope"] = "validation"
+            m["RPD"] = m["val"]["RPD"]
+            m["RMSE_val"] = m["val"]["RMSE"]
             m["RMSEC"] = m["train"]["RMSE"]
             m["RMSECV"] = _extract_rmsecv(cv_results, best_n)
-            m["quality"] = evaluate_quality(m, domain=domain, n_samples=int(X.shape[0]))
+            m["quality"] = evaluate_quality(m, domain=domain, n_samples=len(y_tr), evaluation_scope="validation")
             try:
                 from nir_core.diagnostics import compute_residual_diagnostics
 
@@ -1955,8 +1956,8 @@ def nir_compare_tool(
 
             # Store y_ref/y_pred for gallery plot.
             m_with_arrays = dict(m)
-            m_with_arrays["y_ref"] = y_te
-            m_with_arrays["y_pred"] = y_pred_te
+            m_with_arrays["y_ref"] = y_val
+            m_with_arrays["y_pred"] = y_pred_val
             results.append(
                 ModelResult(
                     method=method,
@@ -1973,7 +1974,8 @@ def nir_compare_tool(
                 "n_components": best_n,
                 "R2_val": round(m["R2_val"], 4),
                 "RPD": round(m["RPD"], 4),
-                "RMSEP": round(m["RMSEP"], 4),
+                "RMSE_val": round(m["RMSE_val"], 4),
+                "evaluation_scope": "validation",
                 "RMSECV": round(m["RMSECV"], 4) if m["RMSECV"] else None,
                 "grade": m["quality"]["grade"],
                 "passed": m["quality"]["passed"],
@@ -1981,11 +1983,11 @@ def nir_compare_tool(
             }
             summaries.append(summary)
 
-            if m["RPD"] > best_rpd:
-                best_rpd = m["RPD"]
+            if m["RMSE_val"] < best_rmse:
+                best_rmse = m["RMSE_val"]
                 best_idx = summary_idx
 
-        if not summaries:
+        if not results:
             return _err("All pipelines failed; no models to compare.")
 
         # Generate gallery HTML.
@@ -2004,12 +2006,12 @@ def nir_compare_tool(
             "",
             "## 对比结果",
             "",
-            "| # | 预处理 | 成分数 | R²(验证) | RPD | RMSEP | 等级 | 通过 |",
+            "| # | 预处理 | 成分数 | R²(验证) | RPD(验证) | RMSE(验证) | 等级 | 通过 |",
             "|---|--------|--------|----------|-----|-------|------|------|",
         ]
         for i, s in enumerate(summaries):
             mark = " ⭐" if i == best_idx else ""
-            md_lines.append(f"| {i + 1} | {s['description']}{mark} | {s.get('n_components', '-')} | {s.get('R2_val', '-')} | {s.get('RPD', '-')} | {s.get('RMSEP', '-')} | {s.get('grade', '-')} | {'是' if s.get('passed') else '否'} |")
+            md_lines.append(f"| {i + 1} | {s['description']}{mark} | {s.get('n_components', '-')} | {s.get('R2_val', '-')} | {s.get('RPD', '-')} | {s.get('RMSE_val', '-')} | {s.get('grade', '-')} | {'是' if s.get('passed') else '否'} |")
         md_lines.extend(
             [
                 "",
@@ -2017,8 +2019,8 @@ def nir_compare_tool(
                 f"- 预处理: {best['description']}",
                 f"- 成分数: {best.get('n_components')}",
                 f"- R²(验证): {best.get('R2_val')}",
-                f"- RPD: {best.get('RPD')}",
-                f"- RMSEP: {best.get('RMSEP')}",
+                f"- RPD(验证): {best.get('RPD')}",
+                f"- RMSE(验证): {best.get('RMSE_val')}",
                 f"- 等级: {best.get('grade')}",
                 "",
             ]

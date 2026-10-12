@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "post_run_read_only_cost_reconciliation",
+  "run_id": "18e8faec-3181-4504-8d01-f45b77c7e144",
+  "thread_id": "97d5ac14-d4a8-4585-865c-480b97011fa2",
+  "new_provider_calls": 0,
+  "test_arrays_opened": 0,
+  "actual_provider_usage_source": "RunJournal on_llm_end callbacks persisted in runs row; corroborated by HTTP log count",
+  "run_stats": {
+    "llm_call_count": 18,
+    "lead_agent_tokens": 428746,
+    "middleware_tokens": 65573,
+    "subagent_tokens": 0,
+    "total_input_tokens": 467891,
+    "total_output_tokens": 26428,
+    "total_tokens": 494319,
+    "created_at": "2026-10-10 07:00:33.474510",
+    "updated_at": "2026-10-10 07:02:46.757414"
+  },
+  "http_provider_successes": 18,
+  "lead_decision_responses": 13,
+  "lead_input_tokens": 418368,
+  "lead_output_tokens": 10378,
+  "lead_total_tokens": 428746,
+  "auxiliary_responses": 5,
+  "auxiliary_input_tokens": 49523,
+  "auxiliary_output_tokens": 16050,
+  "auxiliary_total_tokens": 65573,
+  "persisted_summary_versions": [
+    {
+      "sha256": "a0be3c30ac5197e29269eb7bd0eeeffdfdbb10d6e60a29992091f71d6bbd082e",
+      "characters": 3917
+    },
+    {
+      "sha256": "d9822c6e3dbdb29eff405121ed57b2afed5cab0c94d7c966220a174b181bac4d",
+      "characters": 6005
+    },
+    {
+      "sha256": "bb9e79a5541b56c586c62f525199efe5060bc5ad0bb1fd39125df874e0899042",
+      "characters": 7653
+    },
+    {
+      "sha256": "d114a705cd251c68fae49884c123c4a2fdd5f85966ed657523ef32f5a68f800b",
+      "characters": 9128
+    },
+    {
+      "sha256": "948658ad087cd9e740f53afdc358cae5c2bcc018d6a5bd33aeb0705e93a4e4d6",
+      "characters": 9714
+    }
+  ],
+  "separate_summary_provider_path": "DeerFlowSummarizationMiddleware._summary_model.ainvoke, outside NIRWorkflowMiddleware call ledger",
+  "summarization_enabled_in_real_run": true,
+  "auxiliary_per_call_metadata_limitation": "Run events used memory backend and do not survive Gateway restart. Individual middleware caller allocation/output/admission sizes cannot be fully recovered from persisted totals.",
+  "actual_provider_calls_within_authorized_44": true,
+  "global_proxy_admission_enforcement_verified": false,
+  "lead_profile_bytes_source": "Original real evidence profiles cover 13 governed Lead responses only",
+  "fix": "Skip generic summary model for trusted web autonomous intake and active llm_autonomous state; reuse existing persisted DecisionContext/provider compaction. Legacy summary remains enabled.",
+  "fixed_path_real_provider_verification": "not performed; no additional authorized attempt",
+  "original_real_evidence_unchanged": true,
+  "run_wall_seconds_created_to_updated": 133.282904
+}

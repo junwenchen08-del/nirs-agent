@@ -33,12 +33,49 @@ import {
 } from "@/core/nir/process-display";
 import { useProcessResource } from "@/core/nir/process-hooks";
 import { selectNIRProcessView } from "@/core/nir/process-selectors";
+import { selectNIRWorkflow } from "@/core/nir/selectors";
 import { cn } from "@/lib/utils";
 
+import { AutonomousProcess } from "./autonomous-process";
 import { MethodKnowledge } from "./method-knowledge";
 import { NIRProcessContent } from "./nir-process-content";
 import { plotLabel, ProcessChartView } from "./process-chart";
 import { ProcessFacts as Facts } from "./process-facts";
+
+export function ProcessWorkspace({ threadId }: { threadId: string }) {
+  const { user } = useAuth();
+  const client = useQueryClient();
+  const sessions = useProcessResource<{ data: { session_id: string }[] }>(
+    threadId,
+    "autonomous",
+  );
+  const sid = sessions.data?.data[0]?.session_id;
+  const workflowState = useQuery({
+    queryKey: ["nir-autonomous-workflow", user?.id, threadId, sid],
+    queryFn: ({ signal }) => loadNIRWorkflowState(threadId, signal),
+    enabled: Boolean(user && sid),
+    retry: false,
+    refetchOnWindowFocus: true,
+    staleTime: 5000,
+  });
+  useEffect(
+    () => () => {
+      client.removeQueries({ queryKey: ["nir-process", user?.id] });
+      client.removeQueries({ queryKey: ["nir-autonomous-workflow", user?.id] });
+    },
+    [client, user?.id],
+  );
+  return sid ? (
+    <AutonomousProcess
+      key={`${threadId}-${sid}`}
+      threadId={threadId}
+      sessionId={sid}
+      workflow={selectNIRWorkflow(workflowState.data)}
+    />
+  ) : (
+    <LegacyProcessWorkspace threadId={threadId} />
+  );
+}
 
 const stepCopy: Record<StepKey, [string, string, string, string]> = {
   audit: [
@@ -597,7 +634,7 @@ function StepDetail({
   );
 }
 
-export function ProcessWorkspace({ threadId }: { threadId: string }) {
+function LegacyProcessWorkspace({ threadId }: { threadId: string }) {
   const { locale } = useI18n();
   const zh = locale === "zh-CN";
   const { user } = useAuth();
@@ -628,7 +665,6 @@ export function ProcessWorkspace({ threadId }: { threadId: string }) {
   const legacyView = selectNIRProcessView(legacy.data);
   useEffect(
     () => () => {
-      client.removeQueries({ queryKey: ["nir-process", user?.id] });
       client.removeQueries({ queryKey: ["nir-process-legacy", user?.id] });
     },
     [client, user?.id],

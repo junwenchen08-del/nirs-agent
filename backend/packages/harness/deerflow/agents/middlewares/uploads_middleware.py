@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # File extensions that typically contain NIR/UV-Vis spectral data.
 # When these are uploaded, the agent should prefer the dedicated `nir_*`
 # tools over writing ad-hoc Python scripts with `bash`.
-_SPECTRAL_FILE_EXTENSIONS = frozenset({".csv", ".mat", ".npz", ".txt", ".parquet"})
+_SPECTRAL_FILE_EXTENSIONS = frozenset({".csv", ".tsv", ".mat", ".npz", ".txt", ".parquet"})
 
 
 _OUTLINE_PREVIEW_LINES = 5
@@ -41,6 +41,12 @@ def _extract_outline_for_file(file_path: Path) -> tuple[list[dict], list[str]]:
           anchor when outline is empty so the agent has some context.
           Empty when outline is non-empty (no fallback needed).
     """
+    # Upload context is assembled before nir_workflow(start). Never disclose
+    # mixed spectral rows through converted previews, even on that first turn.
+    if file_path.suffix.lower() in _SPECTRAL_FILE_EXTENSIONS:
+        return [], []
+    if file_path.suffix.lower() == ".md" and any(file_path.with_suffix(suffix).is_file() for suffix in _SPECTRAL_FILE_EXTENSIONS):
+        return [], []
     md_path = file_path.with_suffix(".md")
     if not md_path.is_file():
         return [], []
@@ -114,7 +120,7 @@ class UploadsMiddleware(AgentMiddleware[UploadsMiddlewareState]):
             lines.append("  Use `grep` to search for keywords (e.g. `grep(pattern='keyword', path='/mnt/user-data/uploads/')`).")
         lines.append("")
 
-    def _create_files_message(self, new_files: list[dict], historical_files: list[dict]) -> str:
+    def _create_files_message(self, new_files: list[dict], historical_files: list[dict], *, sealed: bool = False) -> str:
         """Create a formatted message listing uploaded files.
 
         Args:
@@ -127,6 +133,19 @@ class UploadsMiddleware(AgentMiddleware[UploadsMiddlewareState]):
             Formatted string inside <uploaded_files> tags.
         """
         lines = ["<uploaded_files>"]
+
+        if sealed:
+            for file in (new_files or []) + (historical_files or []):
+                lines.append(f"- {file['filename']} ({file.get('size', 0)} bytes): {file['path']}")
+            lines.extend(
+                [
+                    "A sealed_holdout regression workflow is active. File metadata only is available here.",
+                    "Use nir_prepare_search for trusted ingestion, then nir_search_model, nir_freeze_search and nir_finalize_search.",
+                    "The workflow source is locked; file readers, scripts and legacy fitting tools are unavailable during this protocol.",
+                    "</uploaded_files>",
+                ]
+            )
+            return "\n".join(lines)
 
         lines.append("The following files were uploaded in this message:")
         lines.append("")
@@ -228,6 +247,9 @@ class UploadsMiddleware(AgentMiddleware[UploadsMiddlewareState]):
             State updates including uploaded files list.
         """
         messages = list(state.get("messages", []))
+        from deerflow.community.nir.web_entry import web_request
+
+        sealed = bool(web_request(getattr(runtime, "context", None)) or (state.get("nir_workflow") or {}).get("search_protocol") == "sealed_holdout")
         if not messages:
             return None
 
@@ -260,7 +282,7 @@ class UploadsMiddleware(AgentMiddleware[UploadsMiddlewareState]):
                     continue
                 if file_path.is_file() and file_path.name not in new_filenames:
                     stat = file_path.stat()
-                    outline, preview = _extract_outline_for_file(file_path)
+                    outline, preview = ([], []) if sealed else _extract_outline_for_file(file_path)
                     historical_files.append(
                         {
                             "filename": file_path.name,
@@ -276,7 +298,7 @@ class UploadsMiddleware(AgentMiddleware[UploadsMiddlewareState]):
         if uploads_dir:
             for file in new_files:
                 phys_path = uploads_dir / file["filename"]
-                outline, preview = _extract_outline_for_file(phys_path)
+                outline, preview = ([], []) if sealed else _extract_outline_for_file(phys_path)
                 file["outline"] = outline
                 file["outline_preview"] = preview
 
@@ -286,7 +308,7 @@ class UploadsMiddleware(AgentMiddleware[UploadsMiddlewareState]):
         logger.debug(f"New files: {[f['filename'] for f in new_files]}, historical: {[f['filename'] for f in historical_files]}")
 
         # Create files message and prepend to the last human message content
-        files_message = self._create_files_message(new_files, historical_files)
+        files_message = self._create_files_message(new_files, historical_files, sealed=sealed)
 
         # Extract original content - handle both string and list formats
         original_content = last_message.content

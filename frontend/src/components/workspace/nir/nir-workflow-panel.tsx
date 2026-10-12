@@ -15,8 +15,10 @@ import {
 import { useArtifacts } from "@/components/workspace/artifacts";
 import { useI18n } from "@/core/i18n/hooks";
 import { selectNIRProcessView } from "@/core/nir";
+import { record, text } from "@/core/nir/autonomous";
 import { cn } from "@/lib/utils";
 
+import { AutonomousProcess } from "./autonomous-process";
 import { NIRProcessContent } from "./nir-process-content";
 
 export function NIRWorkflowPanel({
@@ -80,15 +82,24 @@ export function NIRWorkflowPanel({
               </Link>
             )}
         </SheetHeader>
-        <NIRProcessContent
-          key={view.base.projectId}
-          view={view}
-          hasArtifacts={artifacts.length > 0}
-          onArtifacts={() => {
-            setOpen(false);
-            setArtifactsOpen(true);
-          }}
-        />
+        {threadId && record(workflow).decision_strategy === "llm_autonomous" ? (
+          <AutonomousProcess
+            key={view.base.projectId}
+            threadId={threadId}
+            sessionId={text(record(workflow).search_session_id) || undefined}
+            workflow={workflow}
+          />
+        ) : (
+          <NIRProcessContent
+            key={view.base.projectId}
+            view={view}
+            hasArtifacts={artifacts.length > 0}
+            onArtifacts={() => {
+              setOpen(false);
+              setArtifactsOpen(true);
+            }}
+          />
+        )}
       </SheetContent>
     </Sheet>
   );

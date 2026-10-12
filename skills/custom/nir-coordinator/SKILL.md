@@ -2,7 +2,7 @@
 name: nir-coordinator
 description: >-
   完整的近红外光谱定量与定性分析工作流。协调数据加载、分类/回归建模、预处理优化和质量评估。
-  包含反思闭环机制——当模型质量不达标时自动尝试不同的预处理组合。
+  legacy 模式保留反思闭环；llm_autonomous 支持首轮选择和基于真实反馈的可选多轮决策。
   支持自然语言自动路由，也可通过 /nir-coordinator 命令显式激活。
 allowed-tools:
   - read_file
@@ -11,6 +11,14 @@ allowed-tools:
   - ask_clarification
   - present_files
   - nir_workflow
+  - nir_prepare_search
+  - nir_search_model
+  - nir_freeze_search
+  - nir_finalize_search
+  - nir_decision_context
+  - nir_submit_decision
+  - nir_execute_decision
+  - nir_decision_history
   - nir_dataset_list
   - nir_dataset_get
   - nir_dataset_history
@@ -55,6 +63,152 @@ allowed-tools:
   - nir_search_knowledge
   - nir_search_method_knowledge
 ---
+
+## Phase-4 autonomous delivery (opt-in)
+
+The default web chat now has one natural-language entry: interpret a new NIR
+single-target regression execution request and call nir_workflow(start, calibration).
+The server binds the scientific protocol and resources; omit mode/budget fields.
+Owned numeric MAT is supported by nir_prepare_search, alongside NPZ/CSV/TXT.
+For ambiguous matrices or targets, use its field-level mapping feedback and ask
+the user when needed; do not fall back to legacy analysis or conversion scripts.
+An omitted validation_goal means internal_holdout, never external validation.
+A completed, unmodeled inspection/knowledge task may start regression in this
+thread with its previous evidence archived. Existing searches/budgets cannot
+restart. When using a saved dataset, copy all verified attachment lineage fields.
+Questions stay ordinary QA; missing target/data require clarification. Current-stage
+schemas are authoritative. With delivery_policy.automatic_delivery=true, tokens are
+statistics only. After accepted STOP/RETAIN the server freezes the named experiment,
+evaluates Test once and publishes model/report/ZIP without another model call.
+Do not call freeze/finalize in that policy. Approval and quality gates still apply.
+The opt-in instructions below describe older explicit/programmatic policies only.
+
+For complete autonomous modeling and delivery, start `llm_autonomous` with
+`sealed_holdout`, `autonomous_rounds=true`, `autonomous_delivery=true`.
+Use `budget_profile=development|autonomous` and optional `task_budget` JSON.
+These new task budgets replace the old-mode max_attempts/max_fits/max_decisions
+arguments only in this opt-in mode. Server ceilings reject larger requests;
+prepare fixes one cumulative fit/experiment/action/call/token/wall allowance.
+Single grids retain 40 candidates / 200 fits and the existing operation limits.
+Wall checks are cooperative; token admission is estimated, accurate usage separate.
+
+Follow the same context/submit/execute loop. Quality and three non-improvements
+do not force an action. Continue or STOP independently, without a fixed round
+count. STOP names a successful retained experiment (including an older/non-best
+one with evidence), zero fits, null selected plan, concise stop_evidence:
+retained_advantages, retained_limitations, search_coverage, unverified_directions
+(direction/reason). Include `experiment:<retained_id>` in evidence_refs.
+
+At search budget exhaustion, read `nir_decision_context` for `final_selection`.
+Select an existing success using `RETAIN` with the same zero-fit evidence contract.
+This consumes separate reserved LLM allowance; stop_source stays budget and
+retained_selection_source=llm. No success or exhausted terminal allowance means
+no frozen deliverable, not an automatic best model.
+
+Accepted STOP/RETAIN -> `nir_freeze_search(experiment_id=<retained>)` ->
+`nir_finalize_search`. The original Cal-fit artifact stays fixed; Test is read
+once, then final evidence/report/artifact/ZIP are published. Export retries use
+persisted Test results. No further search, raw files, scripts, MCP fit or workflow
+restart. Deliver using the returned links. STOP/Test never imply quality passage
+or approval: registration still needs genuine current-user approval and existing
+scientific/provenance gates. Do not change decisions after execution.
+
+When autonomous_delivery=false retain the earlier modes below.
+
+Delivery mode exposes only the tools for the current process step and a phase-specific
+proposal object schema. Follow its required fields; keep `pipeline.fixed_params`
+and sibling `optimization.search_space` separate. Correct errors using the existing
+context and exact error paths; refresh only after execution or a stale/terminal
+transition. These process/schema constraints never choose a model or optimization action.
+
+## Phase-3 feedback decisions (opt-in)
+
+For feedback-based optimization requests, start `decision_strategy="llm_autonomous"`,
+`search_protocol="sealed_holdout"`, `autonomous_rounds=true`. Set cumulative
+`max_attempts` (experiments), `max_fits` and `max_decisions` (accepted actions).
+The following takes precedence over legacy quality/reflection/auto-model recipes.
+
+Repeat the existing context → submit → execute tools after initial execution.
+Each fresh context supplies trusted current/recent/best/retained successes and
+failures, previous expectations and their actual support, tried parameter regions
+and remaining resources. Best-by-Val is information, not an automatic selection.
+Use `nir_decision_history(offset, limit<=4, experiment_id)` for older full records
+and `nir_decision_context(knowledge_query=...)` for small additional sourced cards.
+Do not invent history or repeat all method knowledge every round.
+
+Compare candidates and independently choose TUNE (same family/preprocessing),
+CHANGE_PREPROCESS (same family, changed preprocessing), SWITCH_MODEL (changed
+family, same preprocessing), EXPLORE (new direction with explicit difference),
+or STOP. Record observations, uncertainty, alternatives, rejected-candidate
+reasons, hypotheses, selected configuration, expected_fits and optional numeric
+expected_improvement before execution. Use the latest base_experiment_id.
+User model/pipeline hard constraints persist. A family you previously chose is
+not a user constraint, including when that execution failed. Quality/diagnostic
+labels, performance thresholds and plateau counts never mandate an action.
+
+Only the accepted decision_id executes. Exact duplicate authorized regions need
+an explicit replication_reason. Retain a successful experiment by explicit
+retained_experiment_id. STOP requires that reference, null selected pipeline and
+optimization, and zero expected_fits; it ends awaiting final confirmation without
+Test. Hard budget termination is distinct and never selects a model. Final Test,
+registration and recovery orchestration remain later work. If autonomous_rounds
+is false, retain the phase-2 one-execution behavior below.
+
+## Phase-2 autonomous initial pipeline
+
+For user requests to autonomously select the initial regression pipeline, use
+`decision_strategy="llm_autonomous"` AND `search_protocol="sealed_holdout"`.
+Use a fresh conversation, complete user task requirements and preserve explicit
+model/pipeline constraints. These instructions override all legacy auto recipes.
+
+1. `nir_prepare_search` binds the source. `nir_decision_context` returns Cal-only
+   observations, uncertainty, reviewed method sources, runtime capabilities,
+   frozen CV membership, budgets and the full DecisionProposal schema.
+2. Compare alternatives yourself and select ordered preprocessing (Raw [] is
+   valid), one of pls/ridge/svr/et, fixed parameters or a discrete bounded model
+   grid. There is no first-family order, mandatory baseline or score-based rule
+   choosing preprocessing/family. Knowledge priority is not a decision.
+3. `nir_submit_decision(proposal=...)` records your actual model-issued proposal
+   before fitting. Include evidence IDs, observations, comparisons, rationale
+   and expected effect. Correct rejected fields explicitly; do not substitute.
+4. `nir_execute_decision(decision_id=...)` reads only that immutable plan. Return
+   its actual parameters, Cal CV/Val metrics and cost, then await the next user
+   instruction. Test stays sealed. A second initial decision, direct search,
+   legacy tools, automatic finalization and later optimization loops are denied.
+
+Do not equate the Fake LLM verification with a real provider run. Caller-provided
+author fields are not proof of an LLM decision; the Lead Agent model boundary
+records server provenance. Registration and final STOP/Test integration remain future work.
+
+## Phase-1 sealed regression protocol
+
+When the user explicitly requests the phase-1 safe regression path, start a
+fresh analysis/calibration workflow with `search_protocol="sealed_holdout"`
+and `validation_goal="internal_holdout"`. This is a validation protocol, not
+the completed `llm_autonomous` decision mode. The instructions in this section
+take precedence over legacy auto/reflect recipes for that protocol.
+
+1. Bind the source in `nir_workflow(start)` and call `nir_prepare_search`.
+   Only its Cal Profile and Cal/Val counts are search evidence. Do not inspect
+   or read the source, converted previews, old reports, or Test data.
+2. Attempt `chemotools_list_capabilities`, then use `nir_search_model` with an
+   explicit `pls`, `ridge`, `svr`, or `et` and a legal JSON preprocessing array.
+   Raw is `[]`; auto sentinels are unsupported. Numerical grids remain the
+   existing bounded grids in phase 1.
+3. Compare only returned Val metrics. Choose a successful experiment explicitly
+   and call `nir_freeze_search(experiment_id=...)`. There is no threshold that
+   silently chooses another family or preprocessing pipeline.
+4. Call `nir_finalize_search` after freeze. It returns the independent final
+   evaluation and new verified artifacts. Never respond to a poor final Test
+   result by reopening search or switching to legacy tools.
+
+The runtime rejects generic execution, subagents, unknown plugins and legacy
+model/inspection tools throughout this protocol. For grouped data use named
+partitions (`groups_cal`, `groups_val`, `groups_test`), not a CSV group column.
+Production/external-validation adaptation and registration of these new session
+outputs are not enabled in phase 1. Legacy registered assets remain available.
+If this conversation already exposed Test evidence, use a fresh conversation;
+do not claim that a prompt can erase it.
 
 ## Runtime validation evidence (mandatory)
 

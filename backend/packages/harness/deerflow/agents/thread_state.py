@@ -29,6 +29,11 @@ NIRWorkflowStage = Literal[
     "clarification",
     "planning",
     "execution",
+    "frozen",
+    "initial_result",
+    "decision_review",
+    "awaiting_final_confirmation",
+    "budget_exhausted",
     "evaluation",
     "knowledge",
     "review",
@@ -54,6 +59,24 @@ class NIRWorkflowState(TypedDict):
     task_type: str
     stage: NIRWorkflowStage
     revision: int
+    search_protocol: NotRequired[Literal["legacy", "sealed_holdout"]]
+    search_session_id: NotRequired[str | None]
+    decision_strategy: NotRequired[Literal["legacy", "llm_autonomous"]]
+    autonomous_rounds: NotRequired[bool]
+    max_decisions: NotRequired[int]
+    max_fits: NotRequired[int]
+    autonomous_delivery: NotRequired[bool]
+    delivery_policy: NotRequired[dict | None]
+    workflow_start_call_id: NotRequired[str | None]
+    active_decision_id: NotRequired[str | None]
+    retained_experiment_id: NotRequired[str | None]
+    stop_source: NotRequired[str | None]
+    model_constraint: NotRequired[str | None]
+    pipeline_constraint: NotRequired[str | None]
+    decision_context_id: NotRequired[str | None]
+    initial_decision_id: NotRequired[str | None]
+    initial_execution: NotRequired[dict | None]
+    latest_execution: NotRequired[dict | None]
     domain: NotRequired[str | None]
     analyte: NotRequired[str | None]
     unit: NotRequired[str | None]
@@ -133,6 +156,9 @@ _NIR_STAGE_RANK = {
     "clarification": 2,
     "planning": 3,
     "execution": 4,
+    "decision_review": 5,
+    "awaiting_final_confirmation": 10,
+    "budget_exhausted": 10,
     "knowledge": 5,
     "evaluation": 6,
     "review": 7,

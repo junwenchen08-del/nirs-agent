@@ -38,12 +38,16 @@ def generate_comparison_gallery(results: list[ModelResult]) -> str:
     """
     rows_html: list[str] = []
     sections_html: list[str] = []
+    validation_only = bool(results) and all(
+        res.metrics.get("evaluation_scope") == "validation" for res in results
+    )
+    error_label = "RMSE(验证)" if validation_only else "RMSEP"
 
     for i, res in enumerate(results):
         method = res.method
         n_comp = res.n_components if res.n_components is not None else "-"
-        rmsep = _metric_value(res.metrics, "RMSEP")
-        r2 = _metric_value(res.metrics, "R2")
+        rmsep = _metric_value(res.metrics, "RMSE_val" if validation_only else "RMSEP")
+        r2 = _metric_value(res.metrics, "R2_val" if validation_only else "R2")
         rpd = _metric_value(res.metrics, "RPD")
 
         rows_html.append(
@@ -87,7 +91,7 @@ def generate_comparison_gallery(results: list[ModelResult]) -> str:
             "<section>"
             f"<h3>模型 {i + 1}: {method}</h3>"
             f"<p>主成分数 / Components: {n_comp} | "
-            f"RMSEP: {rmsep} | R²: {r2} | RPD: {rpd}</p>"
+            f"{error_label}: {rmsep} | R²: {r2} | RPD: {rpd}</p>"
             f"{plot_html}"
             "</section>"
         )
@@ -96,7 +100,7 @@ def generate_comparison_gallery(results: list[ModelResult]) -> str:
         "<table>"
         "<thead><tr>"
         "<th>#</th><th>方法 Method</th><th>主成分 Components</th>"
-        "<th>RMSEP</th><th>R²</th><th>RPD</th>"
+        f"<th>{error_label}</th><th>R²</th><th>RPD</th>"
         "</tr></thead>"
         "<tbody>" + "\n".join(rows_html) + "</tbody>"
         "</table>"

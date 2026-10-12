@@ -154,8 +154,37 @@ class ProcessStore:
                 connection.execute("PRAGMA user_version=2")
                 if not write:
                     connection.commit()
-            elif version != 2:
+            elif version not in {2, 3, 4, 5}:
                 raise ValueError("Unsupported process index schema")
+            if version in {0, 1, 2}:
+                if not write:
+                    connection.execute("BEGIN IMMEDIATE")
+                connection.execute("CREATE TABLE IF NOT EXISTS search_sessions (id TEXT PRIMARY KEY, project TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)")
+                connection.execute("CREATE TABLE IF NOT EXISTS search_experiments (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, status TEXT NOT NULL, spec TEXT NOT NULL, result TEXT, artifact_hash TEXT)")
+                connection.execute("PRAGMA user_version=3")
+                if not write:
+                    connection.commit()
+            if version in {0, 1, 2, 3}:
+                if not write:
+                    connection.execute("BEGIN IMMEDIATE")
+                connection.execute("CREATE TABLE IF NOT EXISTS decision_contexts (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL)")
+                connection.execute("CREATE TABLE IF NOT EXISTS initial_decisions (id TEXT PRIMARY KEY, session_id TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, status TEXT NOT NULL, execution TEXT)")
+                connection.execute("CREATE TABLE IF NOT EXISTS model_issued_calls (id TEXT PRIMARY KEY, tool TEXT NOT NULL, args_hash TEXT NOT NULL, payload TEXT NOT NULL)")
+                connection.execute("PRAGMA user_version=4")
+                if not write:
+                    connection.commit()
+            if version in {0, 1, 2, 3, 4}:
+                if not write:
+                    connection.execute("BEGIN IMMEDIATE")
+                # Copy opaque payload bytes; historical decisions and artifacts remain intact.
+                connection.execute("ALTER TABLE initial_decisions RENAME TO initial_decisions_v4")
+                connection.execute("CREATE TABLE initial_decisions (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL, execution TEXT)")
+                connection.execute("INSERT INTO initial_decisions SELECT * FROM initial_decisions_v4")
+                connection.execute("DROP TABLE initial_decisions_v4")
+                connection.execute("CREATE INDEX decisions_session ON initial_decisions(session_id)")
+                connection.execute("PRAGMA user_version=5")
+                if not write:
+                    connection.commit()
             yield connection
             connection.commit()
         except BaseException:

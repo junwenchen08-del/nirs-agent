@@ -24,6 +24,10 @@ const height = 330,
 const fmt = formatProcessNumber;
 export const plotLabel = (value: string | undefined, zh: boolean): string => {
   const labels: Record<string, [string, string]> = {
+    trend: ["Val 性能趋势", "Val performance trend"],
+    round: ["实验轮次", "Experiment round"],
+    candidate_index: ["参数候选序号", "Parameter candidate index"],
+    final_test: ["最终 Test", "Final Test"],
     spectra: ["光谱曲线", "Spectra"],
     distribution: ["目标值分布", "Target distribution"],
     prediction: ["实测值与预测值", "Reference vs prediction"],
@@ -32,10 +36,15 @@ export const plotLabel = (value: string | undefined, zh: boolean): string => {
     cv: ["交叉验证误差", "Cross-validation error"],
     all: ["全体样本", "All samples"],
     calibration: ["校准集", "Calibration"],
+    validation: ["Val 验证集", "Val validation"],
     tuning: ["调参集", "Tuning"],
     holdout: ["留出集", "Holdout"],
     external: ["外部验证", "External"],
-    calibration_cv: ["校准集交叉验证", "Calibration CV"],
+    calibration_cv: ["校准交叉验证（Cal CV）", "Calibration CV"],
+    RMSE: ["均方根误差（RMSE）", "RMSE"],
+    R2: ["决定系数（R²）", "R²"],
+    RPD: ["性能偏差比（RPD）", "RPD"],
+    RMSECV: ["交叉验证误差（折均值）", "CV mean-fold RMSE"],
     final_fit_cv: ["最终拟合集交叉验证", "Final fitting set CV"],
     selected_variables: ["保留变量", "Retained variables"],
     calibration_before: ["处理前 · 校准集", "Before · calibration"],
@@ -169,7 +178,7 @@ export function ProcessChartView({
           {plotLabel(chart.scope, zh)} ·{" "}
           {chart.type === "distribution"
             ? `${chart.n_returned} ${zh ? "分箱" : "bins"} / ${chart.n_total} ${zh ? "样本" : "samples"}`
-            : `${chart.n_returned}/${chart.n_total} ${chart.type === "wavelength" ? (zh ? "保留变量 / 全部变量" : "retained / total variables") : chart.type === "cv" ? (zh ? "显示候选 / 记录候选" : "displayed / recorded candidates") : zh ? "显示样本 / 全量样本" : "displayed / total samples"}`}
+            : `${chart.n_returned}/${chart.n_total} ${chart.type === "wavelength" ? (zh ? "保留变量 / 全部变量" : "retained / total variables") : chart.type === "cv" ? (zh ? "显示候选 / 记录候选" : "displayed / recorded candidates") : chart.type === "trend" ? (zh ? "显示实验 / 记录实验" : "displayed / recorded experiments") : zh ? "显示样本 / 全量样本" : "displayed / total samples"}`}
           {chart.axis_total !== undefined &&
             ` · ${chart.axis_returned}/${chart.axis_total} ${zh ? "显示变量 / 全部变量" : "displayed / total variables"}`}
         </span>
@@ -444,6 +453,7 @@ export function ProcessChartView({
             <button
               key={series.id}
               type="button"
+              title={series.id}
               aria-pressed={!hidden.includes(series.id)}
               className={cn(
                 "rounded border px-2 py-1 text-xs",
@@ -457,8 +467,12 @@ export function ProcessChartView({
                 )
               }
             >
-              <span style={{ color: colors[index % colors.length] }}>● </span>#
-              {series.id.slice(0, 6)}
+              <span style={{ color: colors[index % colors.length] }}>● </span>
+              {chart.type === "spectra"
+                ? zh
+                  ? `样本 ${index + 1}`
+                  : `Sample ${index + 1}`
+                : plotLabel(series.id, zh)}
             </button>
           ))}
         </div>

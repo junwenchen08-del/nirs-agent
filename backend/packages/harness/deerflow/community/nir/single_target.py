@@ -1014,7 +1014,7 @@ def nir_train_model_tool(
                 warnings.warn(f"VIP/coefficient computation failed: {type(exc).__name__}: {exc}", RuntimeWarning, stacklevel=2)
 
         # Quality assessment.
-        quality = evaluate_quality(metrics, domain=domain, n_samples=int(X.shape[0]))
+        quality = evaluate_quality(metrics, domain=domain, n_samples=int(X_tr.shape[0]), evaluation_scope="validation")
         metrics["quality"] = quality
 
         # ★ V3.6: Residual diagnostics for LLM-driven preprocessing decisions.

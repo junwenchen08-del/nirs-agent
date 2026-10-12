@@ -2,6 +2,46 @@ import { methodLabel, protocolLabel } from "./presentation";
 import { type ProcessCandidate, stableJSON } from "./process-contract";
 
 const LABELS: Record<string, [string, string]> = {
+  action: ["决策动作", "Decision action"],
+  status: ["执行状态", "Execution status"],
+  strategy: ["参数策略", "Parameter strategy"],
+  observations: ["主要观察", "Observations"],
+  uncertainties: ["问题与不确定性", "Uncertainties"],
+  hypotheses: ["待验证假设", "Hypotheses"],
+  alternatives: ["候选动作", "Alternatives"],
+  not_selected_reasons: [
+    "其他候选暂未采用的理由",
+    "Reasons for other alternatives",
+  ],
+  expected_outcome: ["预期效果", "Expected outcome"],
+  expected_fits: ["预计拟合次数", "Expected fits"],
+  fits: ["实际拟合次数", "Actual fits"],
+  elapsed_seconds: ["实际耗时（秒）", "Elapsed seconds"],
+  failure_reason: ["执行失败原因", "Failure reason"],
+  actual_configuration: ["实际执行配置", "Actual configuration"],
+  actual_parameters: ["实际模型参数", "Actual parameters"],
+  parameter_plan: ["参数搜索计划", "Parameter plan"],
+  fixed_parameters: ["固定参数", "Fixed parameters"],
+  search_space: ["授权参数搜索空间", "Authorized search space"],
+  budget: ["搜索预算", "Search budget"],
+  max_candidates: ["参数候选上限", "Candidate limit"],
+  comparisons: ["与历史实验的实际比较", "Historical comparisons"],
+  previous: ["上一轮实验", "Previous experiment"],
+  retained: ["已保留实验", "Retained experiment"],
+  available: ["证据是否可用", "Evidence available"],
+  val_rmse_change: ["验证误差变化（负数表示改善）", "Val RMSE change"],
+  val_r2_change: ["验证 R² 变化（正数表示改善）", "Val R² change"],
+  source: ["证据来源", "Evidence source"],
+  goal: ["预期改善目标", "Improvement goal"],
+  metric: ["评价指标", "Metric"],
+  minimum_change: ["预期最小变化", "Minimum change"],
+  text_expectation: ["原始预期说明", "Original expectation"],
+  cv_settings: ["实际交叉验证配置", "Actual CV settings"],
+  n_splits: ["交叉验证折数", "CV folds"],
+  shuffle: ["打乱样本顺序", "Shuffle"],
+  epsilon: ["不敏感区宽度", "Epsilon"],
+  delta: ["导数间隔", "Derivative spacing"],
+  spacing: ["间距依据", "Spacing basis"],
   target: ["目标变量", "Target"],
   unit: ["单位", "Unit"],
   protocol: ["验证协议", "Protocol"],
@@ -94,6 +134,14 @@ const LABELS: Record<string, [string, string]> = {
 };
 
 const STAGES: Record<string, string> = {
+  achieved: "预期改善已实现",
+  not_achieved: "预期改善未实现",
+  not_evaluable: "缺少可评价的改善目标或对照",
+  searching: "模型搜索中",
+  stopped: "保留选择已记录",
+  frozen: "模型已冻结",
+  finalized: "最终测试已完成",
+  executing: "执行中",
   intake: "接收任务",
   data_audit: "数据审查",
   clarification: "等待数据说明",
@@ -150,7 +198,7 @@ export function factValue(key: string, value: unknown, zh: boolean): unknown {
     return methodLabel(value, zh);
   if (key === "protocol") return protocolLabel(value, zh) ?? value;
   if (!zh) return value;
-  if (key === "stage" || key === "execution_status")
+  if (key === "stage" || key === "execution_status" || key === "status")
     return STAGES[value] ?? value;
   if (key === "source_tool")
     return (
@@ -174,11 +222,29 @@ export function factValue(key: string, value: unknown, zh: boolean): unknown {
       "grade",
       "selection_rule",
       "kernel",
+      "strategy",
+      "action",
+      "source",
+      "spacing",
     ].includes(key)
   )
     return (
       (
         {
+          calibration_cv: "校准交叉验证（Cal CV）",
+          validation: "验证集（Val）",
+          final_test: "最终测试集（Test）",
+          fixed: "固定参数（不隐式搜索）",
+          grid: "授权范围内的网格搜索",
+          EXPLORE: "探索新方案",
+          TUNE: "优化模型参数",
+          CHANGE_PREPROCESS: "调整预处理",
+          SWITCH_MODEL: "切换模型家族",
+          STOP: "主动停止并保留",
+          RETAIN: "预算终止后的保留选择",
+          actual_cal_fitted_preprocessing_state: "实际校准拟合的预处理状态",
+          persisted_validation_metrics: "已保存的验证指标",
+          index: "变量序号",
           cross_validation: "训练内交叉验证",
           tuning: "调参集",
           calibration: "仅校准集",

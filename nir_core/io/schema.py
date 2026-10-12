@@ -589,6 +589,11 @@ def infer_mat_mapping(root: dict[str, object]) -> dict[str, Any]:
         "transpose": False if ambiguous else best["transpose"],
         "shape": best["shape"],
         "x_candidates": tied_x if ambiguous else list(matrices),
+        "compatible_y_candidates": [
+            path
+            for path, value in vectors.items()
+            if not ambiguous and value.size == best["shape"][0]
+        ],
         "y_candidates": [
             path
             for path in vectors

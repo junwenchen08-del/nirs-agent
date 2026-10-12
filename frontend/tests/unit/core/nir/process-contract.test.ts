@@ -10,7 +10,6 @@ import {
 
 import examples from "../../../../../contracts/nir-process-v1.examples.json";
 
-
 test("parameter and operation order changes are visible", () => {
   expect(
     pipelineDifference(

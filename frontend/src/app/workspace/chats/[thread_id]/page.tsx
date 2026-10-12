@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { ArtifactTrigger } from "@/components/workspace/artifacts";
@@ -25,8 +25,10 @@ import { TokenUsageIndicator } from "@/components/workspace/token-usage-indicato
 import { useActiveGoal } from "@/components/workspace/use-active-goal";
 import { Welcome } from "@/components/workspace/welcome";
 import { useI18n } from "@/core/i18n/hooks";
+import { shouldHideAutonomousReasoning } from "@/core/messages/reasoning-visibility";
 import { useModels } from "@/core/models/hooks";
 import { useNIRWorkflow } from "@/core/nir";
+import { modelingChatContext } from "@/core/nir/autonomous";
 import { useNotification } from "@/core/notification/hooks";
 import { useLocalSettings, useThreadSettings } from "@/core/settings";
 import {
@@ -52,6 +54,10 @@ export default function ChatPage() {
   // `isNewThread` stays true until the backend actually creates the thread.
   const [isWelcomeMode, setIsWelcomeMode] = useState(isNewThread);
   const [settings, setSettings] = useThreadSettings(threadId);
+  const chatContext = useMemo(
+    () => modelingChatContext(settings.context),
+    [settings.context],
+  );
   const [localSettings, setLocalSettings] = useLocalSettings();
   const { tokenUsageEnabled } = useModels();
   const threadTokenUsage = useThreadTokenUsage(
@@ -92,7 +98,7 @@ export default function ChatPage() {
   } = useThreadStream({
     threadId: isNewThread ? undefined : threadId,
     displayThreadId: threadId,
-    context: settings.context,
+    context: chatContext,
     isMock,
     // onSend only animates the UI; do NOT flip `isNewThread` here — the
     // LangGraph SDK eagerly fetches /history the moment it receives a
@@ -226,6 +232,10 @@ export default function ChatPage() {
                 className={cn("size-full", !isWelcomeMode && "pt-10")}
                 threadId={threadId}
                 thread={thread}
+                hideRawReasoning={shouldHideAutonomousReasoning(
+                  nirWorkflow,
+                  chatContext,
+                )}
                 paddingBottom={MESSAGE_LIST_DEFAULT_PADDING_BOTTOM}
                 hasMoreHistory={hasMoreHistory}
                 loadMoreHistory={loadMoreHistory}
@@ -299,7 +309,7 @@ export default function ChatPage() {
                           ? "streaming"
                           : "ready"
                     }
-                    context={settings.context}
+                    context={chatContext}
                     extraHeader={
                       isWelcomeMode &&
                       !hasGoal &&

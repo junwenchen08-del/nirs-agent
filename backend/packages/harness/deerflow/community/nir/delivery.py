@@ -86,7 +86,7 @@ def build_delivery(report: Path, *, model: Path | None = None, metrics: Path | N
     body = _render(report.read_text(encoding="utf-8"), plot_map)
     html_path = root / (report.stem + ".html")
     html_text = (
-        '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>NIR 建模报告</title><style>'
+        '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>近红外光谱建模报告</title><style>'
         "body{font:16px/1.8 system-ui,sans-serif;color:#1e293b;background:#fff;margin:40px auto;padding:0 32px;max-width:1120px}"
         "h1{border-bottom:3px solid #0f766e;padding-bottom:16px}h2{margin-top:42px;color:#0f766e}"
         "table{width:100%;border-collapse:collapse;margin:20px 0;font-variant-numeric:tabular-nums}"

@@ -13,7 +13,7 @@ export async function loadProcess<T>(
   threadId: string,
   resource: string,
   signal?: AbortSignal,
-  previous?: ProcessSummary,
+  previous?: ProcessSummary | { session_id: string; revision: string },
 ): Promise<T> {
   const response = await fetchWithAuth(
     `${getBackendBaseURL()}/api/threads/${encodeURIComponent(threadId)}/nir-process/${resource}`,
@@ -21,7 +21,10 @@ export async function loadProcess<T>(
       signal,
       headers: previous
         ? {
-            "If-None-Match": `"${previous.run_id}-${previous.offset ?? 0}-${previous.revision}"`,
+            "If-None-Match":
+              "session_id" in previous
+                ? `"${previous.session_id}-${previous.revision}"`
+                : `"${previous.run_id}-${previous.offset ?? 0}-${previous.revision}"`,
           }
         : undefined,
     },
@@ -35,6 +38,7 @@ export async function loadProcess<T>(
     previous &&
     "revision" in result &&
     typeof result.revision === "number" &&
+    typeof previous.revision === "number" &&
     result.revision < previous.revision
   )
     return previous as T;

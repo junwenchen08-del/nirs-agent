@@ -1,0 +1,1952 @@
+{
+  "verification": "real_provider_attempt",
+  "started": 1791522110.8062253,
+  "model_name": "deepseek-flash",
+  "provider": "deerflow.models.patched_deepseek:PatchedChatDeepSeek",
+  "thread_id": "phase3-real-9c3b463ffdd0",
+  "session_id": "search_232386c272be4813b125dcb735bc8b45",
+  "actual_model_class": "PatchedChatDeepSeek",
+  "limits": {
+    "experiments": 2,
+    "fits": 14,
+    "model_responses": 9
+  },
+  "steps": [
+    {
+      "model_tool_calls": [
+        "nir_decision_context"
+      ],
+      "message_id": "lc_run--01a11f0a-0b1b-74c3-bf1d-ae1ce98842ac-0",
+      "token_usage": {
+        "input_tokens": 8066,
+        "output_tokens": 32,
+        "total_tokens": 8098,
+        "input_token_details": {
+          "cache_read": 3328
+        },
+        "output_token_details": {}
+      }
+    },
+    {
+      "tool": "nir_decision_context",
+      "status": null,
+      "code": null,
+      "errors": null,
+      "state": "execution"
+    },
+    {
+      "model_tool_calls": [
+        "nir_submit_decision"
+      ],
+      "message_id": "lc_run--01a11f0a-13c0-7ac3-927c-f770376325f3-0",
+      "token_usage": {
+        "input_tokens": 15960,
+        "output_tokens": 1243,
+        "total_tokens": 17203,
+        "input_token_details": {
+          "cache_read": 8064
+        },
+        "output_token_details": {}
+      }
+    },
+    {
+      "tool": "nir_submit_decision",
+      "status": null,
+      "code": null,
+      "errors": null,
+      "state": "execution"
+    },
+    {
+      "model_tool_calls": [
+        "nir_execute_decision"
+      ],
+      "message_id": "lc_run--01a11f0a-2d33-7e51-8ca2-39fb782ca863-0",
+      "token_usage": {
+        "input_tokens": 19166,
+        "output_tokens": 90,
+        "total_tokens": 19256,
+        "input_token_details": {
+          "cache_read": 17152
+        },
+        "output_token_details": {}
+      }
+    },
+    {
+      "tool": "nir_execute_decision",
+      "status": "succeeded",
+      "code": null,
+      "errors": null,
+      "state": "decision_review"
+    },
+    {
+      "model_tool_calls": [
+        "nir_decision_context"
+      ],
+      "message_id": "lc_run--01a11f0a-329a-71f2-8eca-9ea072ccf875-0",
+      "token_usage": {
+        "input_tokens": 21398,
+        "output_tokens": 72,
+        "total_tokens": 21470,
+        "input_token_details": {
+          "cache_read": 19200
+        },
+        "output_token_details": {}
+      }
+    },
+    {
+      "tool": "nir_decision_context",
+      "status": null,
+      "code": null,
+      "errors": null,
+      "state": "decision_review"
+    },
+    {
+      "model_tool_calls": [
+        "nir_submit_decision"
+      ],
+      "message_id": "lc_run--01a11f0a-3721-7020-a2f1-4eb312b6912e-0",
+      "token_usage": {
+        "input_tokens": 17541,
+        "output_tokens": 1620,
+        "total_tokens": 19161,
+        "input_token_details": {
+          "cache_read": 8064
+        },
+        "output_token_details": {}
+      }
+    },
+    {
+      "tool": "nir_submit_decision",
+      "status": "error",
+      "code": "nir_decision_rejected",
+      "errors": [
+        {
+          "field": "action",
+          "message": "action: selected alternative and decision action disagree",
+          "type": "ValueError"
+        }
+      ],
+      "state": "decision_review"
+    },
+    {
+      "model_tool_calls": [
+        "nir_submit_decision"
+      ],
+      "message_id": "lc_run--01a11f0a-582e-79c1-9afb-de33749be7ab-0",
+      "token_usage": {
+        "input_tokens": 19218,
+        "output_tokens": 1421,
+        "total_tokens": 20639,
+        "input_token_details": {
+          "cache_read": 19072
+        },
+        "output_token_details": {}
+      }
+    },
+    {
+      "tool": "nir_submit_decision",
+      "status": null,
+      "code": null,
+      "errors": null,
+      "state": "execution"
+    },
+    {
+      "model_tool_calls": [
+        "nir_execute_decision"
+      ],
+      "message_id": "lc_run--01a11f0a-6a54-7080-949e-8f500078df14-0",
+      "token_usage": {
+        "input_tokens": 22739,
+        "output_tokens": 126,
+        "total_tokens": 22865,
+        "input_token_details": {
+          "cache_read": 20608
+        },
+        "output_token_details": {}
+      }
+    },
+    {
+      "tool": "nir_execute_decision",
+      "status": "succeeded",
+      "code": null,
+      "errors": null,
+      "state": "budget_exhausted"
+    },
+    {
+      "model_tool_calls": [],
+      "message_id": "lc_run--01a11f0a-706c-7182-87b5-a8faea3fff62-0",
+      "token_usage": {
+        "input_tokens": 24979,
+        "output_tokens": 774,
+        "total_tokens": 25753,
+        "input_token_details": {
+          "cache_read": 22784
+        },
+        "output_token_details": {}
+      }
+    }
+  ],
+  "records": [
+    {
+      "accepted_spec": {
+        "max_components": 20,
+        "method": "pls",
+        "parameter_plan": {
+          "fixed_params": {
+            "max_iter": 500,
+            "scale": false,
+            "tol": 1e-06
+          },
+          "max_fits": 10,
+          "max_trials": 3,
+          "search_space": {
+            "n_components": [
+              1,
+              2,
+              3
+            ]
+          },
+          "strategy": "grid"
+        },
+        "steps": [
+          {
+            "method": "sg_smooth",
+            "params": {
+              "order": 2,
+              "window": 7
+            }
+          }
+        ]
+      },
+      "action": "EXPLORE",
+      "base_experiment_id": null,
+      "context_id": "ctx_5ea56bf01b34303c602f9bc84e0df801",
+      "context_sha256": "1bf072c0aad6a495e9c8931e767be4d97eb282d12ae90739eaa3911a75d8660f",
+      "cv_manifest_id": "cv_3d9f342df3b6ee79e7b8de2de2dcd7ff03e6403dcf19caf3f4b4f6db5906aded",
+      "decision_id": "decision_b7f1fc045373d9b521c1cd7128b9f146",
+      "decision_time": "2026-10-09T05:02:03.053969+00:00",
+      "execution_signature": "e8c9f00ab783afcf3f53f2cff2d220dfba549cee6d343d9738883bad2eb8d9df",
+      "experiment_id": "exp_ae090ecec2d9dca0e2111ff163a9b477",
+      "origin": {
+        "agent_run_id": "real-smoke-phase3-real-9c3b463ffdd0",
+        "issued_at": "2026-10-09T05:02:03.040970+00:00",
+        "message_id": "lc_run--01a11f0a-13c0-7ac3-927c-f770376325f3-0",
+        "model_class": "PatchedChatDeepSeek",
+        "model_name": "deepseek-flash",
+        "model_type": "chat-deepseek",
+        "response_sha256": "69e9ddfe8746f641224842aaa3f1fd11891e6e326118ae11ce41c1859389bab1",
+        "source": "lead_agent_model_call",
+        "token_usage": {
+          "input_token_details": {
+            "cache_read": 8064
+          },
+          "input_tokens": 15960,
+          "output_token_details": {},
+          "output_tokens": 1243,
+          "total_tokens": 17203
+        },
+        "tool_call_id": "call_00_AouR9LIHxGZ0VdOkGGYS3092",
+        "verification_kind": "provider_model"
+      },
+      "proposal": {
+        "action": "EXPLORE",
+        "alternatives": [
+          {
+            "action": "EXPLORE",
+            "comparison": "Targets the dominant high-frequency-noise proxy with mild SG smoothing (win7/order2 preserving bands) then linear latent-variable regression with small component grid; uses 3+1 refit style fits within budget.",
+            "id": "A_sgsmooth_pls",
+            "optimization": {
+              "max_fits": 10,
+              "max_trials": 3,
+              "objective": "train_cv_rmse",
+              "search_space": {
+                "n_components": [
+                  1,
+                  2,
+                  3
+                ]
+              },
+              "strategy": "grid"
+            },
+            "pipeline": {
+              "fixed_params": {},
+              "model_method": "pls",
+              "preprocessing": [
+                {
+                  "method": "sg_smooth",
+                  "params": {
+                    "order": 2,
+                    "window": 7
+                  }
+                }
+              ],
+              "wavelength_selection": "none"
+            }
+          },
+          {
+            "action": "EXPLORE",
+            "comparison": "Raw [] plus RBF SVR tests whether nonlinearity matters, but ignores the noise proxy and mixes two changes, and RBF is scale-sensitive on unsmoothed noisy spectra.",
+            "id": "B_raw_svr",
+            "optimization": {
+              "max_fits": 7,
+              "max_trials": 2,
+              "objective": "train_cv_rmse",
+              "search_space": {
+                "C": [
+                  1,
+                  10
+                ],
+                "gamma": [
+                  "scale"
+                ]
+              },
+              "strategy": "grid"
+            },
+            "pipeline": {
+              "fixed_params": {},
+              "model_method": "svr",
+              "preprocessing": [],
+              "wavelength_selection": "none"
+            }
+          }
+        ],
+        "base_experiment_id": null,
+        "context_id": "ctx_5ea56bf01b34303c602f9bc84e0df801",
+        "context_sha256": "1bf072c0aad6a495e9c8931e767be4d97eb282d12ae90739eaa3911a75d8660f",
+        "difference": "Mild SG smoothing + PLS component grid vs raw SVR grid.",
+        "evidence_refs": [
+          "profile:calibration",
+          "protocol:sealed_holdout",
+          "budget:session",
+          "method:sg_smooth:a7560c9ec34f2dd9",
+          "method:model_pls:40b7b293c678d774",
+          "method:model_svr:3900dcf94ca02b3b"
+        ],
+        "expected_fits": 10,
+        "expected_improvement": {
+          "comparison": "previous",
+          "metric": "val_rmse",
+          "minimum_change": 0.0
+        },
+        "expected_outcome": "Expect a modest, CV-selected PG-smoothed PLS model with lower train_cv_rmse than an unsmoothed linear fit; validation RMSE reported but not tuned on.",
+        "expected_revision": 1,
+        "hypotheses": [
+          "Smoothing before PLS will lower train_cv_rmse relative to unsmoothed linear baselines by suppressing high-frequency noise.",
+          "A small PLS component count (1-3) is adequate given only 12 wavelengths and strong collinearity."
+        ],
+        "not_selected_reasons": {
+          "B_raw_svr": "Leaves the dominant noise proxy unaddressed and couples a scale-sensitive nonlinear kernel with unsmoothed input; less diagnostic than isolating noise handling."
+        },
+        "observations": [
+          {
+            "claim": "Calibration profile (n=28, 12 wavelengths) shows high_frequency_noise_score 0.580 and low_signal_to_noise tag; this is the dominant descriptive issue.",
+            "evidence_refs": [
+              "profile:calibration"
+            ]
+          },
+          {
+            "claim": "Scatter variation (0.209) and baseline drift (0.092) proxies are moderate/low; spike row fraction is 0.0 so no despiking evidence.",
+            "evidence_refs": [
+              "profile:calibration"
+            ]
+          },
+          {
+            "claim": "Frozen protocol: 3-fold CV on 28 Cal samples, metric train_cv_rmse, sealed validation of 10 samples, Test inaccessible.",
+            "evidence_refs": [
+              "protocol:sealed_holdout",
+              "budget:session"
+            ]
+          },
+          {
+            "claim": "sg_smooth is applicable to high-frequency noise while preserving broad bands; window must be odd and larger than polynomial order.",
+            "evidence_refs": [
+              "method:sg_smooth:a7560c9ec34f2dd9"
+            ]
+          },
+          {
+            "claim": "PLS suits high-dimensional collinear quantitative spectra; project adapter uses scale=False and selects components inside training.",
+            "evidence_refs": [
+              "method:model_pls:40b7b293c678d774"
+            ]
+          },
+          {
+            "claim": "SVR RBF can model nonlinearity but is sensitive to scale/hyperparameters and costlier as n grows.",
+            "evidence_refs": [
+              "method:model_svr:3900dcf94ca02b3b"
+            ]
+          }
+        ],
+        "phase": "initial",
+        "rationale": "High-frequency noise is the only strong descriptive issue and there is no spike evidence, so a light, band-preserving SG smoothing is the minimal targeted change; PLS is the standard linear comparison for high-dim collinear NIR. Candidate A is chosen over B because it isolates noise handling and stays cheap, whereas B ignores the stated noise issue and couples a nonlinear family with unscaled noisy input.",
+        "replication_reason": null,
+        "retained_experiment_id": null,
+        "selected_alternative_id": "A_sgsmooth_pls",
+        "uncertainties": [
+          "Whether the noise proxy translates to real noise or to genuine narrow bands that smoothing would weaken.",
+          "Optimal PLS component count is not known before CV."
+        ]
+      },
+      "proposal_sha256": "9c65614bc8f30fd7b17b77e59de5fb939bba2ea3ba67de92919556dfbb7138f6",
+      "reserved_fits": 10,
+      "retained_experiment_id": null,
+      "round_index": 1,
+      "runtime_snapshot": {
+        "models_sha256": "2cbe0e3d59d26bf85ddb2476df40648030cbd72052b1a6e65e4e591675178a19",
+        "preprocessing_providers": [
+          {
+            "compatibility": "verified",
+            "has_fitted_state": false,
+            "implementation_version": "chemotools-adapter-v1",
+            "is_default": false,
+            "provider": "chemotools",
+            "provider_class": "chemotools.smooth.SavitzkyGolayFilter",
+            "provider_version": "0.4.4"
+          }
+        ],
+        "preprocessing_sha256": "4bde60cefeb7a3d9ce5d5a0025cf755f70f17ae844e6f0783e17d12517b2b156",
+        "provider_policy": "catalog_default"
+      },
+      "selection_origin": "llm",
+      "session_id": "search_232386c272be4813b125dcb735bc8b45",
+      "status": "succeeded",
+      "execution": {
+        "actual_configuration": {
+          "max_components": 20,
+          "method": "pls",
+          "parameter_plan": {
+            "fixed_params": {
+              "max_iter": 500,
+              "scale": false,
+              "tol": 1e-06
+            },
+            "max_fits": 10,
+            "max_trials": 3,
+            "search_space": {
+              "n_components": [
+                1,
+                2,
+                3
+              ]
+            },
+            "strategy": "grid"
+          },
+          "steps": [
+            {
+              "method": "sg_smooth",
+              "params": {
+                "order": 2,
+                "window": 7
+              }
+            }
+          ]
+        },
+        "actual_parameters": {
+          "copy": true,
+          "max_iter": 500,
+          "n_components": 1,
+          "scale": false,
+          "tol": 1e-06
+        },
+        "comparisons": {
+          "previous": {
+            "available": false,
+            "experiment_id": null
+          },
+          "retained": {
+            "available": false,
+            "experiment_id": null
+          }
+        },
+        "configuration": {
+          "max_components": 20,
+          "method": "pls",
+          "parameter_plan": {
+            "fixed_params": {
+              "max_iter": 500,
+              "scale": false,
+              "tol": 1e-06
+            },
+            "max_fits": 10,
+            "max_trials": 3,
+            "search_space": {
+              "n_components": [
+                1,
+                2,
+                3
+              ]
+            },
+            "strategy": "grid"
+          },
+          "steps": [
+            {
+              "method": "sg_smooth",
+              "params": {
+                "order": 2,
+                "window": 7
+              }
+            }
+          ]
+        },
+        "context_id": "ctx_5ea56bf01b34303c602f9bc84e0df801",
+        "cv_manifest": {
+          "folds": [
+            {
+              "train": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                10,
+                14,
+                15,
+                16,
+                18,
+                19,
+                20,
+                23,
+                24,
+                26,
+                27
+              ],
+              "validation": [
+                0,
+                8,
+                9,
+                11,
+                12,
+                13,
+                17,
+                21,
+                22,
+                25
+              ]
+            },
+            {
+              "train": [
+                0,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                14,
+                17,
+                18,
+                19,
+                20,
+                21,
+                22,
+                24,
+                25,
+                27
+              ],
+              "validation": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                15,
+                16,
+                23,
+                26
+              ]
+            },
+            {
+              "train": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                8,
+                9,
+                11,
+                12,
+                13,
+                15,
+                16,
+                17,
+                21,
+                22,
+                23,
+                25,
+                26
+              ],
+              "validation": [
+                6,
+                7,
+                10,
+                14,
+                18,
+                19,
+                20,
+                24,
+                27
+              ]
+            }
+          ],
+          "manifest_id": "cv_3d9f342df3b6ee79e7b8de2de2dcd7ff03e6403dcf19caf3f4b4f6db5906aded",
+          "n_splits": 3,
+          "random_state": 42,
+          "scope": "calibration_cv",
+          "sha256": "3d9f342df3b6ee79e7b8de2de2dcd7ff03e6403dcf19caf3f4b4f6db5906aded",
+          "splitter": "KFold"
+        },
+        "cv_settings": {
+          "manifest_id": "cv_3d9f342df3b6ee79e7b8de2de2dcd7ff03e6403dcf19caf3f4b4f6db5906aded",
+          "n_splits": 3,
+          "random_state": 42,
+          "scope": "calibration_cv",
+          "shuffle": true,
+          "source": "frozen_manifest_and_safe_search_splitter_implementation",
+          "splitter": "KFold"
+        },
+        "decision_id": "decision_b7f1fc045373d9b521c1cd7128b9f146",
+        "elapsed_seconds": 0.125,
+        "execution_origin": {
+          "agent_run_id": "real-smoke-phase3-real-9c3b463ffdd0",
+          "issued_at": "2026-10-09T05:02:04.305560+00:00",
+          "message_id": "lc_run--01a11f0a-2d33-7e51-8ca2-39fb782ca863-0",
+          "model_class": "PatchedChatDeepSeek",
+          "model_name": "deepseek-flash",
+          "model_type": "chat-deepseek",
+          "response_sha256": "5a08ca622c91a387e404403d623f4e3ecedac607be9d0380e8c830692afb74b8",
+          "source": "lead_agent_model_call",
+          "token_usage": {
+            "input_token_details": {
+              "cache_read": 17152
+            },
+            "input_tokens": 19166,
+            "output_token_details": {},
+            "output_tokens": 90,
+            "total_tokens": 19256
+          },
+          "tool_call_id": "call_00_N4r5aU1DSgvyTKFsJqyw0196",
+          "verification_kind": "provider_model"
+        },
+        "expected_improvement": {
+          "goal": {
+            "comparison": "previous",
+            "metric": "val_rmse",
+            "minimum_change": 0.0
+          },
+          "source": "persisted_validation_metrics",
+          "status": "not_evaluable",
+          "text_expectation": "Expect a modest, CV-selected PG-smoothed PLS model with lower train_cv_rmse than an unsmoothed linear fit; validation RMSE reported but not tuned on."
+        },
+        "experiment_id": "exp_ae090ecec2d9dca0e2111ff163a9b477",
+        "feedback_id": "feedback_cfb14aaa72c97fb1fe9b18b036985135",
+        "fits": 10,
+        "metrics": {
+          "RMSECV": 1.8131695307908773,
+          "diagnostics": {
+            "outlier_count": 1,
+            "outlier_ratio": 0.1,
+            "residual_std": 1.030512,
+            "residual_trend": "upward",
+            "residual_variance": "high",
+            "scope": "validation"
+          },
+          "domain": "default",
+          "evaluation_scope": "validation",
+          "method": "pls",
+          "n_components": 1,
+          "n_samples": 28,
+          "quality": {
+            "action": "investigate_data",
+            "details": {
+              "R2_status": "poor",
+              "RPD_status": "poor",
+              "bias_issue": true,
+              "bias_limit": 0.8532849992867562,
+              "overfitting_risk": false
+            },
+            "evaluation_scope": "validation",
+            "grade": "poor",
+            "passed": false,
+            "recommendation": "模型质量不达标，建议检查数据质量、异常值与划分方式。 检测到显著系统偏差，建议检查基准校正或仪器漂移。",
+            "thresholds_used": {
+              "domain": "default",
+              "max_retries": 3,
+              "min_r2": 0.8,
+              "min_rpd": 3.0,
+              "n_samples": null,
+              "small_sample_relaxation": false
+            }
+          },
+          "test_status": "sealed",
+          "train": {
+            "MAE": 1.1999692648455276,
+            "R2": 0.34321221994971673,
+            "RMSE": 1.4932856875405007,
+            "RPD": 1.256563966567445,
+            "bias": -2.379049338482478e-16,
+            "n": 28,
+            "reference_mean": 0.8143274087098317,
+            "reference_std": 1.8764089867542861,
+            "scope": "calibration",
+            "slope": 0.3432122199497169
+          },
+          "train_cv": {
+            "MAE": 1.5102193884162014,
+            "R2": -0.0974571084777558,
+            "RMSE": 1.930297057314041,
+            "RPD": 0.9720830167794283,
+            "bias": -0.1664227092338397,
+            "n": 28,
+            "reference_mean": 0.8143274087098317,
+            "reference_std": 1.8764089867542861,
+            "scope": "calibration_cv",
+            "slope": 0.14283226914992847
+          },
+          "val": {
+            "MAE": 1.049852616683848,
+            "R2": -0.13953875102722924,
+            "RMSE": 1.3491620455006503,
+            "RPD": 0.9874479126752053,
+            "bias": 0.8707945186825803,
+            "n": 10,
+            "reference_mean": -0.07133809941752735,
+            "reference_std": 1.3322272456902275,
+            "scope": "validation",
+            "slope": 0.4801449047906783
+          }
+        },
+        "parameters": {
+          "copy": true,
+          "max_iter": 500,
+          "n_components": 1,
+          "scale": false,
+          "tol": 1e-06
+        },
+        "previous_experiment_id": null,
+        "retained_experiment_id": null,
+        "runtime_snapshot": {
+          "models_sha256": "2cbe0e3d59d26bf85ddb2476df40648030cbd72052b1a6e65e4e591675178a19",
+          "preprocessing_providers": [
+            {
+              "compatibility": "verified",
+              "has_fitted_state": false,
+              "implementation_version": "chemotools-adapter-v1",
+              "is_default": false,
+              "provider": "chemotools",
+              "provider_class": "chemotools.smooth.SavitzkyGolayFilter",
+              "provider_version": "0.4.4"
+            }
+          ],
+          "preprocessing_sha256": "4bde60cefeb7a3d9ce5d5a0025cf755f70f17ae844e6f0783e17d12517b2b156",
+          "provider_policy": "catalog_default"
+        },
+        "status": "succeeded",
+        "trials": [
+          {
+            "RMSECV": 1.8131695307908773,
+            "fold_rmse": [
+              2.310101129626209,
+              2.183586072048072,
+              0.9458213906983515
+            ],
+            "parameters": {
+              "max_iter": 500,
+              "n_components": 1,
+              "scale": false,
+              "tol": 1e-06
+            },
+            "scope": "calibration_cv"
+          },
+          {
+            "RMSECV": 1.9880110478544661,
+            "fold_rmse": [
+              2.5465679694355274,
+              2.4294514417151416,
+              0.9880137324127292
+            ],
+            "parameters": {
+              "max_iter": 500,
+              "n_components": 2,
+              "scale": false,
+              "tol": 1e-06
+            },
+            "scope": "calibration_cv"
+          },
+          {
+            "RMSECV": 1.9996442658094562,
+            "fold_rmse": [
+              2.5180826603771513,
+              2.5960041414840007,
+              0.8848459955672168
+            ],
+            "parameters": {
+              "max_iter": 500,
+              "n_components": 3,
+              "scale": false,
+              "tol": 1e-06
+            },
+            "scope": "calibration_cv"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_spec": {
+        "max_components": 20,
+        "method": "ridge",
+        "parameter_plan": {
+          "fixed_params": {
+            "alpha": 1.0,
+            "fit_intercept": true,
+            "max_iter": null,
+            "tol": 0.0001
+          },
+          "max_fits": 4,
+          "max_trials": 1,
+          "search_space": {},
+          "strategy": "fixed"
+        },
+        "steps": [
+          {
+            "method": "sg_smooth",
+            "params": {
+              "order": 2,
+              "window": 7
+            }
+          }
+        ]
+      },
+      "action": "SWITCH_MODEL",
+      "base_experiment_id": "exp_ae090ecec2d9dca0e2111ff163a9b477",
+      "context_id": "ctx_31afc88e8a211bf154ea4f8a6baf9441",
+      "context_sha256": "6d4327193865cd00b624bb108c93dae3ac05940f665cf4245962067bc15849fc",
+      "cv_manifest_id": "cv_3d9f342df3b6ee79e7b8de2de2dcd7ff03e6403dcf19caf3f4b4f6db5906aded",
+      "decision_id": "decision_4c050ad13f648161b1f7a7b9cafee09e",
+      "decision_time": "2026-10-09T05:02:18.702753+00:00",
+      "execution_signature": "e41b55432fbfa0aaa4b57574a3710d1ab833f263b556de270d888f80a2cfc5da",
+      "experiment_id": "exp_f44a7238e03ea3ca899e27c48ab23533",
+      "origin": {
+        "agent_run_id": "real-smoke-phase3-real-9c3b463ffdd0",
+        "issued_at": "2026-10-09T05:02:18.688710+00:00",
+        "message_id": "lc_run--01a11f0a-582e-79c1-9afb-de33749be7ab-0",
+        "model_class": "PatchedChatDeepSeek",
+        "model_name": "deepseek-flash",
+        "model_type": "chat-deepseek",
+        "response_sha256": "679f49c7a21ca6f4389e66ee07ae1e2a844e6f67f0b5518d667d94d94a023508",
+        "source": "lead_agent_model_call",
+        "token_usage": {
+          "input_token_details": {
+            "cache_read": 19072
+          },
+          "input_tokens": 19218,
+          "output_token_details": {},
+          "output_tokens": 1421,
+          "total_tokens": 20639
+        },
+        "tool_call_id": "call_00_eujuHf1i22pR6pfqoPi32871",
+        "verification_kind": "provider_model"
+      },
+      "proposal": {
+        "action": "SWITCH_MODEL",
+        "alternatives": [
+          {
+            "action": "SWITCH_MODEL",
+            "comparison": "Keeps the light band-preserving SG smoothing and switches family to ridge with its internal scaling and default alpha=1. A regularized linear fit avoids the PLS latent-starvation that pinned to 1 component, while the fixed single candidate stays within 4 remaining fits.",
+            "id": "A_ridge_tuned_smoothing",
+            "optimization": {
+              "max_fits": 4,
+              "max_trials": 1,
+              "objective": "train_cv_rmse",
+              "search_space": {},
+              "strategy": "fixed"
+            },
+            "pipeline": {
+              "fixed_params": {},
+              "model_method": "ridge",
+              "preprocessing": [
+                {
+                  "method": "sg_smooth",
+                  "params": {
+                    "order": 2,
+                    "window": 7
+                  }
+                }
+              ],
+              "wavelength_selection": "none"
+            }
+          },
+          {
+            "action": "TUNE",
+            "comparison": "TUNE within the same PLS family with extra components forced. This keeps the family that underfit and does not address the untreated scatter, so it is less informative than switching family under the tight fit budget.",
+            "id": "B_pls_tune_more_components",
+            "optimization": {
+              "max_fits": 4,
+              "max_trials": 1,
+              "objective": "train_cv_rmse",
+              "search_space": {},
+              "strategy": "fixed"
+            },
+            "pipeline": {
+              "fixed_params": {},
+              "model_method": "pls",
+              "preprocessing": [
+                {
+                  "method": "sg_smooth",
+                  "params": {
+                    "order": 2,
+                    "window": 7
+                  }
+                }
+              ],
+              "wavelength_selection": "none"
+            }
+          }
+        ],
+        "base_experiment_id": "exp_ae090ecec2d9dca0e2111ff163a9b477",
+        "context_id": "ctx_31afc88e8a211bf154ea4f8a6baf9441",
+        "context_sha256": "6d4327193865cd00b624bb108c93dae3ac05940f665cf4245962067bc15849fc",
+        "difference": "Same preprocessing as base, model family changed from pls to ridge with internal scaling and default alpha=1 under a fixed plan.",
+        "evidence_refs": [
+          "history:session",
+          "experiment:exp_ae090ecec2d9dca0e2111ff163a9b477",
+          "profile:calibration",
+          "method:model_ridge:9d84fa74f68e2aec",
+          "capabilities:runtime",
+          "budget:session"
+        ],
+        "expected_fits": 4,
+        "expected_improvement": {
+          "comparison": "previous",
+          "metric": "val_rmse",
+          "minimum_change": 0.0
+        },
+        "expected_outcome": "Expect a ridge model with intercept on SG-smoothed, internally scaled spectra to produce a Val RMSE at or below the prior 1.349 with an improved (steeper) slope and reduced positive bias, even if abs R2 remains weak on this small noisy dataset.",
+        "expected_revision": 2,
+        "hypotheses": [
+          "A scaled regularized linear model can fit a stable global solution on the 12 noisy, collinear bands where PLS latents starved at 1 component.",
+          "The CV/Val slope far below 1 reflects underfitting rather than label noise, so a family that does not rely on few latents may raise the fitted slope."
+        ],
+        "not_selected_reasons": {
+          "B_pls_tune_more_components": "The previous PLS grid already covered n_components 1-3 and still selected the floor; repeating within the same family and preprocessing spends the last experiment on a known-underfitting region rather than testing a genuinely different fit structure."
+        },
+        "observations": [
+          {
+            "claim": "Baseline sg_smooth(7,2)+PLS grid collapsed to n_components=1 with RMSECV 1.813, Val RMSE 1.349, Val R2 -0.140, CV slope 0.143 and Val slope 0.480, indicating severe underfitting.",
+            "evidence_refs": [
+              "history:session",
+              "experiment:exp_ae090ecec2d9dca0e2111ff163a9b477"
+            ]
+          },
+          {
+            "claim": "Validation flags bias_issue=true (bias 0.871 above limit 0.853), R2_status poor and RPD_status poor.",
+            "evidence_refs": [
+              "experiment:exp_ae090ecec2d9dca0e2111ff163a9b477"
+            ]
+          },
+          {
+            "claim": "Calibration profile tags high_frequency_noise, low_signal_to_noise and scatter_variation; scatter proxy 0.209, noise proxy 0.580, spike fraction 0.0.",
+            "evidence_refs": [
+              "profile:calibration"
+            ]
+          },
+          {
+            "claim": "Ridge adapter has internal_scaler=true and supports a fixed single-candidate plan, giving 1*3+1=4 fits within remaining budget.",
+            "evidence_refs": [
+              "capabilities:runtime",
+              "budget:session"
+            ]
+          }
+        ],
+        "phase": "feedback",
+        "rationale": "The only strong descriptive issue is high-frequency noise, beyond what one light SG smoothing addressed, and the model collapsed to the minimum latent, which points to fit structure rather than preprocessing. Switching to a scaled, L2-regularized linear family tests whether an alternative global solution recovers the slope under a single-candidate plan that exactly fits the remaining 4-fit budget. Sweeping alpha in a grid would exceed the remaining fits (grid 2 candidates = 7 fits), so a fixed ridge is chosen to respect the reported budget; window/order are frozen to the prior legal pipeline so family is the isolated change.",
+        "replication_reason": null,
+        "retained_experiment_id": null,
+        "selected_alternative_id": "A_ridge_tuned_smoothing",
+        "uncertainties": [
+          "Whether residual scatter rather than model family is the dominant error driver, which a fixed ridge cannot separate from the family switch.",
+          "Whether low signal-to-noise (12 bands) limits any linear family regardless of regularization."
+        ]
+      },
+      "proposal_sha256": "6fa1c9fe572e8f3252d1147fa242f57c8a3683a152ee98109fad337abc01f67b",
+      "reserved_fits": 4,
+      "retained_experiment_id": null,
+      "round_index": 2,
+      "runtime_snapshot": {
+        "models_sha256": "2cbe0e3d59d26bf85ddb2476df40648030cbd72052b1a6e65e4e591675178a19",
+        "preprocessing_providers": [
+          {
+            "compatibility": "verified",
+            "has_fitted_state": false,
+            "implementation_version": "chemotools-adapter-v1",
+            "is_default": false,
+            "provider": "chemotools",
+            "provider_class": "chemotools.smooth.SavitzkyGolayFilter",
+            "provider_version": "0.4.4"
+          }
+        ],
+        "preprocessing_sha256": "4bde60cefeb7a3d9ce5d5a0025cf755f70f17ae844e6f0783e17d12517b2b156",
+        "provider_policy": "catalog_default"
+      },
+      "selection_origin": "llm",
+      "session_id": "search_232386c272be4813b125dcb735bc8b45",
+      "status": "succeeded",
+      "execution": {
+        "actual_configuration": {
+          "max_components": 20,
+          "method": "ridge",
+          "parameter_plan": {
+            "fixed_params": {
+              "alpha": 1.0,
+              "fit_intercept": true,
+              "max_iter": null,
+              "tol": 0.0001
+            },
+            "max_fits": 4,
+            "max_trials": 1,
+            "search_space": {},
+            "strategy": "fixed"
+          },
+          "steps": [
+            {
+              "method": "sg_smooth",
+              "params": {
+                "order": 2,
+                "window": 7
+              }
+            }
+          ]
+        },
+        "actual_parameters": {
+          "alpha": 1.0,
+          "copy_X": true,
+          "fit_intercept": true,
+          "max_iter": null,
+          "positive": false,
+          "random_state": null,
+          "solver": "auto",
+          "tol": 0.0001
+        },
+        "comparisons": {
+          "previous": {
+            "available": true,
+            "experiment_id": "exp_ae090ecec2d9dca0e2111ff163a9b477",
+            "val_r2_change": -0.04473879726080443,
+            "val_rmse_change": 0.02622938453813206
+          },
+          "retained": {
+            "available": false,
+            "experiment_id": null
+          }
+        },
+        "configuration": {
+          "max_components": 20,
+          "method": "ridge",
+          "parameter_plan": {
+            "fixed_params": {
+              "alpha": 1.0,
+              "fit_intercept": true,
+              "max_iter": null,
+              "tol": 0.0001
+            },
+            "max_fits": 4,
+            "max_trials": 1,
+            "search_space": {},
+            "strategy": "fixed"
+          },
+          "steps": [
+            {
+              "method": "sg_smooth",
+              "params": {
+                "order": 2,
+                "window": 7
+              }
+            }
+          ]
+        },
+        "context_id": "ctx_31afc88e8a211bf154ea4f8a6baf9441",
+        "cv_manifest": {
+          "folds": [
+            {
+              "train": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                10,
+                14,
+                15,
+                16,
+                18,
+                19,
+                20,
+                23,
+                24,
+                26,
+                27
+              ],
+              "validation": [
+                0,
+                8,
+                9,
+                11,
+                12,
+                13,
+                17,
+                21,
+                22,
+                25
+              ]
+            },
+            {
+              "train": [
+                0,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                14,
+                17,
+                18,
+                19,
+                20,
+                21,
+                22,
+                24,
+                25,
+                27
+              ],
+              "validation": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                15,
+                16,
+                23,
+                26
+              ]
+            },
+            {
+              "train": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                8,
+                9,
+                11,
+                12,
+                13,
+                15,
+                16,
+                17,
+                21,
+                22,
+                23,
+                25,
+                26
+              ],
+              "validation": [
+                6,
+                7,
+                10,
+                14,
+                18,
+                19,
+                20,
+                24,
+                27
+              ]
+            }
+          ],
+          "manifest_id": "cv_3d9f342df3b6ee79e7b8de2de2dcd7ff03e6403dcf19caf3f4b4f6db5906aded",
+          "n_splits": 3,
+          "random_state": 42,
+          "scope": "calibration_cv",
+          "sha256": "3d9f342df3b6ee79e7b8de2de2dcd7ff03e6403dcf19caf3f4b4f6db5906aded",
+          "splitter": "KFold"
+        },
+        "cv_settings": {
+          "manifest_id": "cv_3d9f342df3b6ee79e7b8de2de2dcd7ff03e6403dcf19caf3f4b4f6db5906aded",
+          "n_splits": 3,
+          "random_state": 42,
+          "scope": "calibration_cv",
+          "shuffle": true,
+          "source": "frozen_manifest_and_safe_search_splitter_implementation",
+          "splitter": "KFold"
+        },
+        "decision_id": "decision_4c050ad13f648161b1f7a7b9cafee09e",
+        "elapsed_seconds": 0.09399999992456287,
+        "execution_origin": {
+          "agent_run_id": "real-smoke-phase3-real-9c3b463ffdd0",
+          "issued_at": "2026-10-09T05:02:20.166898+00:00",
+          "message_id": "lc_run--01a11f0a-6a54-7080-949e-8f500078df14-0",
+          "model_class": "PatchedChatDeepSeek",
+          "model_name": "deepseek-flash",
+          "model_type": "chat-deepseek",
+          "response_sha256": "cbae66eeb4e8ea842480ba0c0ecf34e05f2eae0d2100e05e7ca1631108b3563a",
+          "source": "lead_agent_model_call",
+          "token_usage": {
+            "input_token_details": {
+              "cache_read": 20608
+            },
+            "input_tokens": 22739,
+            "output_token_details": {},
+            "output_tokens": 126,
+            "total_tokens": 22865
+          },
+          "tool_call_id": "call_00_LgXtMULfMBi6TsCAnoCh3745",
+          "verification_kind": "provider_model"
+        },
+        "expected_improvement": {
+          "actual_improvement": -0.02622938453813206,
+          "goal": {
+            "comparison": "previous",
+            "metric": "val_rmse",
+            "minimum_change": 0.0
+          },
+          "source": "persisted_validation_metrics",
+          "status": "not_achieved",
+          "text_expectation": "Expect a ridge model with intercept on SG-smoothed, internally scaled spectra to produce a Val RMSE at or below the prior 1.349 with an improved (steeper) slope and reduced positive bias, even if abs R2 remains weak on this small noisy dataset."
+        },
+        "experiment_id": "exp_f44a7238e03ea3ca899e27c48ab23533",
+        "feedback_id": "feedback_e11f8757ec870038c61a273e3587dae0",
+        "fits": 4,
+        "metrics": {
+          "RMSECV": 1.5858005886822617,
+          "diagnostics": {
+            "outlier_count": 1,
+            "outlier_ratio": 0.1,
+            "residual_std": 1.165425,
+            "residual_trend": "upward",
+            "residual_variance": "high",
+            "scope": "validation"
+          },
+          "domain": "default",
+          "evaluation_scope": "validation",
+          "method": "ridge",
+          "n_components": null,
+          "n_samples": 28,
+          "quality": {
+            "action": "investigate_data",
+            "details": {
+              "R2_status": "poor",
+              "RPD_status": "poor",
+              "bias_issue": false,
+              "bias_limit": 0.8698739186397364,
+              "overfitting_risk": false
+            },
+            "evaluation_scope": "validation",
+            "grade": "poor",
+            "passed": false,
+            "recommendation": "模型质量不达标，建议检查数据质量、异常值与划分方式。",
+            "thresholds_used": {
+              "domain": "default",
+              "max_retries": 3,
+              "min_r2": 0.8,
+              "min_rpd": 3.0,
+              "n_samples": null,
+              "small_sample_relaxation": false
+            }
+          },
+          "test_status": "sealed",
+          "train": {
+            "MAE": 0.7901338093173802,
+            "R2": 0.701358168621371,
+            "RMSE": 1.0069448632234175,
+            "RPD": 1.8634674601224466,
+            "bias": -2.8449465006019636e-16,
+            "n": 28,
+            "reference_mean": 0.8143274087098317,
+            "reference_std": 1.8764089867542861,
+            "scope": "calibration",
+            "slope": 0.6318651810248035
+          },
+          "train_cv": {
+            "MAE": 1.3339197883074188,
+            "R2": 0.14463606183932287,
+            "RMSE": 1.7041422309009655,
+            "RPD": 1.1010870763775655,
+            "bias": 0.003217462410549914,
+            "n": 28,
+            "reference_mean": 0.8143274087098317,
+            "reference_std": 1.8764089867542861,
+            "scope": "calibration_cv",
+            "slope": 0.4037360237774449
+          },
+          "val": {
+            "MAE": 1.1440186481308996,
+            "R2": -0.18427754828803367,
+            "RMSE": 1.3753914300387824,
+            "RPD": 0.9686167999844686,
+            "bias": 0.7304011817966913,
+            "n": 10,
+            "reference_mean": -0.07133809941752735,
+            "reference_std": 1.3322272456902275,
+            "scope": "validation",
+            "slope": 0.6179242292878886
+          }
+        },
+        "parameters": {
+          "alpha": 1.0,
+          "copy_X": true,
+          "fit_intercept": true,
+          "max_iter": null,
+          "positive": false,
+          "random_state": null,
+          "solver": "auto",
+          "tol": 0.0001
+        },
+        "previous_experiment_id": "exp_ae090ecec2d9dca0e2111ff163a9b477",
+        "retained_experiment_id": null,
+        "runtime_snapshot": {
+          "models_sha256": "2cbe0e3d59d26bf85ddb2476df40648030cbd72052b1a6e65e4e591675178a19",
+          "preprocessing_providers": [
+            {
+              "compatibility": "verified",
+              "has_fitted_state": false,
+              "implementation_version": "chemotools-adapter-v1",
+              "is_default": false,
+              "provider": "chemotools",
+              "provider_class": "chemotools.smooth.SavitzkyGolayFilter",
+              "provider_version": "0.4.4"
+            }
+          ],
+          "preprocessing_sha256": "4bde60cefeb7a3d9ce5d5a0025cf755f70f17ae844e6f0783e17d12517b2b156",
+          "provider_policy": "catalog_default"
+        },
+        "status": "succeeded",
+        "trials": [
+          {
+            "RMSECV": 1.5858005886822617,
+            "fold_rmse": [
+              2.1327775813529946,
+              1.8302398111212264,
+              0.7943843735725644
+            ],
+            "parameters": {
+              "alpha": 1.0,
+              "fit_intercept": true,
+              "max_iter": null,
+              "tol": 0.0001
+            },
+            "scope": "calibration_cv"
+          }
+        ]
+      }
+    }
+  ],
+  "terminal_stage": "budget_exhausted",
+  "stop_source": "hard_budget",
+  "multi_round": true,
+  "status": "passed",
+  "decision_id": "decision_b7f1fc045373d9b521c1cd7128b9f146",
+  "context_id": "ctx_5ea56bf01b34303c602f9bc84e0df801",
+  "proposal": {
+    "action": "EXPLORE",
+    "alternatives": [
+      {
+        "action": "EXPLORE",
+        "comparison": "Targets the dominant high-frequency-noise proxy with mild SG smoothing (win7/order2 preserving bands) then linear latent-variable regression with small component grid; uses 3+1 refit style fits within budget.",
+        "id": "A_sgsmooth_pls",
+        "optimization": {
+          "max_fits": 10,
+          "max_trials": 3,
+          "objective": "train_cv_rmse",
+          "search_space": {
+            "n_components": [
+              1,
+              2,
+              3
+            ]
+          },
+          "strategy": "grid"
+        },
+        "pipeline": {
+          "fixed_params": {},
+          "model_method": "pls",
+          "preprocessing": [
+            {
+              "method": "sg_smooth",
+              "params": {
+                "order": 2,
+                "window": 7
+              }
+            }
+          ],
+          "wavelength_selection": "none"
+        }
+      },
+      {
+        "action": "EXPLORE",
+        "comparison": "Raw [] plus RBF SVR tests whether nonlinearity matters, but ignores the noise proxy and mixes two changes, and RBF is scale-sensitive on unsmoothed noisy spectra.",
+        "id": "B_raw_svr",
+        "optimization": {
+          "max_fits": 7,
+          "max_trials": 2,
+          "objective": "train_cv_rmse",
+          "search_space": {
+            "C": [
+              1,
+              10
+            ],
+            "gamma": [
+              "scale"
+            ]
+          },
+          "strategy": "grid"
+        },
+        "pipeline": {
+          "fixed_params": {},
+          "model_method": "svr",
+          "preprocessing": [],
+          "wavelength_selection": "none"
+        }
+      }
+    ],
+    "base_experiment_id": null,
+    "context_id": "ctx_5ea56bf01b34303c602f9bc84e0df801",
+    "context_sha256": "1bf072c0aad6a495e9c8931e767be4d97eb282d12ae90739eaa3911a75d8660f",
+    "difference": "Mild SG smoothing + PLS component grid vs raw SVR grid.",
+    "evidence_refs": [
+      "profile:calibration",
+      "protocol:sealed_holdout",
+      "budget:session",
+      "method:sg_smooth:a7560c9ec34f2dd9",
+      "method:model_pls:40b7b293c678d774",
+      "method:model_svr:3900dcf94ca02b3b"
+    ],
+    "expected_fits": 10,
+    "expected_improvement": {
+      "comparison": "previous",
+      "metric": "val_rmse",
+      "minimum_change": 0.0
+    },
+    "expected_outcome": "Expect a modest, CV-selected PG-smoothed PLS model with lower train_cv_rmse than an unsmoothed linear fit; validation RMSE reported but not tuned on.",
+    "expected_revision": 1,
+    "hypotheses": [
+      "Smoothing before PLS will lower train_cv_rmse relative to unsmoothed linear baselines by suppressing high-frequency noise.",
+      "A small PLS component count (1-3) is adequate given only 12 wavelengths and strong collinearity."
+    ],
+    "not_selected_reasons": {
+      "B_raw_svr": "Leaves the dominant noise proxy unaddressed and couples a scale-sensitive nonlinear kernel with unsmoothed input; less diagnostic than isolating noise handling."
+    },
+    "observations": [
+      {
+        "claim": "Calibration profile (n=28, 12 wavelengths) shows high_frequency_noise_score 0.580 and low_signal_to_noise tag; this is the dominant descriptive issue.",
+        "evidence_refs": [
+          "profile:calibration"
+        ]
+      },
+      {
+        "claim": "Scatter variation (0.209) and baseline drift (0.092) proxies are moderate/low; spike row fraction is 0.0 so no despiking evidence.",
+        "evidence_refs": [
+          "profile:calibration"
+        ]
+      },
+      {
+        "claim": "Frozen protocol: 3-fold CV on 28 Cal samples, metric train_cv_rmse, sealed validation of 10 samples, Test inaccessible.",
+        "evidence_refs": [
+          "protocol:sealed_holdout",
+          "budget:session"
+        ]
+      },
+      {
+        "claim": "sg_smooth is applicable to high-frequency noise while preserving broad bands; window must be odd and larger than polynomial order.",
+        "evidence_refs": [
+          "method:sg_smooth:a7560c9ec34f2dd9"
+        ]
+      },
+      {
+        "claim": "PLS suits high-dimensional collinear quantitative spectra; project adapter uses scale=False and selects components inside training.",
+        "evidence_refs": [
+          "method:model_pls:40b7b293c678d774"
+        ]
+      },
+      {
+        "claim": "SVR RBF can model nonlinearity but is sensitive to scale/hyperparameters and costlier as n grows.",
+        "evidence_refs": [
+          "method:model_svr:3900dcf94ca02b3b"
+        ]
+      }
+    ],
+    "phase": "initial",
+    "rationale": "High-frequency noise is the only strong descriptive issue and there is no spike evidence, so a light, band-preserving SG smoothing is the minimal targeted change; PLS is the standard linear comparison for high-dim collinear NIR. Candidate A is chosen over B because it isolates noise handling and stays cheap, whereas B ignores the stated noise issue and couples a nonlinear family with unscaled noisy input.",
+    "replication_reason": null,
+    "retained_experiment_id": null,
+    "selected_alternative_id": "A_sgsmooth_pls",
+    "uncertainties": [
+      "Whether the noise proxy translates to real noise or to genuine narrow bands that smoothing would weaken.",
+      "Optimal PLS component count is not known before CV."
+    ]
+  },
+  "accepted_spec": {
+    "max_components": 20,
+    "method": "pls",
+    "parameter_plan": {
+      "fixed_params": {
+        "max_iter": 500,
+        "scale": false,
+        "tol": 1e-06
+      },
+      "max_fits": 10,
+      "max_trials": 3,
+      "search_space": {
+        "n_components": [
+          1,
+          2,
+          3
+        ]
+      },
+      "strategy": "grid"
+    },
+    "steps": [
+      {
+        "method": "sg_smooth",
+        "params": {
+          "order": 2,
+          "window": 7
+        }
+      }
+    ]
+  },
+  "origin": {
+    "agent_run_id": "real-smoke-phase3-real-9c3b463ffdd0",
+    "issued_at": "2026-10-09T05:02:03.040970+00:00",
+    "message_id": "lc_run--01a11f0a-13c0-7ac3-927c-f770376325f3-0",
+    "model_class": "PatchedChatDeepSeek",
+    "model_name": "deepseek-flash",
+    "model_type": "chat-deepseek",
+    "response_sha256": "69e9ddfe8746f641224842aaa3f1fd11891e6e326118ae11ce41c1859389bab1",
+    "source": "lead_agent_model_call",
+    "token_usage": {
+      "input_token_details": {
+        "cache_read": 8064
+      },
+      "input_tokens": 15960,
+      "output_token_details": {},
+      "output_tokens": 1243,
+      "total_tokens": 17203
+    },
+    "tool_call_id": "call_00_AouR9LIHxGZ0VdOkGGYS3092",
+    "verification_kind": "provider_model"
+  },
+  "execution": {
+    "actual_configuration": {
+      "max_components": 20,
+      "method": "pls",
+      "parameter_plan": {
+        "fixed_params": {
+          "max_iter": 500,
+          "scale": false,
+          "tol": 1e-06
+        },
+        "max_fits": 10,
+        "max_trials": 3,
+        "search_space": {
+          "n_components": [
+            1,
+            2,
+            3
+          ]
+        },
+        "strategy": "grid"
+      },
+      "steps": [
+        {
+          "method": "sg_smooth",
+          "params": {
+            "order": 2,
+            "window": 7
+          }
+        }
+      ]
+    },
+    "actual_parameters": {
+      "copy": true,
+      "max_iter": 500,
+      "n_components": 1,
+      "scale": false,
+      "tol": 1e-06
+    },
+    "comparisons": {
+      "previous": {
+        "available": false,
+        "experiment_id": null
+      },
+      "retained": {
+        "available": false,
+        "experiment_id": null
+      }
+    },
+    "configuration": {
+      "max_components": 20,
+      "method": "pls",
+      "parameter_plan": {
+        "fixed_params": {
+          "max_iter": 500,
+          "scale": false,
+          "tol": 1e-06
+        },
+        "max_fits": 10,
+        "max_trials": 3,
+        "search_space": {
+          "n_components": [
+            1,
+            2,
+            3
+          ]
+        },
+        "strategy": "grid"
+      },
+      "steps": [
+        {
+          "method": "sg_smooth",
+          "params": {
+            "order": 2,
+            "window": 7
+          }
+        }
+      ]
+    },
+    "context_id": "ctx_5ea56bf01b34303c602f9bc84e0df801",
+    "cv_manifest": {
+      "folds": [
+        {
+          "train": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            10,
+            14,
+            15,
+            16,
+            18,
+            19,
+            20,
+            23,
+            24,
+            26,
+            27
+          ],
+          "validation": [
+            0,
+            8,
+            9,
+            11,
+            12,
+            13,
+            17,
+            21,
+            22,
+            25
+          ]
+        },
+        {
+          "train": [
+            0,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            24,
+            25,
+            27
+          ],
+          "validation": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            15,
+            16,
+            23,
+            26
+          ]
+        },
+        {
+          "train": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            8,
+            9,
+            11,
+            12,
+            13,
+            15,
+            16,
+            17,
+            21,
+            22,
+            23,
+            25,
+            26
+          ],
+          "validation": [
+            6,
+            7,
+            10,
+            14,
+            18,
+            19,
+            20,
+            24,
+            27
+          ]
+        }
+      ],
+      "manifest_id": "cv_3d9f342df3b6ee79e7b8de2de2dcd7ff03e6403dcf19caf3f4b4f6db5906aded",
+      "n_splits": 3,
+      "random_state": 42,
+      "scope": "calibration_cv",
+      "sha256": "3d9f342df3b6ee79e7b8de2de2dcd7ff03e6403dcf19caf3f4b4f6db5906aded",
+      "splitter": "KFold"
+    },
+    "cv_settings": {
+      "manifest_id": "cv_3d9f342df3b6ee79e7b8de2de2dcd7ff03e6403dcf19caf3f4b4f6db5906aded",
+      "n_splits": 3,
+      "random_state": 42,
+      "scope": "calibration_cv",
+      "shuffle": true,
+      "source": "frozen_manifest_and_safe_search_splitter_implementation",
+      "splitter": "KFold"
+    },
+    "decision_id": "decision_b7f1fc045373d9b521c1cd7128b9f146",
+    "elapsed_seconds": 0.125,
+    "execution_origin": {
+      "agent_run_id": "real-smoke-phase3-real-9c3b463ffdd0",
+      "issued_at": "2026-10-09T05:02:04.305560+00:00",
+      "message_id": "lc_run--01a11f0a-2d33-7e51-8ca2-39fb782ca863-0",
+      "model_class": "PatchedChatDeepSeek",
+      "model_name": "deepseek-flash",
+      "model_type": "chat-deepseek",
+      "response_sha256": "5a08ca622c91a387e404403d623f4e3ecedac607be9d0380e8c830692afb74b8",
+      "source": "lead_agent_model_call",
+      "token_usage": {
+        "input_token_details": {
+          "cache_read": 17152
+        },
+        "input_tokens": 19166,
+        "output_token_details": {},
+        "output_tokens": 90,
+        "total_tokens": 19256
+      },
+      "tool_call_id": "call_00_N4r5aU1DSgvyTKFsJqyw0196",
+      "verification_kind": "provider_model"
+    },
+    "expected_improvement": {
+      "goal": {
+        "comparison": "previous",
+        "metric": "val_rmse",
+        "minimum_change": 0.0
+      },
+      "source": "persisted_validation_metrics",
+      "status": "not_evaluable",
+      "text_expectation": "Expect a modest, CV-selected PG-smoothed PLS model with lower train_cv_rmse than an unsmoothed linear fit; validation RMSE reported but not tuned on."
+    },
+    "experiment_id": "exp_ae090ecec2d9dca0e2111ff163a9b477",
+    "feedback_id": "feedback_cfb14aaa72c97fb1fe9b18b036985135",
+    "fits": 10,
+    "metrics": {
+      "RMSECV": 1.8131695307908773,
+      "diagnostics": {
+        "outlier_count": 1,
+        "outlier_ratio": 0.1,
+        "residual_std": 1.030512,
+        "residual_trend": "upward",
+        "residual_variance": "high",
+        "scope": "validation"
+      },
+      "domain": "default",
+      "evaluation_scope": "validation",
+      "method": "pls",
+      "n_components": 1,
+      "n_samples": 28,
+      "quality": {
+        "action": "investigate_data",
+        "details": {
+          "R2_status": "poor",
+          "RPD_status": "poor",
+          "bias_issue": true,
+          "bias_limit": 0.8532849992867562,
+          "overfitting_risk": false
+        },
+        "evaluation_scope": "validation",
+        "grade": "poor",
+        "passed": false,
+        "recommendation": "模型质量不达标，建议检查数据质量、异常值与划分方式。 检测到显著系统偏差，建议检查基准校正或仪器漂移。",
+        "thresholds_used": {
+          "domain": "default",
+          "max_retries": 3,
+          "min_r2": 0.8,
+          "min_rpd": 3.0,
+          "n_samples": null,
+          "small_sample_relaxation": false
+        }
+      },
+      "test_status": "sealed",
+      "train": {
+        "MAE": 1.1999692648455276,
+        "R2": 0.34321221994971673,
+        "RMSE": 1.4932856875405007,
+        "RPD": 1.256563966567445,
+        "bias": -2.379049338482478e-16,
+        "n": 28,
+        "reference_mean": 0.8143274087098317,
+        "reference_std": 1.8764089867542861,
+        "scope": "calibration",
+        "slope": 0.3432122199497169
+      },
+      "train_cv": {
+        "MAE": 1.5102193884162014,
+        "R2": -0.0974571084777558,
+        "RMSE": 1.930297057314041,
+        "RPD": 0.9720830167794283,
+        "bias": -0.1664227092338397,
+        "n": 28,
+        "reference_mean": 0.8143274087098317,
+        "reference_std": 1.8764089867542861,
+        "scope": "calibration_cv",
+        "slope": 0.14283226914992847
+      },
+      "val": {
+        "MAE": 1.049852616683848,
+        "R2": -0.13953875102722924,
+        "RMSE": 1.3491620455006503,
+        "RPD": 0.9874479126752053,
+        "bias": 0.8707945186825803,
+        "n": 10,
+        "reference_mean": -0.07133809941752735,
+        "reference_std": 1.3322272456902275,
+        "scope": "validation",
+        "slope": 0.4801449047906783
+      }
+    },
+    "parameters": {
+      "copy": true,
+      "max_iter": 500,
+      "n_components": 1,
+      "scale": false,
+      "tol": 1e-06
+    },
+    "previous_experiment_id": null,
+    "retained_experiment_id": null,
+    "runtime_snapshot": {
+      "models_sha256": "2cbe0e3d59d26bf85ddb2476df40648030cbd72052b1a6e65e4e591675178a19",
+      "preprocessing_providers": [
+        {
+          "compatibility": "verified",
+          "has_fitted_state": false,
+          "implementation_version": "chemotools-adapter-v1",
+          "is_default": false,
+          "provider": "chemotools",
+          "provider_class": "chemotools.smooth.SavitzkyGolayFilter",
+          "provider_version": "0.4.4"
+        }
+      ],
+      "preprocessing_sha256": "4bde60cefeb7a3d9ce5d5a0025cf755f70f17ae844e6f0783e17d12517b2b156",
+      "provider_policy": "catalog_default"
+    },
+    "status": "succeeded",
+    "trials": [
+      {
+        "RMSECV": 1.8131695307908773,
+        "fold_rmse": [
+          2.310101129626209,
+          2.183586072048072,
+          0.9458213906983515
+        ],
+        "parameters": {
+          "max_iter": 500,
+          "n_components": 1,
+          "scale": false,
+          "tol": 1e-06
+        },
+        "scope": "calibration_cv"
+      },
+      {
+        "RMSECV": 1.9880110478544661,
+        "fold_rmse": [
+          2.5465679694355274,
+          2.4294514417151416,
+          0.9880137324127292
+        ],
+        "parameters": {
+          "max_iter": 500,
+          "n_components": 2,
+          "scale": false,
+          "tol": 1e-06
+        },
+        "scope": "calibration_cv"
+      },
+      {
+        "RMSECV": 1.9996442658094562,
+        "fold_rmse": [
+          2.5180826603771513,
+          2.5960041414840007,
+          0.8848459955672168
+        ],
+        "parameters": {
+          "max_iter": 500,
+          "n_components": 3,
+          "scale": false,
+          "tol": 1e-06
+        },
+        "scope": "calibration_cv"
+      }
+    ]
+  },
+  "files_opened": [
+    "search.npz",
+    "search.npz",
+    "search.npz",
+    "search.npz"
+  ],
+  "test_access": false,
+  "agent_chain": "production Lead factory/prompt + actual NIR and dynamic-context middlewares; unrelated middleware services omitted",
+  "service_scope": "in-process configured provider, no Gateway/UI deployment",
+  "elapsed_seconds": 34.40037703514099,
+  "cost": {
+    "input_tokens": 149067,
+    "output_tokens": 5378,
+    "total_tokens": 154445,
+    "model_responses": 8,
+    "model_fits": 14
+  },
+  "scope_note": "Synthetic configured-provider integration; existing production Lead factory/prompt/NIR/dynamic-context middleware. No Gateway/UI deployment or real dataset experiment. Initial LLM used three PLS candidates (10 fits), follow-up used one fixed Ridge candidate (4 fits); the enforced cap is the 14-fit cumulative session budget."
+}

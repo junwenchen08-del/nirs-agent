@@ -82,3 +82,63 @@ async def read_candidates(thread_id: str, run_id: str, step_id: str, request: Re
 async def read_chart(thread_id: str, run_id: str, chart_id: str, request: Request, version: str = Query(..., min_length=1, max_length=64)):
     store = await _store(request, thread_id)
     return JSONResponse(await _read(store.chart, run_id, chart_id, version), headers={"Cache-Control": "private, no-store"})
+
+
+async def _autonomous(request, thread_id):
+    from deerflow.community.nir.autonomous_view import AutonomousView
+
+    return AutonomousView(await _store(request, thread_id))
+
+
+@router.get("/autonomous")
+@require_permission("threads", "read", owner_check=True)
+async def autonomous_sessions(thread_id: str, request: Request, offset: int = Query(0, ge=0, le=100000)):
+    view = await _autonomous(request, thread_id)
+    return JSONResponse(await _read(view.sessions, offset), headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/autonomous/{session_id}")
+@require_permission("threads", "read", owner_check=True)
+async def autonomous_summary(thread_id: str, session_id: str, request: Request):
+    view = await _autonomous(request, thread_id)
+    payload = await _read(view.summary, session_id)
+    etag = f'"{session_id}-{payload["revision"]}"'
+    headers = {"Cache-Control": "private, no-cache", "ETag": etag}
+    if request.headers.get("If-None-Match") == etag:
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(payload, headers=headers)
+
+
+@router.get("/autonomous/{session_id}/decisions")
+@require_permission("threads", "read", owner_check=True)
+async def autonomous_decisions(thread_id: str, session_id: str, request: Request, offset: int = Query(0, ge=0, le=100000), limit: int = Query(10, ge=1, le=20)):
+    view = await _autonomous(request, thread_id)
+    return JSONResponse(await _read(view.decisions, session_id, offset, limit), headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/autonomous/{session_id}/decisions/{decision_id}")
+@require_permission("threads", "read", owner_check=True)
+async def autonomous_decision(thread_id: str, session_id: str, decision_id: str, request: Request):
+    view = await _autonomous(request, thread_id)
+    return JSONResponse(await _read(view.decision, session_id, decision_id), headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/autonomous/{session_id}/charts/{scope}")
+@require_permission("threads", "read", owner_check=True)
+async def autonomous_chart(thread_id: str, session_id: str, scope: str, request: Request):
+    view = await _autonomous(request, thread_id)
+    return JSONResponse(await _read(view.chart, session_id, scope), headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/autonomous/{session_id}/rejections")
+@require_permission("threads", "read", owner_check=True)
+async def autonomous_rejections(thread_id: str, session_id: str, request: Request, offset: int = Query(0, ge=0, le=100000)):
+    view = await _autonomous(request, thread_id)
+    return JSONResponse(await _read(view.rejections, session_id, offset), headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/autonomous/{session_id}/spectra/{experiment_id}")
+@require_permission("threads", "read", owner_check=True)
+async def autonomous_spectra(thread_id: str, session_id: str, experiment_id: str, request: Request):
+    view = await _autonomous(request, thread_id)
+    return JSONResponse(await _read(view.spectra, session_id, experiment_id), headers={"Cache-Control": "private, no-store"})

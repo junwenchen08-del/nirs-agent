@@ -45,6 +45,15 @@ def _registration_gate(metrics: dict) -> tuple[bool, str]:
     else:
         quality = metrics.get("quality")
         quality_passed = isinstance(quality, dict) and quality.get("passed") is True
+        if isinstance(quality, dict) and quality.get("evaluation_scope") == "validation":
+            from nir_core.utils.metrics import evaluate_quality
+
+            try:
+                final_quality = evaluate_quality(metrics, domain=metrics.get("domain", "default"), evaluation_scope="final_test")
+            except ValueError:
+                return False, "final test evidence is required for registration"
+            if final_quality.get("passed") is not True:
+                return False, "final test quality gate did not pass"
     if not quality_passed:
         return False, "model quality gate did not pass"
     return True, "all registration gates passed"

@@ -264,6 +264,12 @@ def build_run_config(
     the LangGraph Platform-compatible HTTP API and the IM channel path behave
     identically.
     """
+    if request_config:
+        checkpoint_fields = {"checkpoint_id", "checkpoint_ns", "checkpoint_map"}
+        containers = [request_config, request_config.get("configurable"), request_config.get("context")]
+        if any(isinstance(value, Mapping) and checkpoint_fields.intersection(value) for value in containers):
+            raise ValueError("Checkpoint locators must use the validated request checkpoint field, not run config")
+
     # Lead-agent recursion budget (LangGraph super-steps for the lead graph
     # only). Independent of subagent depth: a `task()` dispatch runs the whole
     # subagent inside ONE lead tools-node step, and subagents enforce their own
@@ -323,6 +329,10 @@ def build_run_config(
     else:
         config["configurable"] = {"thread_id": thread_id}
 
+    # Ownership was checked against the URL thread. Client configuration must
+    # never select a different checkpoint or private process-store thread.
+    config["configurable"]["thread_id"] = thread_id
+
     # Inject custom agent name when the caller specified a non-default assistant.
     # Honour an explicit agent_name in either runtime options container.
     if assistant_id and assistant_id != _DEFAULT_ASSISTANT_ID:
@@ -374,6 +384,11 @@ async def apply_checkpoint_to_run_config(
             checkpoint_ns = str(raw_checkpoint_ns)
         checkpoint_map = checkpoint.get("checkpoint_map")
 
+    configurable = config.setdefault("configurable", {})
+    if not isinstance(configurable, dict):
+        raise HTTPException(status_code=400, detail="request config configurable must be an object")
+    configurable["thread_id"] = thread_id
+
     if not checkpoint_id:
         return
 
@@ -389,6 +404,7 @@ async def apply_checkpoint_to_run_config(
 
     checkpointer = get_checkpointer(request)
     try:
+        latest_tuple = await checkpointer.aget_tuple({"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}})
         checkpoint_tuple = await checkpointer.aget_tuple(read_config)
     except Exception as exc:
         logger.exception("Failed to validate checkpoint %s for thread %s", checkpoint_id, sanitize_log_param(thread_id))
@@ -396,14 +412,43 @@ async def apply_checkpoint_to_run_config(
     if checkpoint_tuple is None:
         raise HTTPException(status_code=404, detail=f"Checkpoint {checkpoint_id} not found")
 
-    configurable = config.setdefault("configurable", {})
-    if not isinstance(configurable, dict):
-        raise HTTPException(status_code=400, detail="request config configurable must be an object")
+    _guard_sealed_checkpoint(latest_tuple, checkpoint_tuple, str(checkpoint_id), checkpoint_ns, checkpoint_map)
+
     configurable["thread_id"] = thread_id
     configurable["checkpoint_ns"] = checkpoint_ns
     configurable["checkpoint_id"] = str(checkpoint_id)
     if checkpoint_map is not None:
         configurable["checkpoint_map"] = checkpoint_map
+
+
+def _guard_sealed_checkpoint(latest_tuple, selected_tuple, checkpoint_id, checkpoint_ns, checkpoint_map):
+    """A sealed chat resumes only its latest root checkpoint and binding.
+
+    The scientific session stays in the existing ProcessStore. This boundary
+    prevents historical graph state from restoring legacy tools or discarding
+    that session; ordinary legacy checkpoint branching remains compatible.
+    """
+
+    def workflow(value):
+        snapshot = getattr(value, "checkpoint", None)
+        channels = snapshot.get("channel_values") if isinstance(snapshot, Mapping) else None
+        state = channels.get("nir_workflow") if isinstance(channels, Mapping) else None
+        return state if isinstance(state, Mapping) else {}
+
+    latest = workflow(latest_tuple)
+    if latest.get("search_protocol") != "sealed_holdout":
+        return
+    latest_config = getattr(latest_tuple, "config", {})
+    latest_configurable = latest_config.get("configurable", {}) if isinstance(latest_config, Mapping) else {}
+    latest_id = latest_configurable.get("checkpoint_id")
+    if not latest_id:
+        snapshot = getattr(latest_tuple, "checkpoint", {})
+        latest_id = snapshot.get("id") if isinstance(snapshot, Mapping) else None
+    selected = workflow(selected_tuple)
+    binding_fields = ("project_id", "search_session_id", "search_protocol", "decision_strategy", "autonomous_rounds", "autonomous_delivery", "delivery_policy")
+    map_matches = checkpoint_map is None or (isinstance(checkpoint_map, Mapping) and all(key == "" and str(value) == checkpoint_id for key, value in checkpoint_map.items()))
+    if not latest_id or str(latest_id) != checkpoint_id or checkpoint_ns or not map_matches or any(selected.get(key) != latest.get(key) for key in binding_fields):
+        raise HTTPException(status_code=409, detail="A sealed NIR task must resume its current checkpoint and session; historical or different-mode checkpoints cannot reopen modeling")
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +480,13 @@ async def start_run(
     disconnect = DisconnectMode.cancel if body.on_disconnect == "cancel" else DisconnectMode.continue_
 
     body_context = getattr(body, "context", None) or {}
+    from deerflow.community.nir.web_entry import bind_web_request
+
+    # Validate before creating a run, not after leaving a pending record.
+    try:
+        bind_web_request({}, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     model_name = body_context.get("model_name")
 
     # Coerce non-string model_name values to str before truncation.
@@ -477,6 +529,21 @@ async def start_run(
 
     owner_context_token = set_current_user(SimpleNamespace(id=owner_user_id)) if owner_user_id else None
     try:
+        # Reject invalid configuration and checkpoint rewinds before persisting
+        # a pending run or changing thread metadata.
+        try:
+            config = build_run_config(thread_id, body.config, body.metadata, assistant_id=body.assistant_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        await apply_checkpoint_to_run_config(config, body=body, thread_id=thread_id, request=request)
+        merge_run_context_overrides(config, getattr(body, "context", None))
+        bind_web_request(config, body)
+        inject_authenticated_user_context(config, request)
+        if config.get("context", {}).get("nir_unified_entry"):
+            # Explicit cancel still aborts the owned run. Losing its SSE/browser
+            # connection must not cancel a deterministic Test/publication step.
+            disconnect = DisconnectMode.continue_
+
         try:
             record = await run_mgr.create_or_reject(
                 thread_id,
@@ -525,16 +592,6 @@ async def start_run(
             graph_input = Command(resume=command["resume"])
         else:
             graph_input = normalize_input(body.input)
-        config = build_run_config(thread_id, body.config, body.metadata, assistant_id=body.assistant_id)
-        await apply_checkpoint_to_run_config(config, body=body, thread_id=thread_id, request=request)
-
-        # Merge DeerFlow-specific context overrides into both ``configurable`` and ``context``.
-        # The ``context`` field is a custom extension for the langgraph-compat layer
-        # that carries agent configuration (model_name, thinking_enabled, etc.).
-        # Only agent-relevant keys are forwarded; unknown keys (e.g. thread_id) are ignored.
-        merge_run_context_overrides(config, getattr(body, "context", None))
-        inject_authenticated_user_context(config, request)
-
         stream_modes = normalize_stream_modes(body.stream_mode)
 
         task = asyncio.create_task(

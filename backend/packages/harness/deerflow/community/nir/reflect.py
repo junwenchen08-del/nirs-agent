@@ -143,6 +143,17 @@ def nir_reflect_tool(
         real_metrics = _resolve(runtime, metrics_path, read_only=True)
         with open(real_metrics, encoding="utf-8") as f:
             metrics = _json.load(f)
+        from nir_core.utils.metrics import search_metrics
+
+        if isinstance(metrics, list):
+            comparable = [search_metrics(item) for item in metrics if isinstance(item, dict) and (isinstance(item.get("val"), dict) or isinstance(item.get("validation"), dict))]
+            if not comparable:
+                return _err("Comparison report has no explicit validation evidence")
+            metrics = min(comparable, key=lambda item: float(item.get("RMSE_val", float("inf"))))
+        if not isinstance(metrics, dict):
+            return _err("Expected a metrics object or comparison array")
+        if metrics.get("test_status") == "consumed" or metrics.get("evaluation_scope") == "final_test":
+            return _ok({"should_retry": False, "search_closed": True, "reason": "模型已冻结并完成最终测试，不能重新进入搜索。"})
 
         # Parse history.
         try:
@@ -159,6 +170,17 @@ def nir_reflect_tool(
                 get_next_pipeline=get_next_pipeline,
             )
 
+        metrics = search_metrics(metrics)
+        safe_history = []
+        for record in history_list if isinstance(history_list, list) else []:
+            if not isinstance(record, dict):
+                continue
+            try:
+                safe_history.append({"pipeline": record.get("pipeline", []), "metrics": search_metrics(record.get("metrics", {}))})
+            except (ValueError, TypeError):
+                continue  # No Val evidence: old Test-only entries cannot guide search.
+        history_list = safe_history
+
         n_samples = metrics.get("n_samples")
 
         # Quality + LV adjustment.
@@ -166,6 +188,7 @@ def nir_reflect_tool(
             metrics,
             domain=domain,
             n_samples=n_samples,
+            evaluation_scope="validation",
         )
         quality = lv_adj["quality"]
 
@@ -200,15 +223,17 @@ def nir_reflect_tool(
         for rec in all_records:
             m = rec.get("metrics", {}) if isinstance(rec, dict) else {}
             r2 = m["R2_val"] if "R2_val" in m else m.get("R2")
-            rpd_v = m.get("RPD")
-            if rpd_v is None:
-                rpd_v = 0.0
-            best_rpd = best.get("RPD") if best is not None else None
-            if best is None or rpd_v > (best_rpd if best_rpd is not None else float("-inf")):
+            rpd_v = m.get("RPD_val")
+            rmse_val = m.get("RMSE_val")
+            if rmse_val is None:
+                continue
+            if best is None or rmse_val < best["RMSE_val"]:
                 best = {
                     "R2_val": r2,
                     "RPD": rpd_v,
-                    "grade": m.get("quality", {}).get("grade", "unknown"),
+                    "RMSE_val": rmse_val,
+                    "evaluation_scope": "validation",
+                    "grade": "ungraded",
                     "pipeline": rec.get("pipeline", []),
                 }
 
@@ -263,6 +288,7 @@ def nir_reflect_tool(
                     "recommendation": lv_adj["recommendation"],
                 },
                 "current_quality": {
+                    "evaluation_scope": "validation",
                     "grade": quality["grade"],
                     "passed": quality["passed"],
                     "action": quality["action"],

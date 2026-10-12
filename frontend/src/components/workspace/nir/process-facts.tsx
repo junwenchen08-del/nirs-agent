@@ -86,7 +86,32 @@ export function ProcessFacts({ value, zh }: { value: unknown; zh: boolean }) {
               {factLabel(key, zh)}
             </dt>
             <dd className="text-sm">
-              <ProcessFacts value={factValue(key, item, zh)} zh={zh} />
+              {zh &&
+              [
+                "rationale",
+                "observations",
+                "uncertainties",
+                "hypotheses",
+                "expected_outcome",
+                "text_expectation",
+                "description",
+                "reason",
+              ].includes(key) &&
+              (typeof item === "string" ||
+                (Array.isArray(item) &&
+                  item.every((part) => typeof part === "string"))) &&
+              !/[\u3400-\u9fff]/u.test(String(item)) ? (
+                <details>
+                  <summary className="text-muted-foreground cursor-pointer">
+                    英文历史证据（展开查看原文）
+                  </summary>
+                  <div className="mt-2" lang="en">
+                    <ProcessFacts value={item} zh={zh} />
+                  </div>
+                </details>
+              ) : (
+                <ProcessFacts value={factValue(key, item, zh)} zh={zh} />
+              )}
             </dd>
           </div>
         ))}

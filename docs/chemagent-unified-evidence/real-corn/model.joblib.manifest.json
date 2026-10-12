@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "artifact_type": "nir_model_artifact",
+  "sha256": "1fe8063000a71ebd670783bf2cc311453eead07db67f0232a34e5cf6167b370d",
+  "size_bytes": 417150,
+  "metrics_sha256": "a4aa8c34a69b63c355c87bd2c5933ea75385e9cf0e51a95f94c58da42328ea09",
+  "training_data_sha256": "b461d7644db2fb16bf0dce25896b6a4ba4e4c73c40aab9f681287dbe10ede19d"
+}

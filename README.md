@@ -2,6 +2,114 @@
 
 > **版本**：v2.1.0　|　**基础框架**：DeerFlow 2.x（LangGraph + FastAPI）
 
+自主模式会明确反馈无法解析的决策 JSON，并在有限续接次数内允许 LLM 修正；
+持续失败会持久化为流程安全关闭，不冒充质量停止、预算 RETAIN 或模型交付。
+错误摘要按实验身份去重，分别展示 Cal CV mean-fold、OOF 和 Val 指标。
+原始响应仍保留审计记录；Provider 请求不重复携带整段非法 JSON。
+
+单目标回归新增第一阶段安全搜索协议：`nir_workflow(start,
+search_protocol="sealed_holdout", validation_goal="internal_holdout")` 后使用
+`nir_prepare_search → nir_search_model → nir_freeze_search → nir_finalize_search`。
+搜索只执行 Cal/CV/Val，Test 在冻结后评价一次；支持 PLS、Ridge、SVR、Extra Trees。
+工具注册见 `config.example.yaml`；本地 `config.yaml` 已按现有条目结构补入安全搜索工具。
+这是可选验证协议；旧入口保留兼容但不具备本协议的
+全流程封存保证。适用范围、测试及限制见
+[第一阶段实施报告](docs/chemagent-phase1-implementation-report.md)。
+
+第二阶段新增可选的首轮自主决策策略：启动时同时指定
+`decision_strategy="llm_autonomous"` 和 `search_protocol="sealed_holdout"`，
+使用 `nir_prepare_search → nir_decision_context → nir_submit_decision → nir_execute_decision`。
+LLM 依据有来源的 Cal 特征、方法卡片、用户要求和实际能力，自行比较并选择 Raw 或有序
+预处理组合、四种模型之一，以及固定参数或有界网格。执行器只读取已接受的 `decision_id`，
+不附加 PLS 基线或替换非法方案。固定参数仍做 Cal CV 评价，但不会搜索其他参数。
+决策由 Lead Agent 的实际模型调用签名关联；执行前快照和执行后反馈分别持久化。
+`autonomous_rounds=false` 时返回 Cal CV/Val 后停在 `initial_result`，保留第二阶段单次执行模式。
+使用新对话避免旧 Test 结果进入上下文；自主模式不注入或写入跨任务记忆。
+本地配置和示例均包含三个决策工具，其他部署需合并条目后按其配置重载方式加载。
+详细能力、测试证据及限制见 [第二阶段实施报告](docs/chemagent-phase2-implementation-report.md)。
+
+第三阶段新增 `autonomous_rounds=true`：每轮执行后从可信持久化结果组织新的上下文，
+由 LLM 比较并选择 TUNE、CHANGE_PREPROCESS、SWITCH_MODEL、EXPLORE 或 STOP。
+数值工具只执行已接受的决策；实验次数、拟合次数和高层动作预算跨轮累计。
+上下文保留关键证据与最近四轮摘要，可用 `nir_decision_history` 分页查详情，按需检索知识。
+执行后反馈关联原决策、实验、预期目标与实际 Cal CV/Val，执行前理由不回写。
+STOP 明确保留 LLM 指定的成功实验，停在待最终确认状态；硬预算终止单独记录。
+所有搜索轮次和停止后 Test 均保持封存。完整最终冻结／Test 生命周期留待后续。
+本地与示例配置已加入历史读取工具，其他设置不变。能力和验证范围见
+[第三阶段实施报告](docs/chemagent-phase3-implementation-report.md)。
+
+第四阶段增加显式 `autonomous_delivery=true`（同时要求 llm_autonomous、sealed_holdout
+协议以及 autonomous_rounds）。决策提交现支持 JSON 对象，保留原 JSON 字符串兼容；
+实际 Lead 调用按当前阶段提供工具和提案 Schema。未变更上下文可重复读取同一版本，
+预算切换先更新终结上下文，再使用预留额度；不会自动补造 RETAIN。
+`budget_profile=development|autonomous` 分别提供
+5/50/15/600 与 40/1000/100/7200 的实验／fits／动作／秒预算；`task_budget` JSON
+可指定较小额度，服务器 `NIR_AUTONOMOUS_MAX_*` 等环境上限拒绝越界。新模式预算
+使用 task_budget，旧模式三个预算参数保持原范围。单次网格仍限 40 候选／200 fits，
+既有文件、内存与单操作资源门禁保留。预算绑定一次，模型调用前持久化额度，真实 usage
+与 estimated 入场 token 分开记录；墙钟检查为合作式，未实现金额硬限制。
+准备搜索前的调用也受持久额度约束；明确请求 autonomous_delivery=true 时不能静默降级
+为 legacy。搜索调用额度为 30/150，估算准入 token 为 120 万/300 万；终结独立预留
+6 次调用、50 万 token 和 300 秒，均可在服务器硬上限内明确请求更小额度。
+
+正常继续／停止仍由 LLM 决定；质量达标或连续无改善均不会强制结束。
+STOP 提交保留实验、优势／局限、覆盖和未验证方向；预算终止后使用独立终结额度
+让 LLM 从历史成功实验中 RETAIN，记录 stop_source=budget，不能自动选择最小 RMSE。
+终结阶段的无效决策/服务失败另记 terminal_failure，不覆盖原预算停止来源。
+随后复用 nir_freeze_search 和 nir_finalize_search：冻结原 Cal 工件，Test 只评价一次，
+输出可信预测模型、范围明确的指标、完整决策证据、Markdown/HTML 报告与 ZIP。
+Test 失败或质量差均不能重开搜索；报告导出失败可只恢复交付。审批和科学注册门禁独立，
+完成的 Test 缓存不会被后续无效提案、LLM 额度耗尽或服务失败覆盖。
+交付不会自动批准／注册。前三阶段默认行为保留，ProcessStore 仍为 v5，历史字节不回写。
+Fake LLM 的 STOP 与预算 RETAIN 完整链路已验证；补充修复后真实 DeepSeek 已完成
+一次预算 RETAIN→冻结→唯一 Test→模型报告交付。该次质量门禁未通过、未审批注册；
+真实主动 STOP 分支本轮未单独验证。详见 [第四阶段最终验收报告](docs/chemagent-phase4-final-acceptance-report.md)。
+
+第五阶段在桌面聊天输入区增加“自主建模”及开发验证／自主搜索／自定义预算入口。
+上传数据并输入自然语言要求后，网页发送结构化模式选择，由 Gateway 绑定封存协议、
+LLM 多轮决策和自主交付策略；无需手写 JSON。原有建模过程侧栏及过程页面展示持久化的
+真实决策、执行反馈、Val 趋势、STOP／预算 RETAIN、冻结结果与已发布工件下载。
+Test 图表只读取原单次评价中保存的缓存；没有记录的光谱与历史图表显示不可用。
+桌面网页与真实 DeepSeek 已在小型合成数据上完成一次预算 RETAIN→冻结→独立 Test→
+报告、模型和 ZIP 下载，并验证刷新不重新训练。该模型未通过质量门禁，未审批、未注册。
+本阶段真实主动 STOP 和多次数值实验后的交付未另行验证。范围、回归结果和剩余项见
+[第五阶段实施报告](docs/chemagent-phase5-implementation-report.md)。
+
+第六阶段增加 Corn/m5 Oil 的受控数据适配、Cal 原始／实际预处理光谱缓存与只读展示，
+并压缩自主模式的重复合同、CV 行索引和协调 Skill 的旧入口说明。自定义网页预算现在
+使用服务端上限内的自主 LLM 额度，训练四项额度仍由用户指定，终结额度独立保留。
+本阶段一次真实 DeepSeek 已在真实 Corn 数据上自主选择并执行 AsLS→mean_center→PLS，
+随后预算 RETAIN 并冻结；因模型调用准入预算不足，未评价 Test、未交付最终模型报告。
+后续修复仅经本地验证，真实多次数值执行和主动 STOP 后交付仍待验收。
+Corn 的目标单位未注明且存在历史数据使用，本次属于公开历史数据功能验证。
+完整证据和回归限制见 [第六阶段实施报告](docs/chemagent-phase6-implementation-report.md)。
+
+自主模式使用既有有界决策上下文，跳过通用摘要模型的预算外调用；legacy 摘要保持兼容。
+第六阶段本次全部 provider usage 为 18 次／494319 tokens，其中 Lead 为 13 次／428746。
+修复后计费降幅尚未真实验证。
+
+第六阶段补充改造统一了默认网页入口：上传数据并用自然语言提出单目标回归任务，
+由 Lead 理解意图，服务端绑定安全自主协议；概念问答不启动训练，旧线程保持原模式。
+建模模式与预算表单已移除。新任务累计 Token 上限明确为 `null`，usage 仍记录，
+单次输出、调用数、时间、实验／拟合／动作和无效提案限制继续生效；旧策略保持原额度。
+合法、已持久化的 LLM STOP／预算 RETAIN 后，程序复用既有服务自动冻结指定实验、
+单次评价 Test 并发布模型、Markdown／HTML 报告和 ZIP，无需额外 provider 撰写交付。
+完成交付仍需真实用户审批且不自动注册。恢复与未知 lease 的安全边界、本地测试、
+真实 provider 验收状态见 [统一自主入口实施报告](docs/chemagent-unified-autonomous-mode-report.md)。
+
+自动交付同时写入聊天附件引用；聊天中的服务器交付消息通过已有只读过程接口
+显示模型、HTML 报告和完整 ZIP 下载卡片。此前已完成的会话也可以刷新恢复下载卡片，
+无需发送消息或重新训练、评价 Test。详情见
+[Docker 下载展示修复报告](docs/chemagent-docker-download-fix-20261011.md)。
+
+默认网页自主回归也支持数值 MAT：唯一 X/y/波长映射可直接封存；有多个目标或矩阵时，
+`nir_prepare_search` 会要求明确变量映射，不会静默选择第一个目标。已完成且没有建模记录的
+数据检查／知识任务可以在同一会话继续启动回归，原工作流会保存为不可变历史引用。
+已有搜索或建模预算的会话仍不能重启。MAT 检查按已解析的目标和波长轴确认样本方向，
+不会因“波长数大于样本数”重新反转维度。
+Docker 修复、原运行错误与测试范围见
+[MAT 入口修复报告](docs/chemagent-docker-mat-workflow-fix-20261011.md)。
+
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](./backend/pyproject.toml)
 [![nir-core](https://img.shields.io/badge/nir--core-0.1.0-blue)](./nir_core/pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -33,7 +141,7 @@ HTML 可离线打开或通过浏览器打印为 PDF；ZIP 保留模型、安全�
 | 预处理 | 21 种目录化方法，Chemotools 优先、原生补充，支持训练边界拟合和预测严格回放 |
 | Chemotools MCP | 将固定版本公共工具集作为 MCP 组件提供给智能体，覆盖目录查询、受控执行、诊断和绘图 |
 | 校准迁移 | 对同类仪器配对样本执行 DS/PDS/SST，绑定方向、波长轴、仪器和验证证据 |
-| 模型选择 | PLS 基线以及受控的 Ridge、SVR、Extra Trees 等候选比较 |
+| 模型选择 | legacy 保留 PLS 基线与受控候选比较；可选自主首轮模式由 LLM 选择 PLS/Ridge/SVR/Extra Trees |
 | 波长选择 | 全光谱基线与 CARS 等方案仅使用校准/调优数据比较 |
 | 质量控制 | 三集分离、泄漏检查、质量门禁、审批注册和可追溯模型产物 |
 | 预测监控 | 产物哈希校验、适用域漂移、连续告警和防篡改预测审计 |
@@ -63,6 +171,10 @@ cp frontend/.env.example frontend/.env
 ```
 
 这些本地配置均已被 Git 忽略。重复部署时不要用模板覆盖已经配置好的文件。
+
+生产容器中的后端与前端代码来自构建镜像；修改工作区后，需要重新构建并重建对应服务，
+仅重启不会更新代码。更新前保留旧镜像并备份实际 `DEER_FLOW_HOME`，继续复用原配置和
+数据挂载。Docker 构建上下文排除 `.tmp/`，本地验收记录不打包进镜像。
 
 `config.example.yaml` 中的 `nir_library.enabled` 默认关闭。可选能力包括受所有权保护的
 数据集和模型库：启用后默认自动保存网页成功上传的 CSV/TXT/MAT、维护版本化解析

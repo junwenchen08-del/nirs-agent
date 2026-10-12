@@ -1,0 +1,1492 @@
+{
+  "schema_version": 3,
+  "date": "2026-10-10",
+  "phase": 5,
+  "provider": "DeepSeek",
+  "model_name": "deepseek-flash",
+  "actual_agent": "DeerFlow Lead Agent via existing Gateway and desktop browser",
+  "auth_mode": "isolated localhost development mode, owner=default; production authentication not tested in browser",
+  "attempts": [
+    {
+      "thread_id": "24ca3eb2-1674-4f59-b395-2358e6a2c02b",
+      "agent_run_id": "d1878b67-4d5f-49a1-a5f9-0925e8608367",
+      "runtime_flags": {
+        "search_protocol": "sealed_holdout",
+        "decision_strategy": "llm_autonomous",
+        "autonomous_rounds": true,
+        "autonomous_delivery": true
+      },
+      "user_budget": {
+        "max_experiments": 3,
+        "max_fits": 18,
+        "max_decisions": 6,
+        "max_wall_seconds": 240
+      },
+      "source": {
+        "kind": "generated_synthetic_csv",
+        "samples": 60,
+        "features": 8,
+        "target_column": 0,
+        "sha256": "91366e6c6c2fb6cf98c6e012a9f95805b49d11d83b718e874d39bbeb8f150580"
+      },
+      "real_provider_verified": true,
+      "lead_model_responses": 8,
+      "lead_actual_input_tokens": 242610,
+      "lead_actual_output_tokens": 16663,
+      "ledger": {
+        "finalization": {
+          "actual_input_tokens": 0,
+          "actual_output_tokens": 0,
+          "calls": 0,
+          "charged_tokens": 0,
+          "seconds": 0.0,
+          "unknown_usage_calls": 0
+        },
+        "inflight": null,
+        "search": {
+          "actual_input_tokens": 242610,
+          "actual_output_tokens": 16663,
+          "calls": 8,
+          "charged_tokens": 1045789,
+          "seconds": 100.78200000012293,
+          "unknown_usage_calls": 0
+        }
+      },
+      "excluded_from_lead_cost": [
+        "title",
+        "post-run suggestions"
+      ],
+      "business_result": "failed_before_sealed_prepare",
+      "orchestration_status": "success (the graph ended with a blocked evidence response; this does not mean modeling succeeded)",
+      "failure": "Mixed target-name/numeric-wavelength CSV header was parsed as an extra sample; strict numeric integrity rejected ingestion. No experiment or Test evaluation was created.",
+      "initial_decision_accepted": false,
+      "experiments": 0,
+      "fits": 0,
+      "final_test_evaluations": 0,
+      "stop_retain_freeze_test_report_complete": false,
+      "private_evidence": [
+        ".tmp/phase5-gateway-live.log",
+        ".tmp/phase5-web-home"
+      ],
+      "screenshot": ".tmp/phase5-web-ready.jpg"
+    },
+    {
+      "thread_id": "cbaf4f19-75eb-47ad-986c-62b11d35eb18",
+      "agent_run_id": "0378c02b-54ec-47a5-a1c5-6613aba31399",
+      "session_id": "search_b5578b611991405c9c78eb38a829687b",
+      "runtime_flags": {
+        "search_protocol": "sealed_holdout",
+        "decision_strategy": "llm_autonomous",
+        "autonomous_rounds": true,
+        "autonomous_delivery": true
+      },
+      "user_budget": {
+        "max_experiments": 3,
+        "max_fits": 18,
+        "max_decisions": 6
+      },
+      "delivery_policy": {
+        "final_llm_calls": 6,
+        "final_llm_tokens": 500000,
+        "final_wall_seconds": 300,
+        "max_decisions": 6,
+        "max_experiments": 3,
+        "max_fits": 18,
+        "max_invalid_decision_repairs": 2,
+        "max_llm_calls": 30,
+        "max_llm_tokens": 1200000,
+        "max_output_tokens": 4096,
+        "max_wall_seconds": 240,
+        "monetary_limit": null,
+        "profile": "development",
+        "schema_version": 1,
+        "server_ceilings": {
+          "final_llm_calls": 6,
+          "final_llm_tokens": 500000,
+          "final_wall_seconds": 300,
+          "max_decisions": 100,
+          "max_experiments": 40,
+          "max_fits": 1000,
+          "max_invalid_decision_repairs": 2,
+          "max_llm_calls": 150,
+          "max_llm_tokens": 3000000,
+          "max_output_tokens": 4096,
+          "max_wall_seconds": 7200
+        },
+        "token_enforcement": "estimated_admission_and_actual_usage",
+        "wall_enforcement": "cooperative_checkpoints"
+      },
+      "source": {
+        "kind": "generated_synthetic_csv",
+        "samples": 60,
+        "features": 8,
+        "target_column": 0,
+        "sha256": "91366e6c6c2fb6cf98c6e012a9f95805b49d11d83b718e874d39bbeb8f150580"
+      },
+      "ui_execution_mode": "flash",
+      "real_provider_verified": true,
+      "lead_model_responses": 11,
+      "lead_actual_input_tokens": 295825,
+      "lead_actual_output_tokens": 3113,
+      "ledger": {
+        "finalization": {
+          "actual_input_tokens": 24921,
+          "actual_output_tokens": 62,
+          "calls": 1,
+          "charged_tokens": 102506,
+          "seconds": 1.140999999945052,
+          "unknown_usage_calls": 0
+        },
+        "inflight": null,
+        "search": {
+          "actual_input_tokens": 270904,
+          "actual_output_tokens": 3051,
+          "calls": 10,
+          "charged_tokens": 1178701,
+          "seconds": 27.751000000047497,
+          "unknown_usage_calls": 0
+        }
+      },
+      "excluded_from_lead_cost": [
+        "title",
+        "post-run suggestions"
+      ],
+      "orchestration_status": "success",
+      "business_stage": "no_deliverable_model",
+      "stop_source": "budget",
+      "stop_reason": [
+        "llm_tokens"
+      ],
+      "terminal_failure_source": null,
+      "initial_decision_accepted": false,
+      "experiments": 0,
+      "fits": 0,
+      "context_count": 4,
+      "rejections": [
+        {
+          "call_id": "call_00_sUvcgLz0EMYfmI9tbgbR3454",
+          "code": "nir_decision_rejected",
+          "created_at": "2026-10-10T02:08:39.009318+00:00",
+          "errors": [
+            {
+              "field": "selected_alternative",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "hypothesis",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "evidence_ids",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "pipeline",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "model_family",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "context_id",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "expected_revision",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "context_sha256",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "phase",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "observations.0",
+              "message": "Input should be an object",
+              "type": "model_type"
+            },
+            {
+              "field": "observations.1",
+              "message": "Input should be an object",
+              "type": "model_type"
+            },
+            {
+              "field": "observations.2",
+              "message": "Input should be an object",
+              "type": "model_type"
+            },
+            {
+              "field": "observations.3",
+              "message": "Input should be an object",
+              "type": "model_type"
+            },
+            {
+              "field": "evidence_refs",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.0.configuration",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "alternatives.0.reason_unselected",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "alternatives.0.id",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.0.pipeline",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.0.optimization",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.0.comparison",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.1.configuration",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "alternatives.1.reason_unselected",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "alternatives.1.id",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.1.pipeline",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.1.optimization",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.1.comparison",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.2.configuration",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "alternatives.2.configuration_detail",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "alternatives.2.reason_selected",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "alternatives.2.id",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.2.pipeline",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.2.optimization",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.2.comparison",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "selected_alternative_id",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "expected_improvement",
+              "message": "Input should be an object",
+              "type": "model_type"
+            }
+          ]
+        },
+        {
+          "call_id": "call_00_D1JDD2zTTsarHHVJIOMb0243",
+          "code": "nir_decision_rejected",
+          "created_at": "2026-10-10T02:08:47.040233+00:00",
+          "errors": [
+            {
+              "field": "expected_revision",
+              "message": "Input should be greater than or equal to 1",
+              "type": "greater_than_equal"
+            },
+            {
+              "field": "context_sha256",
+              "message": "String should match pattern '^[0-9a-f]{64}$'",
+              "type": "string_pattern_mismatch"
+            },
+            {
+              "field": "observations.0.kind",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "observations.0.detail",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "observations.0.claim",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "observations.0.evidence_refs",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "observations.1.kind",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "observations.1.detail",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "observations.1.claim",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "observations.1.evidence_refs",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "observations.2.kind",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "observations.2.detail",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "observations.2.claim",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "observations.2.evidence_refs",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.0.pipeline.steps",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "alternatives.0.pipeline.preprocessing",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.1.pipeline.steps",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "alternatives.1.pipeline.preprocessing",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "alternatives.2.pipeline.steps",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "alternatives.2.pipeline.preprocessing",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "expected_improvement.direction",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "expected_improvement.note",
+              "message": "Extra inputs are not permitted",
+              "type": "extra_forbidden"
+            },
+            {
+              "field": "expected_improvement.metric",
+              "message": "Input should be 'val_rmse' or 'val_r2'",
+              "type": "literal_error"
+            },
+            {
+              "field": "expected_improvement.comparison",
+              "message": "Field required",
+              "type": "missing"
+            },
+            {
+              "field": "expected_improvement.minimum_change",
+              "message": "Field required",
+              "type": "missing"
+            }
+          ]
+        }
+      ],
+      "decisions": [],
+      "retained_experiment_id": null,
+      "freeze": {
+        "freeze_id": null,
+        "experiment_id": null,
+        "decision_id": null,
+        "configuration": null,
+        "parameters": null,
+        "artifact_sha256": null
+      },
+      "final_test_evaluations": 0,
+      "final_metrics": null,
+      "final_test_chart_cached": false,
+      "stop_retain_freeze_test_report_complete": false,
+      "published": false,
+      "lifecycle_at_delivery": null,
+      "private_evidence": [
+        ".tmp/phase5-gateway-real-b.log",
+        ".tmp/phase5-web-home"
+      ],
+      "screenshot": ".tmp/phase5-second-failed.jpg",
+      "failure": "Atomic DecisionContext JSON was externalized/truncated by the production ToolOutputBudgetMiddleware. read_file remained correctly denied. Missing provider schema/bindings caused illegal proposals and llm_tokens admission exhaustion before any fit; no successful experiment existed for RETAIN."
+    },
+    {
+      "thread_id": "7d1cd330-1dd8-49db-af29-2574dac46787",
+      "agent_run_id": "8d03c902-4fc5-430d-a6df-9fc6df835ed7",
+      "session_id": "search_8ca9788edd5443b1a880ee8b96783e41",
+      "runtime_flags": {
+        "search_protocol": "sealed_holdout",
+        "decision_strategy": "llm_autonomous",
+        "autonomous_rounds": true,
+        "autonomous_delivery": true
+      },
+      "user_budget": {
+        "max_experiments": 3,
+        "max_fits": 18,
+        "max_decisions": 6,
+        "max_wall_seconds": 240
+      },
+      "delivery_policy": {
+        "final_llm_calls": 6,
+        "final_llm_tokens": 500000,
+        "final_wall_seconds": 300,
+        "max_decisions": 6,
+        "max_experiments": 3,
+        "max_fits": 18,
+        "max_invalid_decision_repairs": 2,
+        "max_llm_calls": 30,
+        "max_llm_tokens": 1200000,
+        "max_output_tokens": 4096,
+        "max_wall_seconds": 240,
+        "monetary_limit": null,
+        "profile": "development",
+        "schema_version": 1,
+        "server_ceilings": {
+          "final_llm_calls": 6,
+          "final_llm_tokens": 500000,
+          "final_wall_seconds": 300,
+          "max_decisions": 100,
+          "max_experiments": 40,
+          "max_fits": 1000,
+          "max_invalid_decision_repairs": 2,
+          "max_llm_calls": 150,
+          "max_llm_tokens": 3000000,
+          "max_output_tokens": 4096,
+          "max_wall_seconds": 7200
+        },
+        "token_enforcement": "estimated_admission_and_actual_usage",
+        "wall_enforcement": "cooperative_checkpoints"
+      },
+      "source": {
+        "kind": "generated_synthetic_csv",
+        "samples": 60,
+        "features": 8,
+        "target_column": 0,
+        "sha256": "91366e6c6c2fb6cf98c6e012a9f95805b49d11d83b718e874d39bbeb8f150580"
+      },
+      "ui_execution_mode": "flash",
+      "real_provider_verified": true,
+      "lead_model_responses": 14,
+      "lead_actual_input_tokens": 485843,
+      "lead_actual_output_tokens": 6466,
+      "ledger": {
+        "finalization": {
+          "actual_input_tokens": 125971,
+          "actual_output_tokens": 2291,
+          "calls": 4,
+          "charged_tokens": 459796,
+          "seconds": 16.45299999997951,
+          "unknown_usage_calls": 0
+        },
+        "inflight": null,
+        "search": {
+          "actual_input_tokens": 211420,
+          "actual_output_tokens": 2989,
+          "calls": 7,
+          "charged_tokens": 855126,
+          "seconds": 22.57900000002701,
+          "unknown_usage_calls": 0
+        }
+      },
+      "excluded_from_lead_cost": [
+        "title",
+        "post-run suggestions"
+      ],
+      "lead_cost_scope": "All captured Lead model responses, including post-delivery narration; title and suggestion generation are separate.",
+      "ledger_cost_scope": "Intake/search and finalization admission only. Post-delivery narration uses ordinary runtime limits.",
+      "actual_tool_call_counts_from_terminal_checkpoint": {
+        "present_files": 1,
+        "nir_decision_context": 1
+      },
+      "orchestration_status": "success",
+      "business_stage": "finalized",
+      "stop_source": "budget",
+      "stop_reason": [
+        "fits"
+      ],
+      "terminal_failure_source": null,
+      "initial_decision_accepted": true,
+      "experiments": 1,
+      "fits": 16,
+      "context_count": 3,
+      "rejections": [],
+      "decisions": [
+        {
+          "decision_id": "decision_ffb0876a759f6bf934ecce31bbda47fd",
+          "context_id": "ctx_1a832c1cb73f9cb0a6002ddf01f01270",
+          "experiment_id": "exp_9aabaec250fdcbaed742d319626dd1bd",
+          "round_index": 1,
+          "action": "EXPLORE",
+          "decision_time": "2026-10-10T02:20:47.716546+00:00",
+          "base_experiment_id": null,
+          "retained_experiment_id": null,
+          "reserved_fits": 16,
+          "status": "succeeded",
+          "selected": {
+            "action": "EXPLORE",
+            "comparison": "Linear latent-variable baseline on lightly smoothed, mean-centered spectra; only latent count varies, so the run isolates the effect of noise suppression versus the tiny 8-band dimension.",
+            "id": "A_pls_sgsmooth_raw",
+            "optimization": {
+              "max_fits": 16,
+              "max_trials": 3,
+              "objective": "train_cv_rmse",
+              "search_space": {
+                "n_components": [
+                  1,
+                  2,
+                  3
+                ]
+              },
+              "strategy": "grid"
+            },
+            "pipeline": {
+              "fixed_params": {},
+              "model_method": "pls",
+              "preprocessing": [
+                {
+                  "method": "sg_smooth",
+                  "params": {
+                    "order": 2,
+                    "window": 7
+                  }
+                },
+                {
+                  "method": "mean_center",
+                  "params": {}
+                }
+              ],
+              "wavelength_selection": "none"
+            }
+          },
+          "rationale": "Round 1 should be a low-variance, interpretable probe rather than an expensive nonlinear search. PLS with a 3-value latent grid on lightly SG-smoothed, mean-centered spectra costs 16 fits, leaves 2 experiments, and directly tests the dominant profile tag (high-frequency noise) while keeping the pipeline simple enough that round 2 remains diagnosable. n_components is the single most consequential free parameter for 8 collinear bands, so it is the only grid dimension.",
+          "expected_outcome": "A trained PLS on SG-smoothed mean-centered Cal spectra returning Cal CV RMSE and Validation RMSE/R2; expected a modest, interpretable linear fit whose residuals indicate whether round 2 should pursue SNV+derivative scatter correction (alternative B) or a non-linear family (C/D).",
+          "alternative_count": 4,
+          "origin": {
+            "source": "lead_agent_model_call",
+            "model_name": "deepseek-flash",
+            "model_class": "PatchedChatDeepSeek",
+            "verification_kind": "provider_model",
+            "issued_at": "2026-10-10T02:20:47.669831+00:00",
+            "agent_run_id": "8d03c902-4fc5-430d-a6df-9fc6df835ed7"
+          },
+          "feedback": {
+            "feedback_id": "feedback_b82b6b989bece37050e57018025a441e",
+            "actual_configuration": {
+              "max_components": 20,
+              "method": "pls",
+              "parameter_plan": {
+                "fixed_params": {
+                  "max_iter": 500,
+                  "scale": false,
+                  "tol": 1e-06
+                },
+                "max_fits": 16,
+                "max_trials": 3,
+                "search_space": {
+                  "n_components": [
+                    1,
+                    2,
+                    3
+                  ]
+                },
+                "strategy": "grid"
+              },
+              "steps": [
+                {
+                  "method": "sg_smooth",
+                  "params": {
+                    "order": 2,
+                    "window": 7
+                  }
+                },
+                {
+                  "method": "mean_center",
+                  "params": {}
+                }
+              ]
+            },
+            "actual_parameters": {
+              "copy": true,
+              "max_iter": 500,
+              "n_components": 3,
+              "scale": false,
+              "tol": 1e-06
+            },
+            "fits": 16,
+            "elapsed_seconds": 0.18799999996554106,
+            "comparisons": {
+              "previous": {
+                "available": false,
+                "experiment_id": null
+              },
+              "retained": {
+                "available": false,
+                "experiment_id": null
+              }
+            },
+            "expected_improvement": {
+              "goal": {
+                "comparison": "previous",
+                "metric": "val_rmse",
+                "minimum_change": 0.0
+              },
+              "source": "persisted_validation_metrics",
+              "status": "not_evaluable",
+              "text_expectation": "A trained PLS on SG-smoothed mean-centered Cal spectra returning Cal CV RMSE and Validation RMSE/R2; expected a modest, interpretable linear fit whose residuals indicate whether round 2 should pursue SNV+derivative scatter correction (alternative B) or a non-linear family (C/D)."
+            },
+            "retained_experiment_id": null,
+            "cv_settings": {
+              "manifest_id": "cv_da4bf745e02975cc631f4e80a44b358e995a413794cea60e681e14471f076f4e",
+              "n_splits": 5,
+              "random_state": 42,
+              "scope": "calibration_cv",
+              "shuffle": true,
+              "source": "frozen_manifest_and_safe_search_splitter_implementation",
+              "splitter": "KFold"
+            },
+            "metrics": {
+              "cal": {
+                "scope": "calibration",
+                "R2": 0.6247660488490786,
+                "RMSE": 1.3008444900610607,
+                "MAE": 1.100621320116546,
+                "RPD": 1.6556409707987418,
+                "bias": 1.4494578377050655e-16,
+                "n": 36
+              },
+              "cal_cv": {
+                "scope": "calibration_cv",
+                "R2": 0.43420071437198904,
+                "RMSE": 1.5973699713207412,
+                "MAE": 1.317840078380178,
+                "RPD": 1.348298436211453,
+                "bias": 0.025953147925181823,
+                "n": 36
+              },
+              "val": {
+                "scope": "validation",
+                "R2": 0.4869803958028849,
+                "RMSE": 1.5579844613114384,
+                "MAE": 1.2487365051393413,
+                "RPD": 1.458234268060059,
+                "bias": -0.0937506903130696,
+                "n": 12
+              }
+            },
+            "trials": [
+              {
+                "RMSECV": 1.8643711962499048,
+                "fold_rmse": [
+                  2.491827493025553,
+                  1.9672937788324187,
+                  2.131366869158317,
+                  1.0915091367050815,
+                  1.6398587035281529
+                ],
+                "parameters": {
+                  "max_iter": 500,
+                  "n_components": 1,
+                  "scale": false,
+                  "tol": 1e-06
+                },
+                "scope": "calibration_cv"
+              },
+              {
+                "RMSECV": 1.6412146633797071,
+                "fold_rmse": [
+                  1.8042051458279238,
+                  2.2922018275679403,
+                  1.8272881969899408,
+                  0.7286568929230386,
+                  1.553721253589691
+                ],
+                "parameters": {
+                  "max_iter": 500,
+                  "n_components": 2,
+                  "scale": false,
+                  "tol": 1e-06
+                },
+                "scope": "calibration_cv"
+              },
+              {
+                "RMSECV": 1.558530535413972,
+                "fold_rmse": [
+                  1.8980137256660072,
+                  1.9092195490743642,
+                  1.4147886099044118,
+                  1.1201533852542758,
+                  1.450477407170801
+                ],
+                "parameters": {
+                  "max_iter": 500,
+                  "n_components": 3,
+                  "scale": false,
+                  "tol": 1e-06
+                },
+                "scope": "calibration_cv"
+              }
+            ]
+          },
+          "proposal": {
+            "action": "EXPLORE",
+            "alternatives": [
+              {
+                "action": "EXPLORE",
+                "comparison": "Linear latent-variable baseline on lightly smoothed, mean-centered spectra; only latent count varies, so the run isolates the effect of noise suppression versus the tiny 8-band dimension.",
+                "id": "A_pls_sgsmooth_raw",
+                "optimization": {
+                  "max_fits": 16,
+                  "max_trials": 3,
+                  "objective": "train_cv_rmse",
+                  "search_space": {
+                    "n_components": [
+                      1,
+                      2,
+                      3
+                    ]
+                  },
+                  "strategy": "grid"
+                },
+                "pipeline": {
+                  "fixed_params": {},
+                  "model_method": "pls",
+                  "preprocessing": [
+                    {
+                      "method": "sg_smooth",
+                      "params": {
+                        "order": 2,
+                        "window": 7
+                      }
+                    },
+                    {
+                      "method": "mean_center",
+                      "params": {}
+                    }
+                  ],
+                  "wavelength_selection": "none"
+                }
+              },
+              {
+                "action": "EXPLORE",
+                "comparison": "Scatter/baseline-focused linear alternative: SNV plus first derivative should remove additive/multiplicative scatter and slow drift before a shrunk linear model, testing the scatter_variation tag more directly than smoothing alone.",
+                "id": "B_ridge_snv_deriv",
+                "optimization": {
+                  "max_fits": 16,
+                  "max_trials": 3,
+                  "objective": "train_cv_rmse",
+                  "search_space": {
+                    "alpha": [
+                      0.1,
+                      1.0,
+                      10.0
+                    ]
+                  },
+                  "strategy": "grid"
+                },
+                "pipeline": {
+                  "fixed_params": {},
+                  "model_method": "ridge",
+                  "preprocessing": [
+                    {
+                      "method": "snv",
+                      "params": {}
+                    },
+                    {
+                      "method": "derivative1",
+                      "params": {
+                        "order": 2,
+                        "window": 7
+                      }
+                    },
+                    {
+                      "method": "mean_center",
+                      "params": {}
+                    }
+                  ],
+                  "wavelength_selection": "none"
+                }
+              },
+              {
+                "action": "EXPLORE",
+                "comparison": "Non-linear kernel alternative with minimal preprocessing, exploring whether the protein response is non-linear; risky with n=36 and only 8 bands, hence a deliberately small 2-candidate grid.",
+                "id": "C_svr_raw_rbf",
+                "optimization": {
+                  "max_fits": 11,
+                  "max_trials": 2,
+                  "objective": "train_cv_rmse",
+                  "search_space": {
+                    "C": [
+                      1.0,
+                      10.0
+                    ],
+                    "gamma": [
+                      "scale"
+                    ]
+                  },
+                  "strategy": "grid"
+                },
+                "pipeline": {
+                  "fixed_params": {
+                    "epsilon": 0.1,
+                    "kernel": "rbf"
+                  },
+                  "model_method": "svr",
+                  "preprocessing": [
+                    {
+                      "method": "autoscale",
+                      "params": {}
+                    }
+                  ],
+                  "wavelength_selection": "none"
+                }
+              },
+              {
+                "action": "EXPLORE",
+                "comparison": "Tree-ensemble alternative to test non-linearity and band interactions without internal scaling; fixed depth bounds variance on a 36-sample Cal set.",
+                "id": "D_et_sgsmooth",
+                "optimization": {
+                  "max_fits": 6,
+                  "max_trials": 1,
+                  "objective": "train_cv_rmse",
+                  "search_space": {},
+                  "strategy": "fixed"
+                },
+                "pipeline": {
+                  "fixed_params": {
+                    "max_depth": 10,
+                    "n_estimators": 200
+                  },
+                  "model_method": "et",
+                  "preprocessing": [
+                    {
+                      "method": "sg_smooth",
+                      "params": {
+                        "order": 2,
+                        "window": 7
+                      }
+                    }
+                  ],
+                  "wavelength_selection": "none"
+                }
+              }
+            ],
+            "base_experiment_id": null,
+            "context_id": "ctx_1a832c1cb73f9cb0a6002ddf01f01270",
+            "context_sha256": "52e8403443e2889bb697c1b2f546892e05475bf58a22d5d64f517ee0dbf3de8a",
+            "difference": "First experiment of the session: no persisted experiments exist. This direction establishes a PLS baseline on the 8-wavelength Cal set with light SG smoothing plus mean centering, chosen to probe whether the flagged high-frequency noise (score 0.739) is a real limitation before spending fits on fancier families/preprocessing.",
+            "evidence_refs": [
+              "task:user",
+              "profile:calibration",
+              "protocol:sealed_holdout",
+              "capabilities:runtime",
+              "budget:session",
+              "method:model_pls:40b7b293c678d774",
+              "method:sg_smooth:a7560c9ec34f2dd9",
+              "history:session"
+            ],
+            "expected_fits": 16,
+            "expected_improvement": {
+              "comparison": "previous",
+              "metric": "val_rmse",
+              "minimum_change": 0.0
+            },
+            "expected_outcome": "A trained PLS on SG-smoothed mean-centered Cal spectra returning Cal CV RMSE and Validation RMSE/R2; expected a modest, interpretable linear fit whose residuals indicate whether round 2 should pursue SNV+derivative scatter correction (alternative B) or a non-linear family (C/D).",
+            "expected_revision": 2,
+            "hypotheses": [
+              "Because the Cal profile flags high-frequency noise, light SG smoothing (window 7, order 2) should reduce Cal CV RMSE relative to raw spectra without erasing the broad protein absorption bands.",
+              "With only 8 collinear bands, a low latent count (1-3) should be sufficient; the CV objective should pick a small n_components rather than overfitting the 36 Cal samples.",
+              "If a smoothed PLS baseline already explains most Cal variance, more complex families (SVR/ET) will not be needed; otherwise residuals will guide round 2 toward scatter correction or a non-linear family."
+            ],
+            "not_selected_reasons": {
+              "B_ridge_snv_deriv": "Not selected first: derivative-based scatter correction is a larger transformation on only 8 bands and would confound the baseline read; SNV+derivative is deferred to round 2 if the smoothed linear fit leaves systematic structure.",
+              "C_svr_raw_rbf": "Not selected first: RBF SVR is the most hyperparameter-sensitive option and n=36 with 8 bands gives little margin to exploit non-linearity; deferred unless Cal/Val residuals show clear curvature.",
+              "D_et_sgsmooth": "Not selected first: fixed trees are less interpretable and typically need more samples to beat a regularized linear model on this dimension; deferred as a non-linearity check."
+            },
+            "observations": [
+              {
+                "claim": "Calibration set has 36 samples and only 8 wavelengths (900-1600 nm), target protein in % spans -4.93 to 3.29 with std 2.12; the very wide target spread relative to a small sample count makes over-parameterized models risky.",
+                "evidence_refs": [
+                  "profile:calibration"
+                ]
+              },
+              {
+                "claim": "The Cal profile is tagged high_frequency_noise, low_signal_to_noise and scatter_variation, with high_frequency_noise_score=0.7393, scatter_variation_score=0.2483, baseline_drift_score=0.1490; these are descriptive proxies only and do not establish causes or mandate preprocessing.",
+                "evidence_refs": [
+                  "profile:calibration"
+                ]
+              },
+              {
+                "claim": "Evaluation is a sealed holdout: selection is on the 12-sample Validation set and Test is accessible only after an explicit freeze; CV is frozen 5-fold KFold on the 36 Cal samples with objective train_cv_rmse.",
+                "evidence_refs": [
+                  "protocol:sealed_holdout",
+                  "capabilities:runtime"
+                ]
+              },
+              {
+                "claim": "PLS is an applicable linear latent-variable comparator for quantitative, collinear NIR data; the project adapter uses scale=False and selects components within training, with n_components writable in 1-20.",
+                "evidence_refs": [
+                  "method:model_pls:40b7b293c678d774"
+                ]
+              },
+              {
+                "claim": "Savitzky-Golay smoothing is applicable where high-frequency noise is present and wide absorption bands should be preserved; the project adapter supports odd windows 5-15 and polynomial order 1-4, with 7/11/15 as candidates and no official optimum.",
+                "evidence_refs": [
+                  "method:sg_smooth:a7560c9ec34f2dd9"
+                ]
+              },
+              {
+                "claim": "Budget is 3 experiments / 18 total fits; a fixed pipeline still costs 6 fits (5 CV + 1 full-Cal refit), so each of the three experiments can afford a small grid of at most 3 candidates.",
+                "evidence_refs": [
+                  "budget:session"
+                ]
+              }
+            ],
+            "phase": "initial",
+            "rationale": "Round 1 should be a low-variance, interpretable probe rather than an expensive nonlinear search. PLS with a 3-value latent grid on lightly SG-smoothed, mean-centered spectra costs 16 fits, leaves 2 experiments, and directly tests the dominant profile tag (high-frequency noise) while keeping the pipeline simple enough that round 2 remains diagnosable. n_components is the single most consequential free parameter for 8 collinear bands, so it is the only grid dimension.",
+            "replication_reason": null,
+            "retained_experiment_id": null,
+            "selected_alternative_id": "A_pls_sgsmooth_raw",
+            "stop_evidence": null,
+            "uncertainties": [
+              "Whether the high high_frequency_noise_score genuinely reflects noise in the spectra or is an artifact of the small 8-band axis; smoothing may add little if the noise is mostly low-level.",
+              "How representative the 12-sample Validation set is; a single small holdout can be noisy, so I will also weigh the 5-fold Cal CV alongside Val metrics.",
+              "Whether the wide target range (-4.93 to 3.29) is genuine chemistry or contains heteroscedastic/outlier samples that will dominate RMSE."
+            ]
+          },
+          "accepted_spec": {
+            "max_components": 20,
+            "method": "pls",
+            "parameter_plan": {
+              "fixed_params": {
+                "max_iter": 500,
+                "scale": false,
+                "tol": 1e-06
+              },
+              "max_fits": 16,
+              "max_trials": 3,
+              "search_space": {
+                "n_components": [
+                  1,
+                  2,
+                  3
+                ]
+              },
+              "strategy": "grid"
+            },
+            "steps": [
+              {
+                "method": "sg_smooth",
+                "params": {
+                  "order": 2,
+                  "window": 7
+                }
+              },
+              {
+                "method": "mean_center",
+                "params": {}
+              }
+            ]
+          },
+          "context_sha256": "52e8403443e2889bb697c1b2f546892e05475bf58a22d5d64f517ee0dbf3de8a",
+          "proposal_sha256": "3c939f511aac6c09ebc24256a9ca47d528b5d45b7574d4dc836f5f5abb8d71b1"
+        },
+        {
+          "decision_id": "decision_eb119d8eb436b8c93572b1c39dfa7c66",
+          "context_id": "ctx_22f8a6354c0a7ca5eebc55ddb71c63d8",
+          "experiment_id": null,
+          "round_index": 2,
+          "action": "RETAIN",
+          "decision_time": "2026-10-10T02:21:12.685767+00:00",
+          "base_experiment_id": null,
+          "retained_experiment_id": null,
+          "reserved_fits": 0,
+          "status": "stopped",
+          "selected": {
+            "action": "RETAIN",
+            "comparison": "保留本会话唯一成功实验 exp_9aabaec250fdcbaed742d319626dd1bd（PLS + SG(7,2) + mean_center，Val RMSE=1.5580、R2=0.4870）。它是预算耗尽前唯一具备完整 Cal CV/Val 证据且无过拟合迹象的方案；作为最终冻结对象可在预算约束下交付一个可复现、可解释的线性基准。",
+            "id": "retain_exp9aab",
+            "optimization": null,
+            "pipeline": null
+          },
+          "rationale": "预算以 fits 耗尽终止（stop_source=budget），new_fits_allowed=false，本会话仅存在一个成功实验，因此 RETAIN 该实验是唯一合法的最终选择动作。该实验是低方差、可解释的线性基准，Cal CV 与 Val 表现接近，未见明显过拟合；虽未达 food_protein 门禁（小样本本身也限制可达精度），但在预算约束下它是证据最完整、最可复现的候选。测试集保持封存，未进行任何额外拟合。",
+          "expected_outcome": "不执行任何训练（expected_fits=0，pipeline/optimization 为 null）。该决策仅指定冻结对象 exp_9aabaec250fdcbaed742d319626dd1bd，供后续 freeze→finalize 一次性读取封存 Test 并导出模型、报告与证据包。",
+          "alternative_count": 2,
+          "origin": {
+            "source": "lead_agent_model_call",
+            "model_name": "deepseek-flash",
+            "model_class": "PatchedChatDeepSeek",
+            "verification_kind": "provider_model",
+            "issued_at": "2026-10-10T02:21:12.659937+00:00",
+            "agent_run_id": "8d03c902-4fc5-430d-a6df-9fc6df835ed7"
+          },
+          "feedback": {
+            "retained_experiment_id": "exp_9aabaec250fdcbaed742d319626dd1bd",
+            "stop_source": "budget",
+            "metrics": {},
+            "trials": []
+          },
+          "proposal": {
+            "action": "RETAIN",
+            "alternatives": [
+              {
+                "action": "RETAIN",
+                "comparison": "保留本会话唯一成功实验 exp_9aabaec250fdcbaed742d319626dd1bd（PLS + SG(7,2) + mean_center，Val RMSE=1.5580、R2=0.4870）。它是预算耗尽前唯一具备完整 Cal CV/Val 证据且无过拟合迹象的方案；作为最终冻结对象可在预算约束下交付一个可复现、可解释的线性基准。",
+                "id": "retain_exp9aab",
+                "optimization": null,
+                "pipeline": null
+              },
+              {
+                "action": "RETAIN",
+                "comparison": "不保留任何实验、放弃本次交付。理论上避免冻结表现不佳的模型，但会浪费全部已消耗预算且不产生任何可审计交付物，违反用户'预算耗尽时保留实验并冻结交付'的明确要求。",
+                "id": "no_retain_abort",
+                "optimization": null,
+                "pipeline": null
+              }
+            ],
+            "base_experiment_id": "exp_9aabaec250fdcbaed742d319626dd1bd",
+            "context_id": "ctx_22f8a6354c0a7ca5eebc55ddb71c63d8",
+            "context_sha256": "d9c5d84aeffeda12a398829ba34eb56d795d5561d25a332a2ff7073278511d1c",
+            "difference": null,
+            "evidence_refs": [
+              "budget:session",
+              "history:session",
+              "protocol:sealed_holdout",
+              "profile:calibration",
+              "experiment:exp_9aabaec250fdcbaed742d319626dd1bd"
+            ],
+            "expected_fits": 0,
+            "expected_improvement": null,
+            "expected_outcome": "不执行任何训练（expected_fits=0，pipeline/optimization 为 null）。该决策仅指定冻结对象 exp_9aabaec250fdcbaed742d319626dd1bd，供后续 freeze→finalize 一次性读取封存 Test 并导出模型、报告与证据包。",
+            "expected_revision": 3,
+            "hypotheses": [
+              "在预算耗尽约束下，保留唯一成功实验是唯一合法终止动作；无足够 fits 支持进一步 TUNE/CHANGE_PREPROCESS/SWITCH_MODEL。",
+              "SG(7,2)+mean_center+PLS 已部分抑制高频噪声，但散射/漂移方向的改进（SNV、衍生、基线校正）与小样本非线性模型仍是未验证方向。"
+            ],
+            "not_selected_reasons": {
+              "no_retain_abort": "放弃保留将导致无任何交付物且违背用户'预算耗尽时保留实验'的明确指令；虽该模型未过门禁，但仍应作为可复现基准冻结交付。"
+            },
+            "observations": [
+              {
+                "claim": "资源预算已耗尽，phase 转为 final_selection：fits 已用 16、仅余 2，new_fits_allowed=false，因此无法再训练任何网格方案，只能在既有成功实验中选择保留。",
+                "evidence_refs": [
+                  "budget:session",
+                  "history:session"
+                ]
+              },
+              {
+                "claim": "本会话仅有一个成功实验 exp_9aabaec250fdcbaed742d319626dd1bd（PLS + sg_smooth(window=7,order=2) + mean_center，含 n_components 网格 [1,2,3]，实际选 3），是唯一具备 Cal CV 与 Val 度量证据的候选。",
+                "evidence_refs": [
+                  "experiment:exp_9aabaec250fdcbaed742d319626dd1bd",
+                  "history:session"
+                ]
+              },
+              {
+                "claim": "该实验 Cal CV RMSE=1.5974、R2=0.4342、RPD=1.348；独立 Cal 拟合 RMSE=1.3008、R2=0.6248；验证集 RMSE=1.5580、R2=0.4870、RPD=1.458、bias=-0.0938，train_cv 与 val 之间无过拟合迹象。",
+                "evidence_refs": [
+                  "experiment:exp_9aabaec250fdcbaed742d319626dd1bd"
+                ]
+              },
+              {
+                "claim": "数据集规模极小（Cal=36、8 波长）且 profile 标签显示高频噪声占优(0.739)、低信噪比与轻度散射/漂移，属于难以获得高 RPD 的小样本场景；质量门禁对该实验判为 poor 且本次未通过。",
+                "evidence_refs": [
+                  "profile:calibration",
+                  "experiment:exp_9aabaec250fdcbaed742d319626dd1bd"
+                ]
+              }
+            ],
+            "phase": "final_selection",
+            "rationale": "预算以 fits 耗尽终止（stop_source=budget），new_fits_allowed=false，本会话仅存在一个成功实验，因此 RETAIN 该实验是唯一合法的最终选择动作。该实验是低方差、可解释的线性基准，Cal CV 与 Val 表现接近，未见明显过拟合；虽未达 food_protein 门禁（小样本本身也限制可达精度），但在预算约束下它是证据最完整、最可复现的候选。测试集保持封存，未进行任何额外拟合。",
+            "replication_reason": null,
+            "retained_experiment_id": "exp_9aabaec250fdcbaed742d319626dd1bd",
+            "selected_alternative_id": "retain_exp9aab",
+            "stop_evidence": {
+              "retained_advantages": [
+                "本会话唯一具备完整 Cal CV 与独立 Val 证据的成功实验，决策链与参数完全可追溯。",
+                "Cal CV RMSE=1.5974 与 Val RMSE=1.5580 接近，未见明显过拟合；Cal 拟合 R2=0.6248。",
+                "流水线简单可解释（SG(7,2) 平滑 + mean_center + PLS），适配小样本与高共线光谱，易于复现与部署。"
+              ],
+              "retained_limitations": [
+                "Val R2=0.4870、RPD=1.458，未达 food_protein 门禁（R2>=0.85、RPD>=3.5），此次质量判定为 poor/未通过。",
+                "仅试探了单一预处理族（SG+mean_center）与 PLS，未评估散射校正或非线性模型。",
+                "Cal=36 样本、8 波长，统计功效低，指标不确定性大。",
+                "封存 Test 未读取，Val 估计能否泛化到最终 Test 尚不确定。"
+              ],
+              "search_coverage": "本轮自主搜索仅覆盖 1 个已执行实验（EXPLORE）：PLS + sg_smooth(window=7,order=2) + mean_center，附 n_components 网格 [1,2,3]（实际选 3），Cal CV RMSE=1.5974、Val RMSE=1.5580。预算以 fits 耗尽终止，未覆盖散射校正、衍生、基线校正或其他模型家族。",
+              "unverified_directions": [
+                {
+                  "direction": "散射校正（SNV/MSC/robust_snv）+ 一阶/二阶衍生后再建模",
+                  "reason": "profile 标签含 scatter_variation(0.248) 与 low_signal_to_snr；预算耗尽前无 fits 支持该方向，未验证。"
+                },
+                {
+                  "direction": "非线性模型家族（SVR/Extra Trees）",
+                  "reason": "仅测试了线性 PLS；小样本下非线性是否改善未验证，且预算不足。"
+                },
+                {
+                  "direction": "基线校正（asls/airpls）与更强的高频平滑参数搜索",
+                  "reason": "baseline_drift_score=0.149、high_frequency_noise_score=0.739，但未执行任何基线校正或平滑参数网格。"
+                }
+              ]
+            },
+            "uncertainties": [
+              "仅有一个成功实验，无法在 Cal/Val 上比较其他预处理（如 SNV/MSC 散射校正）或非线性模型家族（SVR/ET）是否更优。",
+              "Val 集仅 12 样本，指标估计方差较大，R2/RPD 的置信区间宽。",
+              "小样本 n=36 且 8 波长高度共线，PLS 潜变量数与门禁阈值是否匹配尚未验证。",
+              "封存 Test 尚未读取，其表现可能与本轮 Val 估计存在偏差（不得据此重开搜索）。"
+            ]
+          },
+          "accepted_spec": null,
+          "context_sha256": "d9c5d84aeffeda12a398829ba34eb56d795d5561d25a332a2ff7073278511d1c",
+          "proposal_sha256": "a56c7327d222cc6cd670e4e6532437af47be418bc4b5dd5c1d260f1b53cf089f"
+        }
+      ],
+      "retained_experiment_id": "exp_9aabaec250fdcbaed742d319626dd1bd",
+      "freeze": {
+        "experiment_id": "exp_9aabaec250fdcbaed742d319626dd1bd",
+        "decision_id": "decision_ffb0876a759f6bf934ecce31bbda47fd",
+        "stop_decision_id": "decision_eb119d8eb436b8c93572b1c39dfa7c66",
+        "configuration": {
+          "max_components": 20,
+          "method": "pls",
+          "parameter_plan": {
+            "fixed_params": {
+              "max_iter": 500,
+              "scale": false,
+              "tol": 1e-06
+            },
+            "max_fits": 16,
+            "max_trials": 3,
+            "search_space": {
+              "n_components": [
+                1,
+                2,
+                3
+              ]
+            },
+            "strategy": "grid"
+          },
+          "steps": [
+            {
+              "method": "sg_smooth",
+              "params": {
+                "order": 2,
+                "window": 7
+              }
+            },
+            {
+              "method": "mean_center",
+              "params": {}
+            }
+          ]
+        },
+        "parameters": {
+          "copy": true,
+          "max_iter": 500,
+          "n_components": 3,
+          "scale": false,
+          "tol": 1e-06
+        },
+        "model_hash": "1dcd238bb2248c3ee38ba0132b421f9d100f13a1558b20db29f3c136b22c6968",
+        "fit_scope": "calibration",
+        "frozen_at": "2026-10-10T02:21:27.205552+00:00",
+        "stop_source": "budget",
+        "cv_manifest_id": "cv_da4bf745e02975cc631f4e80a44b358e995a413794cea60e681e14471f076f4e"
+      },
+      "final_test_evaluations": 1,
+      "test_count_evidence_scope": "Deduplicated actual finalize tool call across persisted root checkpoints plus the finalized unique-lease cache. This web run had no live file-IO spy; automated Fake tests verify the physical Test read count.",
+      "final_metrics": {
+        "R2_val": 0.4869803958028849,
+        "RMSECV": 1.558530535413972,
+        "RMSEP": 1.3340061032285562,
+        "RPD": 1.6193576254861188,
+        "diagnostics": {
+          "outlier_count": 1,
+          "outlier_ratio": 0.0833,
+          "residual_std": 1.555161,
+          "residual_trend": "upward",
+          "residual_variance": "high",
+          "scope": "validation"
+        },
+        "domain": "food_protein",
+        "evaluation_scope": "final_test",
+        "method": "pls",
+        "n_components": 3,
+        "n_samples": 36,
+        "quality": {
+          "action": "investigate_data",
+          "details": {
+            "R2_status": "poor",
+            "RPD_status": "poor",
+            "bias_issue": false,
+            "bias_limit": 0.7701887827996107,
+            "overfitting_risk": false
+          },
+          "evaluation_scope": "final_test",
+          "grade": "poor",
+          "passed": false,
+          "recommendation": "模型质量不达标，建议检查数据质量、异常值与划分方式。",
+          "thresholds_used": {
+            "domain": "food_protein",
+            "max_retries": 3,
+            "min_r2": 0.85,
+            "min_rpd": 3.5,
+            "n_samples": null,
+            "small_sample_relaxation": false
+          }
+        },
+        "test": {
+          "MAE": 1.0644804878417968,
+          "R2": 0.5839907191640501,
+          "RMSE": 1.3340061032285562,
+          "RPD": 1.6193576254861188,
+          "bias": 0.03119815350750173,
+          "n": 12,
+          "reference_mean": -1.1487899885611357,
+          "reference_std": 2.160232955708185,
+          "scope": "final_test",
+          "slope": 0.5709898499891873
+        },
+        "test_status": "consumed",
+        "train": {
+          "MAE": 1.100621320116546,
+          "R2": 0.6247660488490786,
+          "RMSE": 1.3008444900610607,
+          "RPD": 1.6556409707987418,
+          "bias": 1.4494578377050655e-16,
+          "n": 36,
+          "reference_mean": -0.13187079079825567,
+          "reference_std": 2.153731434382889,
+          "scope": "calibration",
+          "slope": 0.6247660488490786
+        },
+        "train_cv": {
+          "MAE": 1.317840078380178,
+          "R2": 0.43420071437198904,
+          "RMSE": 1.5973699713207412,
+          "RPD": 1.348298436211453,
+          "bias": 0.025953147925181823,
+          "n": 36,
+          "reference_mean": -0.13187079079825567,
+          "reference_std": 2.153731434382889,
+          "scope": "calibration_cv",
+          "slope": 0.5349614156438938
+        },
+        "val": {
+          "MAE": 1.2487365051393413,
+          "R2": 0.4869803958028849,
+          "RMSE": 1.5579844613114384,
+          "RPD": 1.458234268060059,
+          "bias": -0.0937506903130696,
+          "n": 12,
+          "reference_mean": -0.4952474390353048,
+          "reference_std": 2.271906330589431,
+          "scope": "validation",
+          "slope": 0.3852733692531146
+        }
+      },
+      "final_test_chart_cached": true,
+      "stop_retain_freeze_test_report_complete": true,
+      "published": true,
+      "lifecycle_at_delivery": {
+        "model_frozen": true,
+        "quality_passed": false,
+        "registered": false,
+        "search_stopped": true,
+        "test_completed": true,
+        "user_approved": false
+      },
+      "private_evidence": [
+        ".tmp/phase5-gateway-real-c.log",
+        ".tmp/phase5-web-home"
+      ],
+      "screenshot": ".tmp/phase5-third-delivery.jpg",
+      "lead_actual_total_tokens": 492309,
+      "captured_receipts_token_usage_known": true,
+      "actual_tool_call_counts_across_persisted_checkpoints": {
+        "nir_workflow": 2,
+        "nir_prepare_search": 1,
+        "nir_decision_context": 4,
+        "nir_submit_decision": 2,
+        "nir_execute_decision": 1,
+        "nir_freeze_search": 1,
+        "nir_finalize_search": 1,
+        "present_files": 1
+      },
+      "checkpoints_examined": 163,
+      "submitted_proposals": 2,
+      "accepted_decisions": 2,
+      "business_result": "completed_budget_RETAIN_freeze_unique_Test_report_and_model_delivery",
+      "active_llm_stop_verified_in_this_attempt": false,
+      "browser_download_verification": {
+        "downloaded": {
+          "model.joblib": {
+            "sha256": "cf8ea8db588348b41df976ffc317cc5b20e506990167b3f766a64e63d6d4c490",
+            "size_bytes": 9146,
+            "identical_to_published": true
+          },
+          "report.html": {
+            "sha256": "8af390b6ac9905e6051311d8d5575ad1b8cc80d0d889c8ca7292af7a79ba0870",
+            "size_bytes": 13043,
+            "identical_to_published": true
+          },
+          "delivery.zip": {
+            "sha256": "191666a0705ddd9849fb47959576bca9e6848ee4bbc17e1b571ac4219aa577c2",
+            "size_bytes": 38726,
+            "identical_to_published": true
+          }
+        },
+        "predictions": [
+          3.3323523255403655,
+          -1.017805054334593,
+          0.2439584736536198
+        ],
+        "prediction_rows": 3,
+        "extra_fits": 0,
+        "test_file_reads": 0,
+        "freeze_matches_llm_retention": true,
+        "report_contains_accepted_decision_ids": true,
+        "zip_crc_valid": true,
+        "zip_members": [
+          "report.md",
+          "model/model.joblib",
+          "model/model.joblib.manifest.json",
+          "evidence/metrics.json",
+          "evidence/decisions.json",
+          "report.html",
+          "delivery_manifest.json",
+          "README.txt"
+        ]
+      },
+      "browser_refresh_verification": {
+        "full_process_page_reload_passed": true,
+        "persisted_state_identical_before_and_after": true,
+        "session_sha256": "dc4f92086de206d462386c993b631274222c0aaa12d27f2c3fe17f798ff94085",
+        "decisions_sha256": "0661a0c36363df102bc8753776aa88cc49cb78d48b4157c29f2c345fdfa9719b",
+        "final_sha256": "d295c5a604661e3aa911c6dafece5a8ba10b7179a41a11f6ab4634501d701ad3",
+        "fits": 16,
+        "experiments": 1,
+        "accepted_decisions": 2,
+        "llm_receipts": 14,
+        "runs": [
+          [
+            "8d03c902-4fc5-430d-a6df-9fc6df835ed7",
+            "success"
+          ]
+        ],
+        "test_count_not_inferred_from_refresh_snapshot": true,
+        "export_generation": "delivery_b58a796a0d0943299cf4cf8515de7e19"
+      },
+      "browser_verified_features": [
+        "existing upload and natural-language chat with explicit autonomous custom budget",
+        "two accepted LLM decisions with immutable initial rationale and later RETAIN",
+        "actual three-candidate Cal-CV trials table and plot",
+        "Val RMSE/R2 selector and informative best-versus-LLM-retained markers",
+        "final Test scatter and residual plots from twelve cached legal points",
+        "unapproved and unregistered quality-failed model delivery",
+        "actual model/report/ZIP downloads and trusted model replay on new synthetic rows",
+        "full process route recovery after explicit browser reload without a new run"
+      ],
+      "browser_download_and_refresh_verified": true,
+      "screenshots": [
+        ".tmp/phase5-third-ready.jpg",
+        ".tmp/phase5-third-timeline.jpg",
+        ".tmp/phase5-third-trials.jpg",
+        ".tmp/phase5-third-charts.jpg",
+        ".tmp/phase5-third-after-refresh.jpg",
+        ".tmp/phase5-third-delivery.jpg"
+      ]
+    }
+  ],
+  "acceptance_passed": true,
+  "acceptance_scope": "Desktop web end-to-end budget RETAIN branch on generated small synthetic data; real active STOP and multiple numerical experiments were not exercised in this phase-5 run."
+}

@@ -61,6 +61,10 @@ class MemoryMiddleware(AgentMiddleware[MemoryMiddlewareState]):
         Returns:
             None (no state changes needed from this middleware).
         """
+        from deerflow.community.nir.web_entry import web_request
+
+        if web_request(getattr(runtime, "context", None)) or (state.get("nir_workflow") or {}).get("decision_strategy") == "llm_autonomous":
+            return None
         config = self._memory_config or get_memory_config()
         if not config.enabled:
             return None

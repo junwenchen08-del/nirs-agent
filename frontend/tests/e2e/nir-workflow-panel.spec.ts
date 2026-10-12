@@ -181,53 +181,83 @@ test("does not show the NIR drawer in an ordinary chat", async ({ page }) => {
   ).toBeHidden();
 });
 
-test("explains hashed selections in Chinese without showing raw codes by default", async ({ page, context }) => {
-  await context.addCookies([{ name: "locale", value: "zh-CN", url: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000" }]);
+test("explains hashed selections in Chinese without showing raw codes by default", async ({
+  page,
+  context,
+}) => {
+  await context.addCookies([
+    {
+      name: "locale",
+      value: "zh-CN",
+      url: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000",
+    },
+  ]);
   const candidateId = "82cb8f406e10b404";
   const routes = mockLangGraphAPI(page, {
-    threads: [{
-      thread_id: THREAD_ID,
-      title: "Corn calibration",
-      values: { nir_workflow: {
-        project_id: "corn",
-        task_type: "calibration",
-        stage: "review",
-        revision: 1,
-        attempt: 1,
-        max_attempts: 1,
-        attempts: [{
-          attempt: 1,
-          method: "svr",
-          pipeline_steps: ["snv"],
-          protocol: "automated_analysis_three_way_holdout",
-          validation_scope: "independent_holdout_not_external",
-          decision_facts: {
-            preprocessing_selection: {
-              selected_candidate_id: candidateId,
-              reason_code: "simplest_within_one_percent_rmsecv",
-              candidates: [{ candidate_id: candidateId, steps: ["snv"], cv_rmse: 0.2, selected: true }],
-            },
-            wavelength_selection_decision: {
-              selected_method: "none",
-              adoption: { reason_code: "full_spectrum_for_non_pls_method" },
-            },
-            model_selection_decision: {
-              selected_method: "svr",
-              reason_code: "explicit_or_no_pls_baseline",
-              reason: "The caller explicitly requested method='svr'.",
-            },
+    threads: [
+      {
+        thread_id: THREAD_ID,
+        title: "Corn calibration",
+        values: {
+          nir_workflow: {
+            project_id: "corn",
+            task_type: "calibration",
+            stage: "review",
+            revision: 1,
+            attempt: 1,
+            max_attempts: 1,
+            attempts: [
+              {
+                attempt: 1,
+                method: "svr",
+                pipeline_steps: ["snv"],
+                protocol: "automated_analysis_three_way_holdout",
+                validation_scope: "independent_holdout_not_external",
+                decision_facts: {
+                  preprocessing_selection: {
+                    selected_candidate_id: candidateId,
+                    reason_code: "simplest_within_one_percent_rmsecv",
+                    candidates: [
+                      {
+                        candidate_id: candidateId,
+                        steps: ["snv"],
+                        cv_rmse: 0.2,
+                        selected: true,
+                      },
+                    ],
+                  },
+                  wavelength_selection_decision: {
+                    selected_method: "none",
+                    adoption: {
+                      reason_code: "full_spectrum_for_non_pls_method",
+                    },
+                  },
+                  model_selection_decision: {
+                    selected_method: "svr",
+                    reason_code: "explicit_or_no_pls_baseline",
+                    reason: "The caller explicitly requested method='svr'.",
+                  },
+                },
+              },
+            ],
           },
-        }],
-      } },
-    }],
+        },
+      },
+    ],
   });
   await routes.ready;
   await page.goto(`/workspace/chats/${THREAD_ID}`);
   await page.getByRole("button", { name: "打开近红外建模过程" }).click();
   await page.getByRole("tab", { name: "选择依据" }).click();
   await expect(page.getByText("本轮选定的方案")).toBeVisible();
-  await expect(page.getByText("与误差最低方案的差距不超过 1%，因此采用步骤更少的方案。")).toBeVisible();
-  await expect(page.getByText("当前使用的不是 PLS 模型，自动 CARS 比较只适用于 PLS，因此保留全部波长。")).toBeVisible();
+  await expect(
+    page.getByText("与误差最低方案的差距不超过 1%，因此采用步骤更少的方案。"),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "当前使用的不是 PLS 模型，自动 CARS 比较只适用于 PLS，因此保留全部波长。",
+    ),
+  ).toBeVisible();
   await expect(page.getByText(`原始选择: ${candidateId}`)).toBeHidden();
   await page.getByText("查看原始技术记录").first().click();
   await expect(page.getByText(`原始选择: ${candidateId}`)).toBeVisible();

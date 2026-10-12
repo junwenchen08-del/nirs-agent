@@ -38,6 +38,7 @@ const METHOD_LABELS: Record<string, [string, string]> = {
   svr: ["支持向量回归（SVR）", "SVR"],
   ridge: ["岭回归", "Ridge regression"],
   et: ["极端随机树", "Extra Trees"],
+  extra_trees: ["极端随机树（Extra Trees）", "Extra Trees"],
   pcr: ["主成分回归（PCR）", "PCR"],
   pls_da: ["偏最小二乘判别（PLS-DA）", "PLS-DA"],
   cars: ["CARS 波长筛选", "CARS wavelength selection"],
@@ -192,6 +193,10 @@ export function protocolLabel(
   zh: boolean,
 ): string | null {
   if (!protocol) return null;
+  if (["sealed_holdout", "sealed_single_target_holdout"].includes(protocol))
+    return zh
+      ? "Cal/Val 搜索，冻结后唯一 Test 评价"
+      : "Cal/Val search, single Test after freeze";
   if (protocol === "automated_analysis_three_way_holdout")
     return zh
       ? "训练、调参、测试分开进行"
