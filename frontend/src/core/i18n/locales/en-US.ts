@@ -203,72 +203,17 @@ export const enUS: Translations = {
     channels: "Channels",
     recentChats: "Recent chats",
     demoChats: "Demo chats",
-    agents: "Agents",
-    agentsDisabledTooltip: "Feature not enabled",
-    evaluations: "NIR evaluations",
     nirDatasets: "Spectral datasets",
     nirModels: "Model library",
-  },
-
-  // Agents
-  agents: {
-    title: "Agents",
-    description:
-      "Create and manage custom agents with specialized prompts and capabilities.",
-    newAgent: "New Agent",
-    emptyTitle: "No custom agents yet",
-    emptyDescription:
-      "Create your first custom agent with a specialized system prompt.",
-    featureDisabledTitle: "Agents feature is not enabled",
-    featureDisabledDescription:
-      "This feature is not enabled on this server. Please contact your administrator.",
-    chat: "Chat",
-    delete: "Delete",
-    deleteConfirm:
-      "Are you sure you want to delete this agent? This action cannot be undone.",
-    deleteSuccess: "Agent deleted",
-    newChat: "New chat",
-    createPageTitle: "Design your Agent",
-    createPageSubtitle:
-      "Describe the agent you want — I'll help you create it through conversation.",
-    nameStepTitle: "Name your new Agent",
-    nameStepHint:
-      "Letters, digits, and hyphens only — stored lowercase (e.g. code-reviewer)",
-    nameStepPlaceholder: "e.g. code-reviewer",
-    nameStepContinue: "Continue",
-    nameStepInvalidError:
-      "Invalid name — use only letters, digits, and hyphens",
-    nameStepAlreadyExistsError: "An agent with this name already exists",
-    nameStepNetworkError:
-      "Network request failed — check your network or backend connection",
-    nameStepCheckError: "Could not verify name availability — please try again",
-    nameStepCheckErrorWithDetail: "Name check failed: {detail}",
-    nameStepApiDisabledError:
-      "Custom agent management is not enabled on this server. Please contact your administrator.",
-    nameStepBootstrapMessage:
-      "The new custom agent name is {name}. Help me design its purpose, behavior, and SOUL.md before saving it.",
-    save: "Save agent",
-    saving: "Saving agent...",
-    saveRequested:
-      "Save requested. DeerFlow is generating and saving an initial version now.",
-    saveHint:
-      "You can save this agent at any time from the top-right menu, even if this is only a first draft.",
-    saveCommandMessage:
-      "Please save this custom agent now based on everything we have discussed so far. Treat this as my explicit confirmation to save. If some details are still missing, make reasonable assumptions, generate a concise first SOUL.md in English, and call setup_agent immediately without asking me for more confirmation.",
-    agentCreatedPendingRefresh:
-      "The agent was created, but DeerFlow could not load it yet. Please refresh this page in a moment.",
-    more: "More actions",
-    agentCreated: "Agent created!",
-    startChatting: "Start chatting",
-    backToGallery: "Back to Gallery",
+    methods: "Method library",
   },
 
   // Breadcrumb
   breadcrumb: {
     workspace: "Workspace",
     chats: "Chats",
-    evaluations: "NIR evaluations",
     nirLibrary: "NIR asset library",
+    methods: "Method library",
   },
 
   // Workspace
@@ -364,49 +309,6 @@ export const enUS: Translations = {
       superseded: "Superseded",
       attached: "Attached",
     },
-  },
-
-  nirEvaluations: {
-    eyebrow: "NIR agent quality lab",
-    title: "Evaluation control room",
-    description:
-      "Map completed NIR conversations to regression scenarios, score their full tool trajectory, and keep safety, quality, latency, and cost visible in one place.",
-    scenarios: "scenarios",
-    deterministic: "Deterministic scoring",
-    mappingTitle: "Regression batch",
-    mappingDescription:
-      "Each scenario can appear once per run. Thread ownership and checkpoint evidence are verified by the Gateway.",
-    threadId: "Thread",
-    threadPlaceholder: "Paste a completed thread ID",
-    scenario: "Expected scenario",
-    selectScenario: "Select a scenario",
-    remove: "Remove case",
-    addCase: "Add case",
-    run: "Run evaluation",
-    running: "Evaluating…",
-    loadError: "Failed to load the NIR scenario catalog",
-    runError: "Failed to run the NIR evaluation",
-    duplicateScenario: "A scenario can only appear once in the same batch.",
-    recentTrend: "Recent quality trend",
-    trendDescription:
-      "The latest 12 browser-local runs. Amber bars indicate policy violations.",
-    noHistory: "Run the first regression batch to establish a baseline.",
-    older: "Older",
-    latest: "Latest",
-    passRate: "Pass rate",
-    averageScore: "Average score",
-    policyViolations: "Policy violations",
-    tokens: "Total tokens",
-    duration: "Duration",
-    results: "Scenario evidence",
-    passed: "passed",
-    failed: "failed",
-    trace: "Trace",
-    noTraceId: "No trace ID recorded",
-    exportEvidence: "Export evidence",
-    clearResult: "Clear",
-    noResults:
-      "Configure at least one completed NIR thread and run an evaluation to inspect its evidence.",
   },
 
   // Conversation

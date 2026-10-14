@@ -25,6 +25,25 @@ const config = {
     defaultLocale: "en",
   },
   devIndicators: false,
+  async redirects() {
+    return [
+      {
+        source: "/workspace/agents/:agent_name/chats/:thread_id",
+        destination: "/workspace/chats/:thread_id",
+        permanent: false,
+      },
+      {
+        source: "/workspace/agents/:path*",
+        destination: "/workspace/chats",
+        permanent: false,
+      },
+      {
+        source: "/workspace/evaluations",
+        destination: "/workspace/chats",
+        permanent: false,
+      },
+    ];
+  },
   async rewrites() {
     const rewrites = [];
     const gatewayURL = getInternalServiceURL(
@@ -44,14 +63,6 @@ const config = {
     }
 
     if (!process.env.NEXT_PUBLIC_BACKEND_BASE_URL) {
-      rewrites.push({
-        source: "/api/agents",
-        destination: `${gatewayURL}/api/agents`,
-      });
-      rewrites.push({
-        source: "/api/agents/:path*",
-        destination: `${gatewayURL}/api/agents/:path*`,
-      });
       rewrites.push({
         source: "/api/skills",
         destination: `${gatewayURL}/api/skills`,

@@ -64,14 +64,14 @@ The frontend is a stateful chat application. Users create **threads** (conversat
 
 ### Source Layout (`src/`)
 
-- **`app/`** — Next.js App Router. Routes include `/` (landing), `/workspace/chats/[thread_id]` (chat), `/workspace/agents/[agent_name]` and `/workspace/agents/new` (custom agents), `/blog/…`, the `(auth)/{login,setup,auth/callback}` flow, `/[lang]/docs/…`, and `/api/…` route handlers (e.g. `/api/memory`).
+- **`app/`** — Next.js App Router. Routes include `/` (landing), `/workspace/chats/[thread_id]` (chat), `/workspace/methods` (method library), `/blog/…`, the `(auth)/{login,setup,auth/callback}` flow, `/[lang]/docs/…`, and `/api/…` route handlers (e.g. `/api/memory`).
 - **`components/`** — React components:
   - `ui/` — Shadcn UI primitives (auto-generated, ESLint-ignored)
   - `ai-elements/` — Vercel AI SDK elements (auto-generated, ESLint-ignored)
   - `workspace/` — Chat page components (messages, artifacts, settings)
   - `landing/` — Landing page sections
   - `docs/` — Docs / MDX rendering components
-- **`core/`** — Business logic, the heart of the app. Domains include `threads/` (creation, streaming, state), `api/` (LangGraph client singleton), `agents/` (custom agents), `auth/` (authentication), `artifacts/`, `channels/` (IM connections), `i18n/` (en-US, zh-CN), `nir/` (bounded NIR workflow projection), `nir-library/` (owner-scoped Dataset/Model API contracts), `settings/`, `memory/`, `skills/`, `messages/`, `mcp/`, `models/`, `suggestions/`, `tasks/`, `todos/`, `tools/`, `config/`, `notification/`, `blog/`, plus rendering helpers (`rehype/`, `streamdown/`) and `utils/`.
+- **`core/`** — Business logic, the heart of the app. Domains include `threads/` (creation, streaming, state), `api/` (LangGraph client singleton), `auth/` (authentication), `artifacts/`, `channels/` (IM connections), `i18n/` (en-US, zh-CN), `nir/` (bounded NIR workflow projection), `nir-library/` (owner-scoped Dataset/Model API contracts), `settings/`, `memory/`, `skills/`, `messages/`, `mcp/`, `models/`, `suggestions/`, `tasks/`, `todos/`, `tools/`, `config/`, `notification/`, `blog/`, plus rendering helpers (`rehype/`, `streamdown/`) and `utils/`.
 - **`hooks/`** — Shared React hooks
 - **`lib/`** — Utilities (`cn()` from clsx + tailwind-merge)
 - **`content/`** — MDX content (blog posts, docs) rendered by the app
@@ -102,13 +102,24 @@ most recent visible group, and a leading orphan opens an
 `assistant:processing` group so replayed or early tool events remain visible
 without surfacing console errors to users.
 
-The NIR quality dashboard at `/workspace/evaluations` is intentionally outside
-the generic settings dialog. Users map owned completed thread IDs to versioned
-NIR scenarios, then Gateway performs the authoritative trace capture and
-deterministic scoring. The `core/nir-evaluations/` domain owns API contracts and
-the browser keeps only mappings plus the latest 12 aggregate summaries in
-user-scoped localStorage keys; complete evidence remains in the current response and can be
-exported as JSON.
+The method library at `/workspace/methods` reads the existing
+`/api/method-knowledge/cards` endpoint through `core/knowledge/method-api.ts`.
+`core/knowledge/method-library.ts` groups scientific purposes separately from
+execution interfaces: MCP smoothing/scatter references are preprocessing,
+regression references are modeling, and transfer/axis alignment remain Other.
+Native legacy IDs get a bounded category fallback. Browsing is read-only; the
+settings manager keeps editing the same persistent catalog. Method API failures
+are retryable, catalog reads accept cancellation, and details expose recorded
+applicability, limitations, parameter definitions and sources.
+Custom-agent management/gallery/chat pages and the NIR evaluation dashboard,
+their exclusive components, API clients, history helpers and translations are
+removed. Next.js redirects preserve old links. `pathOfThread` always returns the
+standard chat route; `contextOfThread` restores agent bindings only from owned
+thread metadata and strips stale browser agent preferences. Submission waits for
+metadata, and metadata errors offer an explicit retry. Gateway agent execution
+and scientific evaluation interfaces remain shared backend functionality.
+Tests: `method-library.test.ts`, `threads/utils.test.ts`,
+`method-library.spec.ts` and `sidebar.spec.ts`.
 
 The default chat page projects live `thread.values.nir_workflow` through
 `core/nir/selectors.ts` and `core/nir/process-selectors.ts` into bounded view models and conditionally renders the
@@ -140,7 +151,7 @@ duplicate IDs; viewing and modeling adoption have separate badges. Workflow
 stage/tool names are localized while original codes remain expandable.
 Tests: `process-display.test.ts` and evidence-backed desktop browser QA in
 `nir-process-explorer.spec.ts` (including compact desktop windows).
-The custom-agent chat route does not mount this panel yet.
+Historical custom-agent threads now open in the standard chat page.
 
 The phase-5 desktop autonomous entry was opt-in; the unified supplement above
 replaces that control for new default-chat regression tasks.
@@ -148,7 +159,7 @@ replaces that control for new default-chat regression tasks.
 `context.nir_autonomous` selection through the existing thread hooks; it does
 not append policy flags to the user prompt. Gateway owns the four autonomous
 flags and validates the four exposed custom budget fields. The mode control
-locks after workflow start. Standard and custom-agent chats retain their prior
+locks after workflow start. Existing workflows retain their prior
 entry behavior. `core/nir/autonomous.ts` is the bounded adapter for the
 owner-checked `/nir-process/autonomous` API, not a new workflow state store.
 `autonomous-process.tsx` is reused by the chat Sheet and existing process route.
@@ -191,8 +202,35 @@ The optional cross-session library lives at `/workspace/nir/datasets` and
 routes only when `nir_library.enabled` is true. `core/nir-library/api.ts` owns
 the centralized authenticated/CSRF-protected requests; page components must not
 fetch or cache raw spectra, model bytes, host paths, or another user's records.
-The Dataset page covers explicit save, Profile versions/confirmation, durable
-use history, attach, archive, and controlled deletion. The Model page covers
+The dataset library's Upload dataset dialog chooses a local CSV/TXT/MAT file,
+defaults the editable name to its filename and sends multipart FormData through
+the central authenticated fetch wrapper (no manual Content-Type boundary).
+It needs no source thread/path. Failure retains the selection for retry; success
+refreshes all datasets so filters cannot hide the new asset. Existing card attach
+and `/datasets` composer selection reuse the uploaded asset without starting a
+run. Browser anchor: `dataset-library.spec.ts`; API unit test: `api.test.ts`.
+The visual parsing panel (`dataset-parsing-settings.tsx`) lazily loads bounded
+structure choices when opened, debounces/aborts draft preview requests, validates
+dataset/source identity and permits save only for the current successful preview.
+MAT group/block/target/axis and CSV/TXT header/orientation/column controls are
+localized. JSON and version history remain under Advanced settings. Save failures
+retain the draft; success refreshes library previews. Composer attachment pins
+the latest confirmed `library_parse` or workspace profile. Anchors:
+`dataset-parsing.spec.ts` and the centralized API unit tests.
+The Dataset page shows count/size statistics and quantitative, classification,
+and unconfirmed filters. It reads owner-scoped `/datasets/{id}/preview` aggregates
+with three concurrent requests, validates dataset/hash identity and offers retry.
+Its card/dialog presents sample counts, mean spectral ranges and target
+distributions, never full individual spectra. Confirmed task profiles take
+precedence; ambiguous layouts stay unconfirmed. Rename, explicit save, Profile
+versions/confirmation and durable use history remain. The archive button is
+removed; existing archived records retain controlled deletion.
+Dataset attach opens `/workspace/chats/new?dataset=...`. The composer gets the
+owned record, reuses thread preparation and verified attachment, validates its
+upload path and displays a mounted file before manual submission. It never
+starts a synthetic run. Failure offers retry, requests abort on navigation,
+and a successful attachment removes its URL marker.
+The Model page covers
 versions, bounded metrics and lineage, attach, archive, and controlled deletion.
 Both deletion dialogs require the exact server identifier and explain that
 thread-attached copies and backups remain. Storage copy distinguishes persistent
@@ -288,7 +326,7 @@ papers before continuing.
 ### Interaction Ownership
 
 - `src/app/workspace/chats/[thread_id]/page.tsx` owns composer busy-state wiring.
-- `src/app/workspace/chats/[thread_id]/page.tsx` and `src/app/workspace/agents/[agent_name]/chats/[thread_id]/page.tsx` own active-goal display state for their composer overlays.
+- `src/app/workspace/chats/[thread_id]/page.tsx` owns active-goal display and metadata restoration for the unified chat route.
 - `src/core/threads/hooks.ts` owns pre-submit upload state and thread submission.
   Upload responses carry optional `dataset_library` saved/reused/failed outcomes.
   `core/uploads/dataset-library.ts` counts distinct saved assets; the composer
@@ -332,3 +370,20 @@ When adding features:
 3. Write unit tests under `tests/unit/` (`pnpm test`) and E2E tests under `tests/e2e/` (`pnpm test:e2e`)
 4. Run `pnpm check` before committing
 5. Update this `AGENTS.md` when architecture, commands, or conventions change
+
+
+Dataset cards and View details open `/workspace/nir/datasets/[dataset_id]`.
+`nir-library/dataset-workspace.tsx` owns the Chinese/English read-only sample
+values table, single/bulk role edits, cross-page selection, name search, native
+SVG spectra and input/drag interval selection. Source labels are separate from
+training/validation/test/excluded roles. Missing roles remain unassigned.
+Summary, row pages and curve responses must match Dataset/source SHA/Profile;
+requests abort on obsolete page/selection/reload. Save pins the source SHA and
+confirmed Profile ID; failures retain the draft. Dirty navigation prompts before
+discard, browser unload warns, and attachment requires a saved clean revision.
+Chart rendering is bounded (24 curves, 512 points); export preserves every
+original value in the chosen interval. No original target/spectral values can
+be edited. Data overview retains legacy parsing and usage history. Composer
+attachment pins the latest saved Profile in its idempotency key and uses actual
+attachment size, while run creation still requires manual submission. Existing
+Dataset/Model commands stay available. Browser anchor: dataset-workspace.spec.ts.

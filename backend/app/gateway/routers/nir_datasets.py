@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.gateway.authz import get_auth_context, require_permission
 from app.gateway.deps import get_config, get_thread_store
@@ -47,6 +47,36 @@ class AttachDatasetRequest(BaseModel):
     desired_filename: str | None = Field(default=None, min_length=1, max_length=256)
 
 
+class SaveWorkspaceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    profile_id: str | None = Field(default=None, max_length=64)
+    usages: list[int] = Field(min_length=1, max_length=5000)
+    range: list[float] = Field(min_length=2, max_length=2)
+
+
+class ParsingSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    layout_id: str | None = Field(default=None, max_length=64)
+    target_id: str | None = Field(default=None, max_length=64)
+    axis_id: str | None = Field(default=None, max_length=64)
+    spectral_start: int | None = Field(default=None, ge=0, le=20000)
+    spectral_end: int | None = Field(default=None, ge=0, le=20000)
+    target_columns: list[int] = Field(default_factory=list, max_length=16)
+    sample_column: int | None = Field(default=None, ge=0, le=20000)
+    coordinate_column: int | None = Field(default=None, ge=0, le=20000)
+    transpose: bool = False
+    has_header: bool | None = None
+
+
+class ParsingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    profile_id: str | None = Field(default=None, max_length=64)
+    task_type: str = Field(pattern=r"^(calibration|classification|inspection)$")
+    selection: ParsingSelection
+
+
 def get_dataset_service(config: AppConfig = Depends(get_config)) -> DatasetService:
     if not config.nir_library.enabled:
         raise HTTPException(status_code=404, detail={"code": "feature_disabled", "message": "NIR dataset library is disabled"})
@@ -78,9 +108,15 @@ def _raise_dataset_error(exc: DatasetError) -> None:
         "profile_not_found": 404,
         "profile_unavailable": 409,
         "profile_unconfirmed": 409,
+        "workspace_conflict": 409,
+        "workspace_unavailable": 422,
+        "invalid_workspace": 400,
         "invalid_profile": 400,
+        "invalid_parsing": 400,
+        "parsing_unavailable": 422,
         "invalid_idempotency_key": 400,
         "invalid_filename": 400,
+        "empty_file": 400,
         "thread_not_owned": 404,
         "idempotency_conflict": 409,
         "filename_conflict": 409,
@@ -120,6 +156,18 @@ async def list_datasets(request: Request, service: DatasetService = Depends(get_
     except DatasetError as exc:
         _raise_dataset_error(exc)
     return {"datasets": rows, "count": len(rows)}
+
+
+@router.post("/upload")
+@require_permission("threads", "write")
+async def upload_dataset(request: Request, file: UploadFile = File(...), name: str | None = Form(None), service: DatasetService = Depends(get_dataset_service)) -> dict:
+    """Import a local file into its authenticated owner's immutable library."""
+    try:
+        return await service.save_from_local_upload(_owner(request), file.filename or "", file.file, file.size or 0, name)
+    except DatasetError as exc:
+        _raise_dataset_error(exc)
+    finally:
+        await file.close()
 
 
 @storage_router.get("/usage")
@@ -172,6 +220,42 @@ async def create_profile(
         _raise_dataset_error(exc)
 
 
+@router.get("/{dataset_id}/preview")
+@require_permission("threads", "read")
+async def preview_dataset(dataset_id: str, request: Request, service: DatasetService = Depends(get_dataset_service)) -> dict:
+    try:
+        return await service.preview_dataset(_owner(request), dataset_id)
+    except DatasetError as exc:
+        _raise_dataset_error(exc)
+
+
+@router.get("/{dataset_id}/parsing")
+@require_permission("threads", "read")
+async def get_parsing(dataset_id: str, request: Request, service: DatasetService = Depends(get_dataset_service)) -> dict:
+    try:
+        return await service.get_parsing(_owner(request), dataset_id)
+    except DatasetError as exc:
+        _raise_dataset_error(exc)
+
+
+@router.post("/{dataset_id}/parsing/preview")
+@require_permission("threads", "read")
+async def preview_parsing(dataset_id: str, body: ParsingRequest, request: Request, service: DatasetService = Depends(get_dataset_service)) -> dict:
+    try:
+        return await service.preview_parsing(_owner(request), dataset_id, source_sha256=body.source_sha256, profile_id=body.profile_id, selection=body.selection.model_dump(exclude_unset=True), task_type=body.task_type)
+    except DatasetError as exc:
+        _raise_dataset_error(exc)
+
+
+@router.put("/{dataset_id}/parsing")
+@require_permission("threads", "write")
+async def save_parsing(dataset_id: str, body: ParsingRequest, request: Request, service: DatasetService = Depends(get_dataset_service)) -> dict:
+    try:
+        return await service.save_parsing(_owner(request), dataset_id, source_sha256=body.source_sha256, profile_id=body.profile_id, selection=body.selection.model_dump(exclude_unset=True), task_type=body.task_type)
+    except DatasetError as exc:
+        _raise_dataset_error(exc)
+
+
 @router.get("/{dataset_id}/profiles")
 @require_permission("threads", "read")
 async def list_profiles(dataset_id: str, request: Request, service: DatasetService = Depends(get_dataset_service)) -> dict:
@@ -180,6 +264,48 @@ async def list_profiles(dataset_id: str, request: Request, service: DatasetServi
     except DatasetError as exc:
         _raise_dataset_error(exc)
     return {"profiles": rows, "count": len(rows)}
+
+
+@router.get("/{dataset_id}/workspace")
+@require_permission("threads", "read")
+async def get_workspace(dataset_id: str, request: Request, service: DatasetService = Depends(get_dataset_service)) -> dict:
+    try:
+        return await service.get_workspace(_owner(request), dataset_id)
+    except DatasetError as exc:
+        _raise_dataset_error(exc)
+
+
+@router.get("/{dataset_id}/workspace/rows")
+@require_permission("threads", "read")
+async def get_workspace_rows(
+    dataset_id: str, request: Request, offset: int = Query(default=0, ge=0, le=5000), limit: int = Query(default=50, ge=1, le=100), query: str = Query(default="", max_length=200), service: DatasetService = Depends(get_dataset_service)
+) -> dict:
+    try:
+        return await service.get_workspace(_owner(request), dataset_id, view="rows", offset=offset, limit=limit, query=query)
+    except DatasetError as exc:
+        _raise_dataset_error(exc)
+
+
+@router.get("/{dataset_id}/workspace/spectra")
+@require_permission("threads", "read")
+async def get_workspace_spectra(dataset_id: str, request: Request, indices: str | None = Query(default=None, max_length=200), service: DatasetService = Depends(get_dataset_service)) -> dict:
+    try:
+        chosen = None if indices is None else ([int(value) for value in indices.split(",")] if indices else [])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="样本编号无效。") from exc
+    try:
+        return await service.get_workspace(_owner(request), dataset_id, view="spectra", indices=chosen)
+    except DatasetError as exc:
+        _raise_dataset_error(exc)
+
+
+@router.put("/{dataset_id}/workspace")
+@require_permission("threads", "write")
+async def save_workspace(dataset_id: str, body: SaveWorkspaceRequest, request: Request, service: DatasetService = Depends(get_dataset_service)) -> dict:
+    try:
+        return await service.save_workspace(_owner(request), dataset_id, source_sha256=body.source_sha256, profile_id=body.profile_id, usages=body.usages, band_range=body.range)
+    except DatasetError as exc:
+        _raise_dataset_error(exc)
 
 
 @router.post("/{dataset_id}/profiles/{profile_id}/confirm")
@@ -217,6 +343,7 @@ async def attach_dataset(
             profile_id=body.profile_id,
             idempotency_key=body.idempotency_key,
             desired_filename=body.desired_filename,
+            apply_workspace=True,
             sync_callback=sync,
         )
     except DatasetError as exc:

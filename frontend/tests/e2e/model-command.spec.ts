@@ -95,6 +95,9 @@ test("/models mounts an exact version without sending, then combines with /datas
       },
     }),
   );
+  await page.route("**/api/nir/datasets/ds_new", (route) =>
+    route.fulfill({ json: { profiles: [] } }),
+  );
   const dialog = await openPicker(page);
   await expect(
     dialog

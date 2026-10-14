@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { previewOf } from "../fixtures/dataset-library";
+
 import { mockLangGraphAPI } from "./utils/mock-api";
 
 const READY_DATASET = {
@@ -58,6 +60,19 @@ const USAGE = {
 };
 
 async function mockLibrary(page: Page) {
+  await page.route("**/api/langgraph/threads", (route) =>
+    route.fulfill({
+      json: { ...route.request().postDataJSON(), status: "idle", values: {} },
+    }),
+  );
+  await page.route("**/api/nir/datasets/*/preview", (route) => {
+    const dataset = new URL(route.request().url()).pathname.includes(
+      "ds_archived",
+    )
+      ? ARCHIVED_DATASET
+      : READY_DATASET;
+    return route.fulfill({ json: previewOf(dataset) });
+  });
   await page.route("**/api/nir/storage/usage", (route) =>
     route.fulfill({
       status: 200,
@@ -191,16 +206,16 @@ test("dataset library shows owner-scoped assets, history, attach, and controlled
     page.getByRole("heading", { name: "Spectral dataset library" }),
   ).toBeVisible();
   await expect(
-    page.getByText("Tablet calibration", { exact: true }),
+    page.getByRole("button", { name: "Tablet calibration", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Persistent datasets", { exact: true }),
+    page
+      .getByTestId("dataset-summary")
+      .getByText("Available datasets", { exact: true }),
   ).toBeVisible();
 
-  await page
-    .getByRole("button", { name: "Details and history" })
-    .first()
-    .click();
+  await page.getByRole("button", { name: "Data overview" }).first().click();
+  await page.getByText("Usage history", { exact: true }).click();
   await expect(
     page.getByText("deleted-source-thread", { exact: true }),
   ).toBeVisible();
@@ -208,11 +223,6 @@ test("dataset library shows owner-scoped assets, history, attach, and controlled
     page.getByText("deleted-source-thread", { exact: true }),
   ).not.toHaveAttribute("href");
   await page.getByRole("button", { name: "Close" }).click();
-
-  await page.getByRole("button", { name: "Attach to chat" }).first().click();
-  await page.getByLabel("Target chat ID").fill("target-thread");
-  await page.getByRole("button", { name: "Attach to chat" }).last().click();
-  await expect(page.getByText("Operation completed").last()).toBeVisible();
 
   const archivedCard = page
     .getByTestId("nir-dataset-card")
@@ -222,6 +232,10 @@ test("dataset library shows owner-scoped assets, history, attach, and controlled
   await confirm.fill("ds_archived");
   await page.getByRole("button", { name: "Delete bytes" }).last().click();
   await expect(page.getByText("Operation completed").last()).toBeVisible();
+  await page.getByRole("button", { name: "Attach to chat" }).first().click();
+  await expect(page.getByTestId("mounted-dataset")).toContainText(
+    "Tablet calibration",
+  );
 });
 
 test("model library labels validation conservatively and attaches an approved version", async ({

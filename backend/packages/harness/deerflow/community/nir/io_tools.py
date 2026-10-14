@@ -363,6 +363,11 @@ def nir_load_data_tool(
         real_in = _resolve(runtime, file_path, read_only=True)
         budget.check_file(real_in, stage="load_file_preflight")
 
+        from .datasets.workspace import load_workspace_export
+
+        if load_workspace_export(real_in) is not None:
+            return _err("此文件包含已保存的固定样本用途。定量分析请在 sealed_holdout 流程中直接使用 nir_prepare_search；分类请直接使用 nir_train_classifier。这样会保留已选波段与用途。")
+
         parsed_y_cols = _parse_y_cols(y_cols)
         if y_col is not None and parsed_y_cols is not None:
             return _err("y_col and y_cols are mutually exclusive")
@@ -482,6 +487,24 @@ def nir_inspect_tool(
         real_in = _resolve(runtime, file_path, read_only=True)
         budget.check_file(real_in, stage="inspect_file_preflight")
         raw = inspect_file(real_in)
+        from .datasets.workspace import load_workspace_export
+
+        workspace = load_workspace_export(real_in)
+        if workspace is not None:
+            return _ok(
+                {
+                    "format": "csv",
+                    "source": "dataset_workspace",
+                    "n_samples": len(workspace["X"]),
+                    "n_wavelengths": workspace["X"].shape[1],
+                    "target_names": workspace["target_names"],
+                    "usage_counts": {role: int(np.count_nonzero(workspace["usage"] == role)) for role in ("unassigned", "train", "validation", "test", "excluded")},
+                    "hint": (
+                        "User-saved fixed sample roles and selected wavelengths. Regression: start sealed_holdout and call nir_prepare_search directly. "
+                        "Classification: nir_train_classifier directly. Never randomize these roles; missing roles require user correction. These labels do not establish external validation."
+                    ),
+                }
+            )
         # inspect_file returns a JSON string. Parse it so we can layer extra
         # advisory fields and re-serialize.
         import json as _json

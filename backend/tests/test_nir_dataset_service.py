@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 import os
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -59,6 +61,92 @@ async def _owned_thread(service: DatasetService, owner: str, thread_id: str) -> 
     async with service.session_factory() as session:
         session.add(ThreadMetaRow(thread_id=thread_id, user_id=owner, status="idle", metadata_json={}))
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_local_upload_keeps_owner_isolation_and_archive_gate(library):
+    service, paths = library
+    content = b"1000,1100\n1,2\n"
+    saved = await service.save_from_local_upload("alice", "本地.CSV", io.BytesIO(content), len(content))
+    assert saved["name"] == "本地.CSV"
+    other = await service.save_from_local_upload("bob", "data.txt", io.BytesIO(content), len(content))
+    assert other["id"] != saved["id"]
+    assert not (paths.user_dir("alice") / "threads").exists()
+    assert await service.list_uses("alice", saved["id"]) == []
+    await service.archive_dataset("alice", saved["id"])
+    with pytest.raises(DatasetError) as exc:
+        await service.save_from_local_upload("alice", "data.csv", io.BytesIO(content), len(content))
+    assert exc.value.code == "dataset_archived"
+
+
+@pytest.mark.asyncio
+async def test_local_upload_checks_stream_size_and_cleans_failed_stage(library):
+    service, paths = library
+    service.policy.max_dataset_file_size = 4
+    with pytest.raises(DatasetError) as exc:
+        await service.save_from_local_upload("alice", "data.mat", io.BytesIO(b"12345"), 5)
+    assert exc.value.code == "file_too_large"
+    with pytest.raises(DatasetError) as exc:
+        await service.save_from_local_upload("alice", "data.mat", io.BytesIO(b"12345"), 4)
+    assert exc.value.code == "file_too_large"
+    with pytest.raises(DatasetError) as exc:
+        await service.save_from_local_upload("alice", "data.txt", io.BytesIO(b"12"), 4)
+    assert exc.value.code == "source_changed"
+    assert await service.list_datasets("alice") == []
+    assert list((paths.user_nir_datasets_dir("alice") / ".staging").iterdir()) == []
+    service.policy.max_user_dataset_bytes = 1
+    with pytest.raises(DatasetError) as exc:
+        await service.save_from_local_upload("alice", "data.txt", io.BytesIO(b"12"), 2)
+    assert exc.value.code == "quota_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_local_upload_finishes_copy_before_stage_cleanup(library, monkeypatch):
+    service, paths = library
+    started, release = threading.Event(), threading.Event()
+    original = dataset_module._copy_local_upload
+
+    def paused_copy(*args):
+        started.set()
+        assert release.wait(5)
+        return original(*args)
+
+    monkeypatch.setattr(dataset_module, "_copy_local_upload", paused_copy)
+    task = asyncio.create_task(service.save_from_local_upload("alice", "data.csv", io.BytesIO(b"x"), 1))
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert list((paths.user_nir_datasets_dir("alice") / ".staging").iterdir()) == []
+    assert await service.list_datasets("alice") == []
+
+
+@pytest.mark.asyncio
+async def test_preview_is_owner_scoped_read_only_and_rejects_tampering(library):
+    service, paths = library
+    content = b"moisture,1000,1100,1200\n1.5,1,2,3\n2.5,2,3,4\n"
+    source = _upload(paths, "alice", "thread1", "spectra.csv", content)
+    saved = await service.save_from_thread_upload("alice", "thread1", source, "Preview", save_confirmed=True)
+    with pytest.raises(DatasetError) as exc:
+        await service.preview_dataset("bob", saved["id"])
+    assert exc.value.code == "dataset_not_found"
+    result = await service.preview_dataset("alice", saved["id"])
+    assert result["dataset_id"] == saved["id"]
+    assert result["source_sha256"] == saved["sha256"]
+    assert result["sample_count"] == 2
+    assert await service.list_profiles("alice", saved["id"]) == []
+    assert await service.list_uses("alice", saved["id"]) == []
+    target = paths.user_nir_dataset_dir("alice", saved["id"]) / "source.csv"
+    assert target.read_bytes() == content
+    target.write_bytes(content.replace(b"1.5", b"9.5"))
+    with pytest.raises(DatasetError) as exc:
+        await service.preview_dataset("alice", saved["id"])
+    assert exc.value.code == "source_hash_mismatch"
 
 
 @pytest.mark.asyncio

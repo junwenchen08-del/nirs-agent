@@ -40,12 +40,6 @@ export type MockThread = {
   historyValues?: Record<string, unknown>;
 };
 
-export type MockAgent = {
-  name: string;
-  description?: string;
-  system_prompt?: string;
-};
-
 export type MockSkill = {
   name: string;
   description: string;
@@ -56,7 +50,6 @@ export type MockSkill = {
 
 export type MockAPIOptions = {
   threads?: MockThread[];
-  agents?: MockAgent[];
   skills?: MockSkill[];
   uploadLimits?: {
     max_files: number;
@@ -118,7 +111,6 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
     return registration;
   };
   let threads = [...(options?.threads ?? [])];
-  const agents = options?.agents ?? [];
   const skills = options?.skills ?? DEFAULT_SKILLS;
   const uploadLimits = options?.uploadLimits ?? {
     max_files: 10,
@@ -635,38 +627,6 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
       });
     }
     return route.fallback();
-  });
-
-  // Agents list — sidebar & gallery page
-  void registerRoute("**/api/agents", (route) => {
-    if (route.request().method() === "GET") {
-      return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ agents }),
-      });
-    }
-    return route.fallback();
-  });
-
-  // Individual agent — agent chat page
-  void registerRoute("**/api/agents/*", (route) => {
-    if (route.request().method() === "GET") {
-      const url = route.request().url();
-      const agent = agents.find((a) => url.endsWith(`/api/agents/${a.name}`));
-      if (agent) {
-        return route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(agent),
-        });
-      }
-    }
-    return route.fulfill({
-      status: 404,
-      contentType: "application/json",
-      body: JSON.stringify({ detail: "Agent not found" }),
-    });
   });
 
   return {

@@ -2,6 +2,31 @@
 
 > **版本**：v2.1.0　|　**基础框架**：DeerFlow 2.x（LangGraph + FastAPI）
 
+左侧新增“方法库”，进入 `/workspace/methods` 可按“预处理、建模、其他”浏览方法卡片。
+预处理下进一步区分平滑降噪、散射校正、基线校正、导数等类别；点击卡片可查看
+适用条件、局限、参数定义和来源。“设置 → 知识库 → 方法知识库”继续保留管理功能，
+两个入口使用同一份卡片。左侧“智能体”和“NIR 评测”的页面及专用前端代码已移除；
+历史自定义智能体对话链接转入普通聊天页，并保留原执行绑定。普通聊天、建模指标、
+数据集库、模型库和服务端执行模块继续使用原有接口。
+
+光谱数据集库显示数据集数量、可用数量和文件总大小，按“定量分析、分类识别、
+待确认”分类。点击卡片或“查看详情”可查看样本规模、平均光谱及目标值分布。
+“挂载到对话”直接进入新对话并带入数据集文件，无需填写目标对话编号；用户
+输入任务后才执行分析。保留重命名和解析设置功能，移除数据集的“归档”按钮。
+数据预览为服务端生成的有限汇总，不更改原文件或启动模型训练。
+
+右上角“上传数据集”可直接选择电脑上的 CSV、TXT 或 MAT 文件，并填写数据集名称。
+上传到数据集库无需创建源对话或填写文件路径；相同内容会复用已有数据集。
+上传后可用卡片上的“挂载到对话”带入新对话，也可在已有对话中输入 `/datasets`
+选择调用，随后手动发送分析要求。上传和挂载本身不会启动分析。
+
+“解析设置”提供可视化选择：MAT 自动列出数据组、样本数量、光谱段、目标值和坐标，
+可选择合并光谱段或单独查看一段；CSV/TXT 可确认首行列名、样本排列方向、光谱起止列、
+目标列及样本名称列。选择后显示光谱和前几个样本的目标值，点击“保存解析设置”即可
+用于详情工作台和对话挂载，无需填写 JSON。高级设置与解析版本仍保留。
+切换数据组或列选择会重置该视图的样本用途及波段；同一选择的设置会保留。
+原文件和历史对话副本不更改，仅保存解析方式不会自动指定训练/验证样本。
+
 自主模式会明确反馈无法解析的决策 JSON，并在有限续接次数内允许 LLM 修正；
 持续失败会持久化为流程安全关闭，不冒充质量停止、预算 RETAIN 或模型交付。
 错误摘要按实验身份去重，分别展示 Cal CV mean-fold、OOF 和 Val 指标。
@@ -274,7 +299,7 @@ Model Library 入库；缺少结构化证据时显示未记录，不推断成功
 
 在 `config.yaml` 中把 `nir_library.enabled` 设为 `true` 并重启服务后，侧栏会出现：
 
-- `/workspace/nir/datasets`：保存、重命名、查看解析 Profile 与使用历史、挂载、归档和删除数据集；
+- `/workspace/nir/datasets`：从本地上传、分类浏览、重命名、查看光谱、调整样本用途和波段、保存修改、挂载到对话；
 - `/workspace/nir/models`：查看模型版本、验证范围、指标和来源，并执行挂载、归档和删除。
 
 页面只调用当前登录用户范围内的 API，不把原始光谱、模型二进制或宿主机路径放进浏览器
@@ -556,3 +581,13 @@ NPZ 的 `nir_train_model` 使用原始数据时需显式传入 `pipeline_steps="
 ## 许可证
 
 本项目基于 [MIT License](./LICENSE) 开源；DeerFlow 框架同样采用 MIT License。
+
+
+The dataset library now includes a sample editing workbench at
+`/workspace/nir/datasets/[dataset_id]`: a spreadsheet-style read-only values
+table, individual/bulk sample roles, linked spectra and numeric/drag band
+selection. Save creates a versioned interpretation while keeping original files
+and prior chat copies intact. New attachments preserve the selected full-resolution
+bands and fixed sample roles; governed regression and classification reuse those
+roles without automatic repartitioning. See the module AGENTS guides for limits
+and maintained regression anchors.

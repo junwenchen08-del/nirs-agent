@@ -183,6 +183,10 @@ def nir_train_auto_split_model_tool(
         budget = budget_for_runtime(runtime)
         real_in = _resolve(runtime, file_path, read_only=True)
         budget.check_file(real_in, stage="auto_split_file_preflight")
+        from .datasets.workspace import load_workspace_export
+
+        if load_workspace_export(real_in) is not None:
+            return _err("保存版本已固定样本用途，请通过 sealed_holdout 流程的 nir_prepare_search 使用该文件，不能重新自动划分。")
         raw = pd.read_csv(real_in)
         if not (0 <= int(y_col) < raw.shape[1]):
             return _err(f"y_col {y_col} is outside the CSV column range 0..{raw.shape[1] - 1}")
@@ -672,6 +676,10 @@ def nir_train_partitioned_model_tool(
         budget = budget_for_runtime(runtime)
         real_in = _resolve(runtime, file_path, read_only=True)
         budget.check_file(real_in, stage="partitioned_file_preflight")
+        from .datasets.workspace import load_workspace_export
+
+        if load_workspace_export(real_in) is not None:
+            return _err("保存版本的用途不是外部验证证据，请通过 sealed_holdout 流程的 nir_prepare_search 保留该划分。")
         raw = pd.read_csv(real_in)
         if split_col not in raw.columns:
             return _err(f"split_col {split_col!r} is not a CSV header; available columns include {list(raw.columns[:12])}")

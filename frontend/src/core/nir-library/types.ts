@@ -26,6 +26,111 @@ export interface NIRDatasetDetail extends NIRDataset {
   profiles: NIRDatasetProfile[];
 }
 
+export type DatasetAnalysisType = "regression" | "classification" | "unknown";
+
+export interface DatasetParsingSelection {
+  layout_id?: string | null;
+  target_id?: string | null;
+  axis_id?: string | null;
+  spectral_start?: number | null;
+  spectral_end?: number | null;
+  target_columns?: number[];
+  sample_column?: number | null;
+  coordinate_column?: number | null;
+  transpose?: boolean;
+  has_header?: boolean | null;
+}
+
+export interface DatasetParsing {
+  dataset_id: string;
+  source_sha256: string;
+  profile_id: string | null;
+  task_type: string;
+  format: "mat" | "table";
+  current: DatasetParsingSelection | null;
+  suggested: DatasetParsingSelection | null;
+  columns: Array<{ index: number; name: string }>;
+  layouts: Array<{
+    id: string;
+    group: string;
+    label: string;
+    sample_count: number;
+    feature_count: number;
+    targets: Array<{ id: string; label: string }>;
+    axes: Array<{ id: string; label: string }>;
+    default_target: string | null;
+    default_axis: string | null;
+  }>;
+}
+
+export interface DatasetParsingPreview extends NIRDatasetPreview {
+  samples: Array<{ name: string; values: Array<string | number | null> }>;
+}
+
+export interface DatasetWorkspace {
+  dataset_id: string;
+  source_sha256: string;
+  profile_id: string | null;
+  version: number;
+  saved: boolean;
+  sample_count: number;
+  feature_count: number;
+  axis_kind: "axis" | "index";
+  axis: number[];
+  fields: string[];
+  usages: number[];
+  range: [number, number];
+  selected_feature_count: number;
+}
+
+export interface DatasetWorkspaceRows {
+  dataset_id: string;
+  source_sha256: string;
+  profile_id: string | null;
+  total: number;
+  offset: number;
+  rows: Array<{
+    index: number;
+    name: string;
+    values: Array<string | number | null>;
+  }>;
+}
+
+export interface DatasetWorkspaceSpectra {
+  dataset_id: string;
+  source_sha256: string;
+  profile_id: string | null;
+  axis: number[];
+  total: number;
+  point_count: number;
+  curves: Array<{ index: number; name: string; values: Array<number | null> }>;
+}
+
+export interface NIRDatasetPreview {
+  dataset_id: string;
+  source_sha256: string;
+  status: "ready" | "needs_mapping";
+  message: string;
+  analysis_type: DatasetAnalysisType;
+  sample_count: number | null;
+  feature_count: number | null;
+  preview_sample_count: number;
+  missing_ratio: number | null;
+  axis_kind: "axis" | "index";
+  spectrum: Array<{
+    x: number;
+    mean: number | null;
+    low: number | null;
+    high: number | null;
+  }>;
+  targets: Array<{
+    name: string;
+    kind: "regression" | "classification";
+    bars: Array<{ label: string; count: number }>;
+  }>;
+  fields: string[];
+}
+
 export interface NIRDatasetUse {
   attachment_id: string;
   dataset_id: string;

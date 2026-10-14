@@ -1,16 +1,16 @@
-import { NIREvaluationDashboard } from "@/components/workspace/evaluations/nir-evaluation-dashboard";
+import { MethodLibrary } from "@/components/workspace/method-library/method-library";
 import {
   WorkspaceBody,
   WorkspaceContainer,
   WorkspaceHeader,
 } from "@/components/workspace/workspace-container";
 
-export default function EvaluationsPage() {
+export default function MethodsPage() {
   return (
     <WorkspaceContainer>
       <WorkspaceHeader />
       <WorkspaceBody className="items-stretch overflow-y-auto">
-        <NIREvaluationDashboard />
+        <MethodLibrary />
       </WorkspaceBody>
     </WorkspaceContainer>
   );

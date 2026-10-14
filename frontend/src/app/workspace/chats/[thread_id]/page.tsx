@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { ArtifactTrigger } from "@/components/workspace/artifacts";
 import {
@@ -37,13 +39,13 @@ import {
   useThreadTokenUsage,
 } from "@/core/threads/hooks";
 import { threadTokenUsageToTokenUsage } from "@/core/threads/token-usage";
-import { textOfMessage } from "@/core/threads/utils";
+import { contextOfThread, textOfMessage } from "@/core/threads/utils";
 import type { ThreadInputMessage } from "@/core/uploads/mounted-dataset";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
 export default function ChatPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const router = useRouter();
   const { threadId, setThreadId, isNewThread, setIsNewThread, isMock } =
     useThreadChat();
@@ -54,10 +56,6 @@ export default function ChatPage() {
   // `isNewThread` stays true until the backend actually creates the thread.
   const [isWelcomeMode, setIsWelcomeMode] = useState(isNewThread);
   const [settings, setSettings] = useThreadSettings(threadId);
-  const chatContext = useMemo(
-    () => modelingChatContext(settings.context),
-    [settings.context],
-  );
   const [localSettings, setLocalSettings] = useLocalSettings();
   const { tokenUsageEnabled } = useModels();
   const threadTokenUsage = useThreadTokenUsage(
@@ -68,6 +66,18 @@ export default function ChatPage() {
     enabled: !isNewThread && !isMock,
     isMock,
   });
+  const isThreadContextReady =
+    isNewThread ||
+    Boolean(isMock) ||
+    (Boolean(threadMetadata.data) && !threadMetadata.isError);
+  const chatContext = useMemo(() => {
+    return modelingChatContext(
+      contextOfThread(
+        settings.context,
+        isNewThread ? null : threadMetadata.data,
+      ),
+    );
+  }, [settings.context, isNewThread, threadMetadata.data]);
   const backendTokenUsage = threadTokenUsageToTokenUsage(threadTokenUsage.data);
   const mountedRef = useRef(false);
   useSpecificChatMode();
@@ -163,6 +173,7 @@ export default function ChatPage() {
 
   const handleSubmit = useCallback(
     (message: ThreadInputMessage) => {
+      if (!isThreadContextReady) return;
       const sendPromise = sendMessage(threadId, message);
       if (
         message.files.length > 0 ||
@@ -173,15 +184,17 @@ export default function ChatPage() {
       }
       void sendPromise;
     },
-    [sendMessage, threadId],
+    [isThreadContextReady, sendMessage, threadId],
   );
   const handleStop = useCallback(async () => {
     await thread.stop();
   }, [thread]);
   const handleRegenerate = useCallback(
-    (messageId: string, supersededMessageIds: string[]) =>
-      regenerateMessage(threadId, messageId, supersededMessageIds),
-    [regenerateMessage, threadId],
+    (messageId: string, supersededMessageIds: string[]) => {
+      if (!isThreadContextReady) return;
+      return regenerateMessage(threadId, messageId, supersededMessageIds);
+    },
+    [isThreadContextReady, regenerateMessage, threadId],
   );
 
   const tokenUsageInlineMode = tokenUsageEnabled
@@ -244,6 +257,7 @@ export default function ChatPage() {
                 canRegenerate={
                   !isNewThread &&
                   !isMock &&
+                  isThreadContextReady &&
                   env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY !== "true" &&
                   !isUploading &&
                   !thread.isLoading
@@ -291,6 +305,26 @@ export default function ChatPage() {
                     </div>
                   </div>
                 )}
+                {!isNewThread &&
+                  !isMock &&
+                  (threadMetadata.isError ||
+                    (threadMetadata.isSuccess && !threadMetadata.data)) && (
+                    <Alert className="mb-3">
+                      <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+                        {locale.startsWith("zh")
+                          ? "无法读取对话信息，请重试后继续。"
+                          : "Could not load conversation details. Retry before continuing."}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void threadMetadata.refetch()}
+                          disabled={threadMetadata.isFetching}
+                        >
+                          {locale.startsWith("zh") ? "重试" : "Retry"}
+                        </Button>
+                      </AlertDescription>
+                    </Alert>
+                  )}
                 {mountedRef.current ? (
                   <InputBox
                     className={cn(
@@ -316,9 +350,10 @@ export default function ChatPage() {
                       !hasTodos && <Welcome mode={settings.context.mode} />
                     }
                     disabled={
-                      isMock ||
+                      Boolean(isMock) ||
                       env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" ||
-                      isUploading
+                      !isThreadContextReady ||
+                      Boolean(isUploading)
                     }
                     onContextChange={(context) =>
                       setSettings("context", context)

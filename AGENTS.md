@@ -240,10 +240,13 @@ Pushes to `Duan` run the focused NIR release gate in
 `.github/workflows/nir-release-gate.yml`; Gitee-native repositories use the
 matching `.workflow/NIRPipeline.yml` after Gitee Go is enabled for the repo.
 
-The NIR evaluation control room lives at `/workspace/evaluations`. Its Gateway
-batch endpoint owner-checks explicit thread/scenario mappings and reuses the
-same deterministic evaluator as `backend/make eval-nir`; browser-local history
-contains only the latest 12 aggregate summaries.
+The workspace method library lives at `/workspace/methods`, reusing the managed
+method catalog for read-only category browsing and method details. Settings
+continues to edit that same catalog. Custom-agent management and the NIR
+evaluation dashboard, with their dedicated frontend domains, have been removed.
+Historical agent-chat URLs redirect to standard chats; owned thread metadata
+preserves execution bindings. Gateway execution, scientific metrics and the
+owner-checked deterministic evaluation/trace interfaces remain available.
 
 NIR file ingestion is confidence-gated. `nir_core.io.schema` profiles CSV/TXT
 encoding, delimiter, decimal mark, field roles, and orientation, and recursively

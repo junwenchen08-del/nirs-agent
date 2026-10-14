@@ -1300,6 +1300,19 @@ preserved. Integration anchor: `test_upload_dataset_autosave.py`.
 The owner-only reconciliation endpoint compares active SQL sizes with exact
 asset directories and reports missing/untracked/stale counts without returning
 host paths; it does not mutate files.
+`GET /api/nir/datasets/{dataset_id}/preview` is an owner/feature/RBAC-gated UI
+summary. It verifies immutable source integrity before and after reading,
+uses the latest confirmed profile's task type and bounds files to 64 MiB,
+preflights ordinary numeric MAT variables/HDF5 datasets at 5 million elements,
+retains the core loader's resource limits for complex structures, bounds preview samples to 512,
+spectral chart coordinates to 256 and target distributions to 6 columns.
+MAT v5/v7.3 reuse the existing loader; HDF5 external/symbolic links are denied.
+CSV/TXT reuse confidence-gated profiling; recognizable text class headers are
+interpreted only for display. Ambiguous mappings return a correctable preview
+state, not a guessed training layout. The DTO contains aggregates and bounded
+field names, never host paths or individual spectra. Viewing does not create
+profiles, dataset uses, model evidence or workflow transitions. Tests:
+`test_nir_dataset_preview.py`, service/router tests and dataset-library E2E.
 Stale cleanup only touches old regular files with the service staging prefix in
 the exact owner staging directory. Dataset Attach copies a reverified source to
 an owner-matched target thread through an atomic no-overwrite path, compensates
@@ -1651,3 +1664,62 @@ See `docs/` directory for detailed documentation:
 - [PATH_EXAMPLES.md](docs/PATH_EXAMPLES.md) - Path types and usage
 - [summarization.md](docs/summarization.md) - Context summarization
 - [plan_mode_usage.md](docs/plan_mode_usage.md) - Plan mode with TodoList
+
+
+Dataset editing workbench: `GET/PUT /api/nir/datasets/{id}/workspace`, plus
+owner/RBAC-gated bounded `/workspace/rows` and `/workspace/spectra` reads, reuse
+verified immutable assets. `datasets/workspace.py` resolves exact sample order
+and original coordinates; ambiguous mappings fail without guesses. Full reads
+are capped at 64 MiB, 5000 samples, 20000 spectral variables and 5 million
+matrix elements. Rows page at 100 maximum; charts expose at most 24 curves and
+512 points each. Viewing does not create profiles, attachments or model evidence.
+PUT strictly accepts only source SHA, current confirmed Profile ID, integer
+sample-role codes and a contiguous coordinate interval. Raw-value writes are
+rejected. The owner admission lock and current Profile identity implement
+compare-and-swap; successful saves create an immutable confirmed Profile version
+and supersede the previous one without changing source bytes or existing uses.
+Web attachments select the saved Profile and deterministically materialize a
+UTF-8 CSV in owner staging, with exact full-resolution selected values and named
+roles. The source SHA remains original-asset lineage; Profile/filename bind the
+materialized version. Attachment size and idempotent verification use the actual
+copy. Old copies remain unchanged. Ordinary attachments retain their old path.
+UI-export detection is restricted to exact reserved headers and does not decode
+ordinary CSV files. Regression `nir_prepare_search` preserves named Cal/Val/Test
+membership in the existing sealed protocol. Classification keeps named roles,
+checks scientific integrity, and records original row indices after exclusions.
+Unassigned or missing required partitions fail; no random repair occurs. Generic
+conversion and automatic repartitioning reject these exports with a supported
+entry hint, protecting explicit membership. Saved labels never imply external
+validation. No migration or training during save/view is required. Anchors:
+`test_nir_dataset_workspace.py`, dataset router tests and workspace E2E.
+
+Direct library upload: `POST /api/nir/datasets/upload` accepts multipart `file`
+and optional `name` through the existing authenticated/CSRF/RBAC Gateway.
+`DatasetService.save_from_local_upload` validates CSV/TXT/MAT filenames, nonempty
+actual multipart sizes and policy limits, then shares staging, SHA deduplication,
+owner admission, immutable publication and compensation with thread-based saves.
+It never accepts a host path, creates a source thread/run or resurrects archived
+assets. Blocking stream copies finish before cancellation cleans their stage.
+The original thread-save API remains compatible. Uploaded assets reuse existing
+workspace, preview and attach endpoints. Tests: dataset service/router tests.
+
+Workspace CSV exports preserve recognized batch/replicate-group IDs; role edits
+reject crossing groups, and existing regression/classification CV receives the
+source grouping. Physical coordinates and index-only coordinates stay distinct.
+Only the bounded UI display truncates names/labels; attachment values remain exact.
+
+Visual parsing adds owner/RBAC-gated GET/PUT `/datasets/{id}/parsing` and read-only
+POST `/parsing/preview`. `datasets/parsing.py` enumerates bounded MAT groups,
+spectral blocks, compatible targets and axes, or CSV/TXT column/header/orientation
+choices. Multi-group files never silently select or merge groups. Generated
+candidate IDs are revalidated against the exact source; saves compare source SHA
+and current Profile ID, create a confirmed immutable version and supersede the
+previous selection. Unchanged selection retains workspace roles/range; changed
+selection resets them. Advanced JSON/Profile APIs remain compatible.
+`library_parse` profiles are used by preview, workspace and deterministic chat
+attachments. Parsing-only exports carry `_nir_workspace_parsing_only=1` and
+unassigned roles: existing regression/classification splitting stays available.
+Assigned-role exports retain fixed partitions and cannot use this marker to
+override membership. MAT v5 compressed expansion is bounded before nested array
+allocation; HDF5 links and oversized structures remain rejected. Tests:
+`test_nir_dataset_parsing.py`, router/workspace tests and dataset-parsing E2E.

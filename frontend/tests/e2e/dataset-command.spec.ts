@@ -2,6 +2,12 @@ import { expect, test } from "@playwright/test";
 
 import { mockLangGraphAPI } from "./utils/mock-api";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/nir/datasets/ds_*", (route) =>
+    route.fulfill({ json: { profiles: [] } }),
+  );
+});
+
 test("/datasets mounts without sending and includes the file only on manual submission", async ({
   page,
 }) => {

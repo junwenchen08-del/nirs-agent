@@ -129,7 +129,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return (await response.json()) as T;
 }
-export const listMethodCards = () => request<MethodCatalog>("/cards");
+export const listMethodCards = (signal?: AbortSignal) =>
+  request<MethodCatalog>("/cards", signal ? { signal } : undefined);
 export const saveMethodCard = (
   methodId: string,
   changes: MethodCardChanges,

@@ -67,6 +67,7 @@ import { useModels } from "@/core/models/hooks";
 import {
   attachDatasetForComposer,
   attachModelForComposer,
+  getDataset,
   useNirLibraryEnabled,
   type NIRDataset,
   type NIRModelVersion,
@@ -201,7 +202,7 @@ export function InputBox({
   onSubmit?: (message: ThreadInputMessage) => void | Promise<void>;
   onStop?: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const searchParams = useSearchParams();
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const { models } = useModels();
@@ -242,6 +243,8 @@ export function InputBox({
   );
   const [datasetMounting, setDatasetMounting] = useState(false);
   const datasetRequestRef = useRef<AbortController | null>(null);
+  const [libraryMountError, setLibraryMountError] = useState(false);
+  const [libraryMountRetry, setLibraryMountRetry] = useState(0);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [mountedModel, setMountedModel] = useState<MountedModel | null>(null);
   const [modelMounting, setModelMounting] = useState(false);
@@ -709,7 +712,7 @@ export function InputBox({
           datasetId: dataset.id,
           name: dataset.name,
           virtualPath: result.virtual_path,
-          sizeBytes: dataset.size_bytes,
+          sizeBytes: result.attachment_size_bytes ?? dataset.size_bytes,
         };
         if (
           result.status !== "attached" ||
@@ -727,6 +730,77 @@ export function InputBox({
     },
     [t.inputBox.datasetAttachFailed, t.inputBox.datasetAttached, threadId],
   );
+
+  const datasetFromLibrary = searchParams.get("dataset");
+  useEffect(() => {
+    if (
+      !datasetFromLibrary ||
+      !isWelcomeMode ||
+      !enableDatasetCommand ||
+      !nirLibraryEnabled ||
+      isMock
+    )
+      return;
+    const controller = new AbortController();
+    datasetRequestRef.current?.abort();
+    datasetRequestRef.current = controller;
+    setDatasetMounting(true);
+    setLibraryMountError(false);
+    async function mountFromLibrary() {
+      try {
+        const dataset = await getDataset(
+          datasetFromLibrary!,
+          controller.signal,
+        );
+        if (dataset.status !== "ready") throw new Error("Dataset unavailable");
+        const result = await attachDatasetForComposer(
+          dataset.id,
+          threadId,
+          controller.signal,
+        );
+        const selection: MountedDataset = {
+          threadId,
+          datasetId: dataset.id,
+          name: dataset.name,
+          virtualPath: result.virtual_path,
+          sizeBytes: result.attachment_size_bytes ?? dataset.size_bytes,
+        };
+        if (
+          result.status !== "attached" ||
+          mountedDatasetFiles(selection, threadId).length !== 1
+        )
+          throw new Error("Invalid dataset attachment");
+        if (controller.signal.aborted) return;
+        setMountedDataset(selection);
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("dataset") === datasetFromLibrary) {
+          url.searchParams.delete("dataset");
+          window.history.replaceState(
+            window.history.state,
+            "",
+            `${url.pathname}${url.search}${url.hash}`,
+          );
+        }
+      } catch {
+        if (!controller.signal.aborted) setLibraryMountError(true);
+      } finally {
+        if (datasetRequestRef.current === controller) {
+          datasetRequestRef.current = null;
+          setDatasetMounting(false);
+        }
+      }
+    }
+    void mountFromLibrary();
+    return () => controller.abort();
+  }, [
+    datasetFromLibrary,
+    threadId,
+    isWelcomeMode,
+    enableDatasetCommand,
+    nirLibraryEnabled,
+    isMock,
+    libraryMountRetry,
+  ]);
 
   const useSavedModel = useCallback(
     async (model: NIRModelVersion) => {
@@ -1304,6 +1378,33 @@ export function InputBox({
             <div className="absolute right-0 bottom-0 left-0 flex items-center justify-center">
               {extraHeader}
             </div>
+          </div>
+        )}
+        {datasetMounting && datasetFromLibrary && (
+          <p className="text-muted-foreground mx-3 mt-3 text-sm" role="status">
+            {locale.startsWith("zh")
+              ? "正在将数据集文件带入新对话…"
+              : "Adding the dataset file to your new chat…"}
+          </p>
+        )}
+        {libraryMountError && datasetFromLibrary && (
+          <div
+            className="text-destructive relative z-10 mx-3 mt-3 flex flex-wrap items-center gap-2 text-sm"
+            role="alert"
+          >
+            <span>
+              {locale.startsWith("zh")
+                ? "文件未能挂载，请重试。"
+                : "The file could not be attached. Retry."}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setLibraryMountRetry((value) => value + 1)}
+            >
+              {locale.startsWith("zh") ? "重新挂载" : "Retry attachment"}
+            </Button>
           </div>
         )}
         {mountedDataset?.threadId === threadId && (

@@ -18,25 +18,37 @@ type ThreadRouteTarget =
 
 export function pathOfThread(
   thread: ThreadRouteTarget,
-  context?: Pick<AgentThreadContext, "agent_name"> | null,
+  _context?: Pick<AgentThreadContext, "agent_name"> | null,
 ) {
   const threadId = typeof thread === "string" ? thread : thread.thread_id;
-  let agentName: string | undefined;
-  if (typeof thread === "string") {
-    agentName = context?.agent_name;
-  } else {
-    agentName = thread.context?.agent_name;
-    if (!agentName) {
-      const metaAgent = thread.metadata?.agent_name;
-      if (typeof metaAgent === "string") {
-        agentName = metaAgent;
-      }
-    }
-  }
+  return `/workspace/chats/${threadId}`;
+}
 
-  return agentName
-    ? `/workspace/agents/${encodeURIComponent(agentName)}/chats/${threadId}`
-    : `/workspace/chats/${threadId}`;
+/** Preserve the execution binding of owned historical agent threads. */
+export function agentNameOfThread(
+  thread: Exclude<ThreadRouteTarget, string> | null | undefined,
+): string | undefined {
+  for (const candidate of [
+    thread?.context?.agent_name,
+    thread?.metadata?.agent_name,
+  ]) {
+    if (typeof candidate === "string" && candidate.trim())
+      return candidate.trim();
+  }
+  return undefined;
+}
+
+/** Browser preferences cannot select an agent after the management UI is removed. */
+export function contextOfThread<T extends Record<string, unknown>>(
+  base: T,
+  thread?: Exclude<ThreadRouteTarget, string> | null,
+): {
+  [K in keyof T as K extends "agent_name" ? never : K]: T[K];
+} & { agent_name?: string } {
+  const context = { ...base };
+  delete context.agent_name;
+  const agentName = agentNameOfThread(thread);
+  return { ...context, ...(agentName ? { agent_name: agentName } : {}) };
 }
 
 export function textOfMessage(message: Message) {

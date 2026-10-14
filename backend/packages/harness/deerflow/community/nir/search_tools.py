@@ -188,10 +188,16 @@ def nir_prepare_search_tool(runtime: Runtime, cv_folds: int = 5, y_col: int = 0,
         elif Path(source).suffix.lower() == ".mat":
             data = _load_search_mat(source, x_var=x_var, y_var=y_var, wv_var=wv_var, transpose=transpose)
         elif Path(source).suffix.lower() in {".csv", ".txt", ".tsv"}:
-            loaded = load_csv(source, y_col=y_col)
-            data = {"X": loaded.X, "y": loaded.y}
-            if loaded.wv is not None:
-                data["wv"] = loaded.wv
+            from .datasets.workspace import fixed_regression_partitions, load_workspace_export
+
+            workspace = load_workspace_export(source)
+            if workspace is not None:
+                data = fixed_regression_partitions(workspace)
+            else:
+                loaded = load_csv(source, y_col=y_col)
+                data = {"X": loaded.X, "y": loaded.y}
+                if loaded.wv is not None:
+                    data["wv"] = loaded.wv
         else:
             raise ValueError("Only explicit CSV/TXT or numeric NPZ ingestion is supported")
         if "X_cal" not in data:

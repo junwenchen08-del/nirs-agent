@@ -140,59 +140,18 @@ export interface Translations {
     newChat: string;
     chats: string;
     demoChats: string;
-    agents: string;
-    agentsDisabledTooltip: string;
     channels: string;
-    evaluations: string;
     nirDatasets: string;
     nirModels: string;
-  };
-
-  // Agents
-  agents: {
-    title: string;
-    description: string;
-    newAgent: string;
-    emptyTitle: string;
-    emptyDescription: string;
-    featureDisabledTitle: string;
-    featureDisabledDescription: string;
-    chat: string;
-    delete: string;
-    deleteConfirm: string;
-    deleteSuccess: string;
-    newChat: string;
-    createPageTitle: string;
-    createPageSubtitle: string;
-    nameStepTitle: string;
-    nameStepHint: string;
-    nameStepPlaceholder: string;
-    nameStepContinue: string;
-    nameStepInvalidError: string;
-    nameStepAlreadyExistsError: string;
-    nameStepNetworkError: string;
-    nameStepCheckError: string;
-    nameStepCheckErrorWithDetail: string;
-    nameStepApiDisabledError: string;
-    nameStepBootstrapMessage: string;
-    save: string;
-    saving: string;
-    saveRequested: string;
-    saveHint: string;
-    saveCommandMessage: string;
-    agentCreatedPendingRefresh: string;
-    more: string;
-    agentCreated: string;
-    startChatting: string;
-    backToGallery: string;
+    methods: string;
   };
 
   // Breadcrumb
   breadcrumb: {
     workspace: string;
     chats: string;
-    evaluations: string;
     nirLibrary: string;
+    methods: string;
   };
 
   // Workspace
@@ -272,45 +231,6 @@ export interface Translations {
     notStrictQuota: string;
     operationSuccess: string;
     statuses: Record<string, string>;
-  };
-
-  nirEvaluations: {
-    eyebrow: string;
-    title: string;
-    description: string;
-    scenarios: string;
-    deterministic: string;
-    mappingTitle: string;
-    mappingDescription: string;
-    threadId: string;
-    threadPlaceholder: string;
-    scenario: string;
-    selectScenario: string;
-    remove: string;
-    addCase: string;
-    run: string;
-    running: string;
-    loadError: string;
-    runError: string;
-    duplicateScenario: string;
-    recentTrend: string;
-    trendDescription: string;
-    noHistory: string;
-    older: string;
-    latest: string;
-    passRate: string;
-    averageScore: string;
-    policyViolations: string;
-    tokens: string;
-    duration: string;
-    results: string;
-    passed: string;
-    failed: string;
-    trace: string;
-    noTraceId: string;
-    exportEvidence: string;
-    clearResult: string;
-    noResults: string;
   };
 
   // Conversation
