@@ -126,7 +126,7 @@ def test_export_growth_limit_does_not_change_source_values(tmp_path, monkeypatch
 def test_unassigned_and_missing_partitions_never_randomized(tmp_path):
     book = table(tmp_path / "data.csv", 6)
     output = tmp_path / "export.csv"
-    for usages in ([1, 1, 1, 2, 3, 0], [1] * 6):
+    for usages in ([1, 1, 1, 2, 3, 0], [1] * 6, [4, 0, 0, 0, 0, 0], [4] * 6):
         write_workspace_csv(book, validate_settings(book, usages, [1000, 1200]), output)
         with pytest.raises(WorkspaceError):
             fixed_regression_partitions(load_workspace_export(str(output)))
@@ -195,6 +195,23 @@ def test_classifier_honors_saved_roles_and_records_original_row_indices(tmp_path
     assert metrics["partitions"]["calibration"]["sample_indices"] == list(range(1, 60))
     assert metrics["partitions"]["holdout"]["sample_indices"] == list(range(70, 80))
     assert metrics["validation_scope"] == "independent_holdout_not_external"
+
+
+@pytest.mark.parametrize("roles", [[1] * 20 + [2] * 6 + [3] * 5 + [0], [1] * 32])
+def test_classifier_rejects_incomplete_fixed_roles_before_training(tmp_path, monkeypatch, roles):
+    import nir_core.model.classification as core_classification
+
+    from deerflow.community.nir import classification
+
+    X = np.random.default_rng(74).normal(size=(32, 8))
+    book = Workbook(X, np.arange(8) + 1000, [f"s{i}" for i in range(32)], ["品种"], [["小麦" if i % 2 else "玉米"] for i in range(32)], roles, {})
+    source = tmp_path / "saved.csv"
+    write_workspace_csv(book, validate_settings(book, roles, [1000, 1007]), source)
+    monkeypatch.setattr(classification, "_resolve", lambda *a, **k: str(source))
+    monkeypatch.setattr(core_classification, "stratified_three_way_split", lambda *a, **k: pytest.fail("Explicit roles must not be randomized"))
+    monkeypatch.setattr(core_classification, "select_classifier", lambda *a, **k: pytest.fail("Incomplete roles must not train"))
+    result = json.loads(classification.nir_train_classifier_tool.func(runtime=MagicMock(), file_path="/mnt/user-data/uploads/saved.csv", methods='["logistic"]', pipeline_steps="[]"))
+    assert result["status"] == "error" and "分配" in result["error"]
 
 
 @pytest.mark.asyncio

@@ -458,6 +458,31 @@ See `docs/nir-method-knowledge.md`, `test_nir_method_knowledge.py`, and the real
 four-entry regressions in `test_nir_process_training.py`.
 
 ### Documentation Update Policy
+
+NIR response_grounding.py renders concise Chinese status, one evaluation scope,
+rounded R²/RMSE with explanations, a plain description of the test data and one
+next step. Review asks for human confirmation; only saved/reused library outcomes
+claim library storage. Internal codes, detailed attempt ledgers and guard reasons
+remain in audit state/reports. Matching finalized attempt evidence supersedes its
+earlier search-only summary, so Test metrics and delivered paths survive deduplication.
+Recommendations for future validation do not assert completed validation; positive
+claims and wrong metric/joblib paths are still checked. Display does not fit/read
+Test, rewrite checkpoints or register models. Maintained tests: test_nir_plain_responses.py,
+response grounding, malformed decision recovery, unified delivery and model autosave.
+
+Autonomous NIR questions use `community/nir/user_wait.py` and the existing
+NIRWorkflowMiddleware hooks. A natural user-choice question ends the turn;
+ask_clarification preserves only that call in a mixed batch and reuses the existing
+ClarificationMiddleware END. Waiting state persists in the workflow/checkpoint and
+unified ProcessStore binding, without changing session membership, CV, budgets,
+experiments, retained choice or approval. Reload/reentry cannot call the provider,
+execute fits, freeze/finalize or register until a later genuine user message.
+Internal continuation reminders, summary/memory and hidden context do not release
+the pause. Display text is checked; unchecked clarification context is not shown.
+The reply must be interpreted by the Lead and does not itself approve registration.
+Tests: test_nir_user_wait.py (real sync/async Lead with fake provider), clarification,
+autonomous delivery, response grounding and malformed-decision regression suites.
+
 **CRITICAL: Always update README.md and AGENTS.md after every code change**
 
 When making code changes, you MUST update the relevant documentation:
@@ -1365,6 +1390,18 @@ event loop reports a separate storage failure instead of nesting event loops.
 Tests: `test_nir_model_autosave.py`, `test_nir_model_service.py` and
 `test_nir_models_router.py`.
 
+`GET /api/nir/models/{model_id}/versions/{version}/report` verifies the owned
+stored package without deserializing an estimator. `models/report.py` projects
+finite per-partition metrics, actual parameters and bounded saved charts. New
+promotions embed a portable report in the already verified metadata file; no
+schema migration or model/metrics rewrite is involved. Legacy process charts
+must match the exact workflow project/tool-call identity. Autonomous charts
+require the finalized metrics-bound session/freeze and existing hash-checked
+Cal cache. Missing or corrupt old charts remain unavailable, never recomputed.
+The dataset preview accepts an optional owner/dataset-matched Profile ID, including
+superseded confirmed versions, so model details do not silently use later parsing.
+Tests: `test_nir_model_report.py` and the pinned-profile DatasetService regression.
+
 Cross-session prediction attaches both assets before starting a prediction
 workflow, then runs inspect/load while the workflow is still in `data_audit`,
 followed by audit, planning, prediction, and completion. Response grounding
@@ -1543,6 +1580,35 @@ Both can be modified at runtime via Gateway API endpoints or `DeerFlowClient` me
 
 ### Test-Driven Development (TDD) — MANDATORY
 
+NIR pause/termination regressions cover colon/newline and numbered answer requests,
+question options and ordinary-user waits. Model-source regression coverage lives
+in test_nir_model_dataset_link.py: new input hashes are captured during ingestion;
+ModelService promotion derives verified missing Dataset/Profile IDs. Historical
+detail reads may recover links using bounded original uploads and exact complete
+partition bindings, without opening private Test/search caches, fitting, loading
+an estimator, changing rows or rewriting model packages. Pinned profile bytes and
+library manifests are verified read-only; temporary profile exports use system
+temp storage. Missing or ambiguous history stays missing. Saved curve/validation
+metadata supplies feature counts, without inventing dimensionality.
+Report recovery projects effective Dataset/Profile IDs consistently in both the
+model and dataset response objects. The original stored row/package remains
+unchanged; front-end strict identity validation must remain enabled. Regression
+coverage includes raw/no-Profile and derived/pinned-Profile historical responses,
+and acceptance must inspect actual authenticated UI rendering, not HTTP 200 only.
+
+NIR pause/termination regressions cover colon/newline and numbered answer requests,
+question options, mixed tool batches and genuine-user-only resume in the actual
+Lead chain, including LoopDetectionMiddleware. A completed experiment changes the
+no-argument context-read loop key; transport IDs, workflow revisions and status
+refreshes do not. Loop/token hard stops carry typed agent_termination metadata.
+NIR ends the graph, persists runtime_termination in the current binding and closes
+incomplete search with the exact failure reason, preserving prior budget source,
+frozen/final artifacts and approvals. It never turns a runtime stop into LLM
+STOP/RETAIN or a final Test. Incomplete provider drafts keep their original data
+but are hidden before continuation; streaming ignores hidden messages. Anchors:
+tests/test_nir_user_wait.py, tests/test_nir_runtime_stop.py,
+tests/test_nir_response_grounding.py and existing loop/token tests.
+
 **Every new feature or bug fix MUST be accompanied by unit tests. No exceptions.**
 
 - Write tests in `backend/tests/` following the existing naming convention `test_<feature>.py`
@@ -1687,7 +1753,13 @@ UI-export detection is restricted to exact reserved headers and does not decode
 ordinary CSV files. Regression `nir_prepare_search` preserves named Cal/Val/Test
 membership in the existing sealed protocol. Classification keeps named roles,
 checks scientific integrity, and records original row indices after exclusions.
-Unassigned or missing required partitions fail; no random repair occurs. Generic
+All-unassigned exports use the existing automatic split, regardless of whether
+the old parsing-only marker is present. `has_fixed_partitions` treats any explicit
+role (including exclusion) as fixed: partial assignments or missing required
+partitions fail without random repair. Group separation protections remain active.
+`search_tools` returns safe Chinese WorkspaceError messages with a nonretryable
+intake code; autonomous failures block before a session and project status-only
+tools, rather than repeating preparation. Generic
 conversion and automatic repartitioning reject these exports with a supported
 entry hint, protecting explicit membership. Saved labels never imply external
 validation. No migration or training during save/view is required. Anchors:

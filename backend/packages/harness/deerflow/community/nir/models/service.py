@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import stat
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping
@@ -25,12 +26,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deerflow.community.nir._common import _read_regular_bytes, _verify_trusted_model_bundle
 from deerflow.community.nir.datasets.service import _owner_admission_lock, _size_of_regular_files
+from deerflow.community.nir.models.report import build_report, complete_dimensions
+from deerflow.community.nir.models.source import recorded_source, verified_library_source, verify_historical_source
 from deerflow.community.nir.registration import _registration_gate, _validation_goal_gate
 from deerflow.config.nir_library_config import NIRLibraryConfig
 from deerflow.config.paths import Paths
 from deerflow.persistence.nir_library.model import (
     NIRDatasetProfileRow,
     NIRDatasetRow,
+    NIRDatasetUseRow,
     NIRModelVersionRow,
 )
 from deerflow.persistence.thread_meta.model import ThreadMetaRow
@@ -71,6 +75,7 @@ def _public(row: NIRModelVersionRow, *, reused_existing: bool = False) -> dict:
         "metrics_sha256": row.metrics_sha256,
         "training_data_sha256": row.training_data_sha256,
         "metrics_summary": metadata.get("metrics_summary", {}),
+        "report_summary": {key: metadata["report"].get(key) for key in ("target", "unit", "sample_count", "feature_count", "metrics")} if isinstance(metadata.get("report"), dict) else None,
         "source_dataset_id": row.source_dataset_id,
         "source_profile_id": row.source_profile_id,
         "source_thread_id": row.source_thread_id,
@@ -303,6 +308,67 @@ class ModelService:
                 raise ModelError("lineage_mismatch", "Source Profile does not match the source Dataset and owner")
         return dataset_id, profile_id
 
+    async def _recover_dataset(self, session, owner, thread, metrics):
+        """Recover missing display lineage only from verified owner-scoped input evidence."""
+        from deerflow.community.nir.datasets.service import DatasetError, _validated_mapping, _workspace_attachment
+
+        try:
+            source = await asyncio.to_thread(recorded_source, metrics, self.paths, owner, thread)
+            if source is None:
+                return None
+            dataset = await session.scalar(select(NIRDatasetRow).where(NIRDatasetRow.owner_user_id == owner, NIRDatasetRow.sha256 == source["sha256"], NIRDatasetRow.status.in_({"ready", "archived"})))
+            profile_id = None
+            if dataset is None:
+                uses = (
+                    await session.scalars(
+                        select(NIRDatasetUseRow)
+                        .where(
+                            NIRDatasetUseRow.owner_user_id == owner,
+                            NIRDatasetUseRow.thread_id == thread,
+                            NIRDatasetUseRow.attachment_filename == source["path"].name,
+                            NIRDatasetUseRow.status == "attached",
+                        )
+                        .limit(2)
+                    )
+                ).all()
+                if len(uses) != 1:
+                    return None
+                use = uses[0]
+                dataset = await session.scalar(
+                    select(NIRDatasetRow).where(NIRDatasetRow.id == use.dataset_id, NIRDatasetRow.owner_user_id == owner, NIRDatasetRow.sha256 == use.source_sha256, NIRDatasetRow.status.in_({"ready", "archived"}))
+                )
+                if dataset is None:
+                    return None
+                if not await asyncio.to_thread(verified_library_source, self.paths, owner, dataset):
+                    return None
+                profile_id = use.profile_id
+                if profile_id:
+                    profile = await session.scalar(select(NIRDatasetProfileRow).where(NIRDatasetProfileRow.id == profile_id, NIRDatasetProfileRow.dataset_id == dataset.id, NIRDatasetProfileRow.owner_user_id == owner))
+                    if profile is None:
+                        return None
+                    if _validated_mapping(profile.mapping_json)[1] != profile.mapping_sha256:
+                        return None
+
+                    # A profile's materialized training copy differs from raw
+                    # library bytes; verify the exact pinned mapping as well.
+                    def check_attachment():
+                        raw = self.paths.user_nir_dataset_dir(owner, dataset.id) / PurePosixPath(dataset.storage_relpath).name
+                        with tempfile.TemporaryDirectory(prefix="nir-model-source-") as staging:
+                            with _workspace_attachment(raw, profile, Path(staging), dataset.sha256, dataset.size_bytes) as (_, digest, _size):
+                                return digest == source["sha256"]
+
+                    if not await asyncio.to_thread(check_attachment):
+                        return None
+                elif dataset.sha256 != source["sha256"]:
+                    return None
+            if not await asyncio.to_thread(verified_library_source, self.paths, owner, dataset):
+                return None
+            if not await asyncio.to_thread(verify_historical_source, source):
+                return None
+            return {"id": dataset.id, "name": dataset.name, "source_sha256": dataset.sha256, "profile_id": profile_id}
+        except (DatasetError, OSError, ValueError, KeyError, TypeError, sqlite3.Error):
+            return None  # Absent or ambiguous history must not invent a link.
+
     async def list_models(self, owner: str, *, include_archived: bool = False) -> list[dict]:
         self._enabled()
         async with self.session_factory() as session:
@@ -398,6 +464,12 @@ class ModelService:
         if attempt < 1:
             raise ModelError("lineage_mismatch", "Workflow attempt lineage is missing")
         preprocessing = {"steps": metrics.get("preprocessing_steps", [])}
+        lineage_workflow = dict(workflow)
+        if not workflow.get("dataset_id") and not workflow.get("dataset_profile_id"):
+            async with self.session_factory() as session:
+                recovered = await self._recover_dataset(session, owner, source_thread_id, metrics)
+            if recovered:
+                lineage_workflow.update(dataset_id=recovered["id"], dataset_profile_id=recovered["profile_id"])
         metadata = {
             "schema_version": 1,
             "model_id": model_id,
@@ -414,10 +486,16 @@ class ModelService:
                 "run_id": clean_run_id,
                 "attempt": attempt,
                 "workflow_project_id": workflow.get("project_id"),
-                "dataset_id": workflow.get("dataset_id"),
-                "profile_id": workflow.get("dataset_profile_id"),
+                "dataset_id": lineage_workflow.get("dataset_id"),
+                "profile_id": lineage_workflow.get("dataset_profile_id"),
+                "tool_call_id": evidence.get("tool_call_id"),
             },
         }
+        metadata["report"] = await asyncio.to_thread(build_report, metrics, metadata["source"], self.paths.thread_dir(source_thread_id, user_id=owner) / "nir-process")
+        metadata["method"] = metadata["report"]["method"]
+        if not isinstance(metrics.get("preprocessing_steps"), list) and metadata["report"]["preprocessing"] is not None:
+            preprocessing = {"steps": metadata["report"]["preprocessing"]}
+            metadata["preprocessing"] = preprocessing
         metadata_bytes = (json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
         try:
             manifest_size = (Path(str(model_source) + ".manifest.json")).lstat().st_size
@@ -466,7 +544,7 @@ class ModelService:
                 )
                 if int(version_count or 0) >= self.policy.max_model_versions_per_id:
                     raise ModelError("version_limit", "Archive an older model version before promoting another")
-                dataset_id, profile_id = await self._validate_lineage(session, owner, workflow)
+                dataset_id, profile_id = await self._validate_lineage(session, owner, lineage_workflow)
                 await self._admit_model(session, owner, package_size)
 
                 stage_root = model_root / ".staging"
@@ -509,7 +587,7 @@ class ModelService:
                         metrics_sha256=str(verified["metrics_sha256"]),
                         training_data_sha256=str(verified["training_data_sha256"]),
                         validation_scope=validation_scope,
-                        method=str(metrics.get("method")) if metrics.get("method") else None,
+                        method=metadata["method"],
                         preprocessing_json=preprocessing,
                         source_dataset_id=dataset_id,
                         source_profile_id=profile_id,
@@ -551,6 +629,52 @@ class ModelService:
             )
         except (ValueError, OSError) as exc:
             raise ModelError("artifact_unverified", "Stored model package failed integrity verification") from exc
+
+    async def get_report(self, owner: str, model_id: str, version: str) -> dict:
+        """Owner-scoped report; verify saved bytes without deserializing the model."""
+        self._enabled()
+        async with self.session_factory() as session:
+            row = await session.scalar(
+                select(NIRModelVersionRow).where(
+                    NIRModelVersionRow.owner_user_id == owner,
+                    NIRModelVersionRow.model_id == model_id,
+                    NIRModelVersionRow.version == version,
+                    NIRModelVersionRow.status.in_({"ready", "archived"}),
+                )
+            )
+            if row is None:
+                raise ModelError("model_not_found", "Model version not found")
+            verified = await self._verify_stored(row)
+            metadata = row.metadata_json or {}
+            report = metadata.get("report")
+            if not isinstance(report, dict):
+                report = await asyncio.to_thread(
+                    build_report,
+                    verified["metrics"],
+                    metadata.get("source", {}),
+                    self.paths.thread_dir(row.source_thread_id, user_id=owner) / "nir-process",
+                )
+            report = complete_dimensions(report, verified["metrics"])
+            dataset = None
+            if row.source_dataset_id:
+                dataset_row = await session.scalar(
+                    select(NIRDatasetRow).where(
+                        NIRDatasetRow.id == row.source_dataset_id,
+                        NIRDatasetRow.owner_user_id == owner,
+                        NIRDatasetRow.status.in_({"ready", "archived"}),
+                    )
+                )
+                if dataset_row:
+                    dataset = {"id": dataset_row.id, "name": dataset_row.name, "source_sha256": dataset_row.sha256, "profile_id": row.source_profile_id}
+            elif row.source_dataset_id is None:
+                dataset = await self._recover_dataset(session, owner, row.source_thread_id, verified["metrics"])
+            model = _public(row)
+            if dataset is not None:
+                # The detail payload is one consistent read projection. Keep
+                # the persisted row/package unchanged while exposing the same
+                # verified source identity in model metadata and dataset data.
+                model.update(source_dataset_id=dataset["id"], source_profile_id=dataset["profile_id"])
+            return {"model": model, "report": report, "dataset": dataset}
 
     async def attach_to_thread(
         self,

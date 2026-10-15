@@ -1,5 +1,12 @@
 # AGENTS.md
 
+Model details distinguish unverified dataset linkage from old model age. A
+server-recovered dataset link uses the existing pinned-profile preview and full
+dataset navigation; no extra manual selection is required. Raw-file linkage with
+no saved parsing version clearly labels the current overview. Missing dimensions
+stay absent unless supplied by verified backend metadata. The model-library
+browser regression checks this missing-link wording and read-only preview behavior.
+
 messages/nir-delivery-files.tsx adds existing ArtifactFileList cards under
 server-generated NIR delivery messages. It uses owner-scoped process hooks and
 requires a finalized, successfully published exact-session summary. Older message
@@ -230,9 +237,20 @@ owned record, reuses thread preparation and verified attachment, validates its
 upload path and displays a mounted file before manual submission. It never
 starts a synthetic run. Failure offers retry, requests abort on navigation,
 and a successful attachment removes its URL marker.
-The Model page covers
-versions, bounded metrics and lineage, attach, archive, and controlled deletion.
-Both deletion dialogs require the exact server identifier and explain that
+The Model page shows ready model cards without storage, archive or deletion UI.
+Card links open `/workspace/nir/models/[model_id]/[version]`; `model-detail.tsx`
+reads the owner-scoped verified report and reuses DatasetPreview with the pinned
+training Profile (including superseded confirmed Profiles). Old null Profiles
+are explicitly labeled as current-library previews. Dataset/hash/Profile mismatches
+never render. Report and preview reads abort on navigation and retry separately.
+`model-report-charts.tsx` uses bounded native SVG with Chinese axes, per-scope R²
+and RMSE, red identity lines and ordered before/after training spectra. Missing
+old chart evidence stays absent. Metrics never mix tuning R² with Test RMSEP.
+Model attach opens `/workspace/chats/new?model=...&version=...`; the composer
+reads the exact owned version, prepares its thread and reuses verified attachment
+without submitting a run. Retry/abort and mounted selection follow `/models`.
+Anchors: `model-report.test.ts`, `model-library.spec.ts`, `model-command.spec.ts`.
+Dataset deletion dialogs require the exact server identifier and explain that
 thread-attached copies and backups remain. Storage copy distinguishes persistent
 Dataset/Model bytes, thread-copy bytes, the new-write admission threshold, and
 free disk; never label the admission threshold as a strict total quota. Display

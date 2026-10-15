@@ -86,7 +86,7 @@ class DeliveryFakeLLM(InitialFakeLLM):
         )
 
 
-def make_delivery_lead(monkeypatch, model, *, middlewares=None):
+def make_delivery_lead(monkeypatch, model, *, middlewares=None, extra_tools=None):
     import deerflow.tools
     from deerflow.agents.lead_agent import agent as lead
     from deerflow.agents.middlewares.nir_workflow_middleware import NIRWorkflowMiddleware
@@ -103,6 +103,7 @@ def make_delivery_lead(monkeypatch, model, *, middlewares=None):
         decision_tools.nir_decision_history_tool,
         search_tools.nir_freeze_search_tool,
         search_tools.nir_finalize_search_tool,
+        *(extra_tools or []),
     ]
     app = AppConfig(models=[ModelConfig(name="fake", use="langchain_openai:ChatOpenAI", model="fake", supports_thinking=False)], sandbox=SandboxConfig(use="deerflow.sandbox.local:LocalSandboxProvider"))
     monkeypatch.setattr(lead, "create_chat_model", lambda **k: model)

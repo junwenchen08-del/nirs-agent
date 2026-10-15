@@ -109,6 +109,7 @@ export interface DatasetWorkspaceSpectra {
 export interface NIRDatasetPreview {
   dataset_id: string;
   source_sha256: string;
+  profile_id?: string | null;
   status: "ready" | "needs_mapping";
   message: string;
   analysis_type: DatasetAnalysisType;
@@ -157,6 +158,10 @@ export interface NIRModelVersion {
   metrics_sha256: string;
   training_data_sha256: string;
   metrics_summary: Record<string, unknown>;
+  report_summary?: Pick<
+    NIRModelReport,
+    "target" | "unit" | "sample_count" | "feature_count" | "metrics"
+  > | null;
   source_dataset_id: string | null;
   source_profile_id: string | null;
   source_thread_id: string;
@@ -166,6 +171,56 @@ export interface NIRModelVersion {
   updated_at: string | null;
   last_used_at: string | null;
   reused_existing: boolean;
+}
+
+export interface ModelMetric {
+  scope: "calibration" | "validation" | "final_test";
+  R2: number | null;
+  RMSE: number | null;
+  MAE: number | null;
+  n: number | null;
+}
+
+export interface ModelChart {
+  type: "prediction" | "spectra";
+  scope: string;
+  x: number[];
+  y?: number[];
+  series?: Array<{ id: string; values: number[] }>;
+  x_label?: string | null;
+  x_unit?: string | null;
+  y_unit?: string | null;
+  n_total: number;
+  n_returned: number;
+  axis_total?: number;
+}
+
+export interface NIRModelReport {
+  schema_version: 1;
+  target: string | null;
+  unit: string | null;
+  method: string | null;
+  sample_count: number | null;
+  feature_count: number | null;
+  model_feature_count: number | null;
+  parameters: Record<string, string | number | boolean | null>;
+  preprocessing: Array<{
+    method: string;
+    params: Record<string, string | number | boolean | null>;
+  }> | null;
+  metrics: ModelMetric[];
+  charts: ModelChart[];
+}
+
+export interface NIRModelDetail {
+  model: NIRModelVersion;
+  report: NIRModelReport;
+  dataset: {
+    id: string;
+    name: string;
+    source_sha256: string;
+    profile_id: string | null;
+  } | null;
 }
 
 export interface NIRStorageUsage {

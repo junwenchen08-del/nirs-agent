@@ -150,6 +150,24 @@ async def test_preview_is_owner_scoped_read_only_and_rejects_tampering(library):
 
 
 @pytest.mark.asyncio
+async def test_model_preview_pins_superseded_training_profile(library):
+    service, paths = library
+    source = _upload(paths, "alice", "thread1", "pinned.csv", b"target,1000,1100\n1.5,1,2\n2.5,2,3\n")
+    saved = await service.save_from_thread_upload("alice", "thread1", source, "Pinned", save_confirmed=True)
+    first = await service.create_profile("alice", saved["id"], task_type="calibration", schema_status="auto", mapping={})
+    await service.confirm_profile("alice", saved["id"], first["id"])
+    later = await service.create_profile("alice", saved["id"], task_type="classification", schema_status="auto", mapping={})
+    await service.confirm_profile("alice", saved["id"], later["id"])
+    pinned = await service.preview_dataset("alice", saved["id"], profile_id=first["id"])
+    current = await service.preview_dataset("alice", saved["id"])
+    assert pinned["profile_id"] == first["id"] and pinned["analysis_type"] == "regression"
+    assert current["profile_id"] == later["id"] and current["analysis_type"] == "classification"
+    with pytest.raises(DatasetError) as exc:
+        await service.preview_dataset("alice", saved["id"], profile_id="foreign-profile")
+    assert exc.value.code == "profile_not_found"
+
+
+@pytest.mark.asyncio
 async def test_confirmed_save_is_immutable_deduplicated_and_owner_scoped(library) -> None:
     service, paths = library
     data = b"wv,x\n1000,0.12\n1001,0.14\n"

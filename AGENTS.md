@@ -390,6 +390,61 @@ starting a run, retains any newly added data files, and passes the selection int
 the next manually submitted message for the existing prediction workflow.
 Selection is not inference evidence. See `docs/nir-model-command.md`.
 
+Workspace exports with every sample unassigned use the existing automatic
+regression/classification split, including historical exports without the
+parsing-only marker. Any explicit role, including exclusion, selects fixed
+membership; partial roles and missing partitions fail without random repair.
+Saved bands, targets, grouping protections and source bytes remain authoritative.
+Safe workspace intake failures return a Chinese reason; autonomous intake blocks
+without a session and exposes status only, preventing unchanged-input retries.
+
+NIR final responses default to plain Chinese outcome/metrics/next-step summaries.
+Grounding replaces a matching search record with authoritative finalized evidence
+without mutating history or duplicating experiments. Future validation advice is
+distinct from a completed-validation claim. Final metrics remain scope-separated,
+and result/path checks include joblib. Internal guard reasons stay in metadata.
+Library saved/reused, registration-only and failed-save outcomes remain distinct.
+
+An autonomous NIR user question is a durable pause, not a premature-final retry.
+`user_wait.py` recognizes explicit choices and tracks the original user boundary;
+only a later genuine HumanMessage releases it. Hidden continuation, summary and
+memory messages cannot do so. Questions suppress sibling tool calls, and waiting
+denies further execution/finalization/registration without selecting a model.
+The existing clarification middleware ends explicit ask calls; waiting state is
+checkpointed and persisted in the current unified binding without a schema change.
+Answer requests ending in a colon/newline or asking for a numbered reply also
+pause; the displayed question retains its choices. Normal no-argument context
+reads after different persisted experiments are distinct for loop detection;
+repeated reads without new experiment evidence still hit unchanged limits.
+Typed runtime stops take priority over automatic continuation, close incomplete
+search durably without a model choice or Test, and render a Chinese outcome.
+Unfinished provider drafts remain checkpointed but hidden from chat, including
+values snapshots ending in a hidden continuation message. Regression coverage:
+test_nir_user_wait.py, test_nir_runtime_stop.py, test_nir_response_grounding.py.
+
+The model library now uses ready cards, a Chinese-friendly model report page and
+server-verified input linkage. New sealed ingestion records source-file SHA/size;
+promotion recovers absent library IDs from the exact owner/thread source and saves
+them. Historical GET recovery verifies finalized session/freeze/search binding and
+bounded original-upload identity, never private search/Test caches or an estimator.
+Full historical partition binding must match; filenames alone cannot prove a link.
+Derived attachments retain the pinned Profile and verify its materialized bytes in
+temporary storage. GET does not rewrite model packages, DB lineage or approvals.
+Saved summary/curve metadata fills absent feature counts.
+The report's model projection must expose the same verified Dataset/Profile IDs
+as its dataset object, including read-only historical recovery. Stored lineage
+and packages stay unchanged. HTTP 200 alone cannot validate client compatibility;
+check the real authenticated page, dataset preview and saved charts as well.
+Tests:
+backend/tests/test_nir_model_dataset_link.py. See docs/nir-model-library.md.
+
+The model library uses ready cards, a Chinese-friendly model report page and
+one-click exact-version mounting into a new chat. It has no personal-storage,
+archive or deletion UI. Reports reuse bounded saved results and pinned Dataset
+Profiles; missing historical charts are never synthesized. ModelService verifies
+the stored package for every report read. See `docs/nir-model-library.md` and the
+module guides for the immutable report snapshot and browser regression anchors.
+
 The NIR retrieval knowledge base keeps vectors in ChromaDB and document
 governance in a lightweight SQLite catalog. Governed ingestion derives stable
 document IDs from DOI, normalized bibliography, or source SHA-256; content

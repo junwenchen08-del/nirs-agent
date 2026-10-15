@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
+
+from .user_wait import waiting_for_user
 
 _MANDATORY_WORKFLOW_ACTIONS = {
     "data_audit": {
@@ -95,6 +98,8 @@ def required_nir_workflow_action(
 
     if not isinstance(workflow, Mapping):
         return None
+    if waiting_for_user(workflow):
+        return None
     if workflow.get("search_protocol") == "sealed_holdout":
         if workflow.get("autonomous_delivery"):
             if workflow.get("stage") == "budget_exhausted":
@@ -159,7 +164,7 @@ class NIRStreamMessageGate:
         messages = state.get("messages")
         if not isinstance(messages, (list, tuple)) or not messages:
             return None
-        message = messages[-1]
+        message = _latest_visible_message(messages)
         if not _is_ai_message(message):
             return None
 
@@ -183,11 +188,15 @@ class NIRStreamMessageGate:
         messages = state.get("messages")
         if not isinstance(messages, (list, tuple)) or not messages:
             return True
-        message = messages[-1]
+        message = _latest_visible_message(messages)
         if not _is_ai_message(message) or getattr(message, "tool_calls", None):
             return True
         response_text = _message_text(message)
         return bool(response_text) and validate_nir_response(response_text, self._workflow).passed
+
+
+def _latest_visible_message(messages):
+    return next((message for message in reversed(messages) if not (getattr(message, "additional_kwargs", {}) or {}).get("hide_from_ui")), None)
 
 
 def _is_ai_message(message: Any) -> bool:
@@ -238,7 +247,7 @@ _CLASSIFICATION_METRIC_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 _MODEL_PATH_RE = re.compile(
-    r"(?P<path>(?:[A-Za-z]:[\\/]|/)[^\s`\"'<>，。；;]+?\.pkl)",
+    r"(?P<path>(?:[A-Za-z]:[\\/]|/)[^\s`\"'<>，。；;]+?\.(?:pkl|joblib))",
     re.IGNORECASE,
 )
 _METRICS_PATH_RE = re.compile(
@@ -246,7 +255,7 @@ _METRICS_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 _EXTERNAL_VALIDATION_RE = re.compile(
-    r"独立外部验证|外部验证|external\s+validation|externally\s+validated",
+    r"独立外部验证|外部验证|external\s+validation|externally\s+validated|测试使用了另外采集的数据",
     re.IGNORECASE,
 )
 _SEALED_TEST_PERFORMANCE_RE = re.compile(
@@ -374,16 +383,27 @@ def _summary_values(summary: Mapping[str, Any]) -> dict[str, list[float]]:
 
 
 def _attempt_evidence_records(workflow: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    """Return the bounded attempt ledger plus the latest evidence if needed."""
+    """Use the latest evidence for a matching experiment without another entry."""
 
     records = [item for item in (workflow.get("attempts") or []) if isinstance(item, Mapping)]
     latest = workflow.get("attempt_evidence")
     if isinstance(latest, Mapping):
         latest_path = _normalized_path(latest.get("metrics_path"))
         latest_experiment = latest.get("experiment_id")
-        already_present = any(latest_experiment and item.get("experiment_id") == latest_experiment or latest_path and _normalized_path(item.get("metrics_path")) == latest_path or item == latest for item in records)
-        if not already_present:
+        matching = next(
+            (
+                index
+                for index, item in reversed(list(enumerate(records)))
+                if latest_experiment and item.get("experiment_id") == latest_experiment or latest_path and _normalized_path(item.get("metrics_path")) == latest_path or item == latest
+            ),
+            None,
+        )
+        if matching is None:
             records.append(latest)
+        else:
+            # Finalization enriches the retained experiment with Test metrics
+            # and published paths. Do not keep its earlier search-only summary.
+            records[matching] = {**records[matching], **latest}
     return records[-10:]
 
 
@@ -411,6 +431,12 @@ def _has_positive_marker(text: str, pattern: re.Pattern[str]) -> bool:
         local_context = lowered[max(0, match.start() - 18) : min(len(lowered), match.end() + 1)]
         if any(negation in local_context for negation in _NEGATIONS):
             continue
+        if pattern is _EXTERNAL_VALIDATION_RE:
+            prefix = re.split(r"[。；;\n.!?]", lowered[: match.start()])[-1]
+            advice = re.search(r"建议|推荐|计划|后续需要|还需|尚需|有待|recommend|suggest|should|plan\s+to", prefix)
+            completed = re.search(r"已经|已通过|已完成|完成了|通过|already|passed|completed|confirmed|validated", prefix)
+            if advice and not completed:
+                continue
         return True
     return False
 
@@ -442,6 +468,8 @@ def _scope_disclosed(text: str, validation_scope: str) -> bool:
     if validation_scope == "independent_external_validation":
         return bool(_EXTERNAL_VALIDATION_RE.search(text))
     if validation_scope == "independent_holdout_not_external":
+        if "从这份数据中单独留出的样本" in text and "尚未用另外采集的数据验证" in text:
+            return True
         has_holdout = bool(re.search(r"独立留出|内部留出|holdout|internal\s+validation", text, re.IGNORECASE))
         external_is_negated = bool(
             re.search(
@@ -609,75 +637,61 @@ def validate_nir_response(
     )
 
 
-def _render_metric_summary(summary: Mapping[str, Any]) -> str | None:
-    labels = (
-        ("R2_val", "R²"),
-        ("RPD", "RPD"),
-        ("RMSEC", "RMSEC"),
-        ("RMSECV", "RMSECV"),
-        ("RMSEP", "RMSEP"),
-    )
-    values = [f"{label}={summary[key]}" for key, label in labels if isinstance(summary.get(key), int | float) and not isinstance(summary.get(key), bool)]
-    holdout = summary.get("holdout")
-    if isinstance(holdout, Mapping):
-        classification_labels = (
-            ("balanced_accuracy", "balanced accuracy"),
-            ("macro_f1", "macro-F1"),
-            ("mcc", "MCC"),
-        )
-        values.extend(f"{label}={holdout[key]}" for key, label in classification_labels if isinstance(holdout.get(key), int | float) and not isinstance(holdout.get(key), bool))
-    for section_key, section_label in (("holdout", "留出测试"), ("external", "外部测试")):
-        section = summary.get(section_key)
-        if not isinstance(section, Mapping):
-            continue
-        section_values = [f"{key}={value}" for key, value in section.items() if key in {"RMSE", "R2", "RPD", "bias"} and isinstance(value, int | float) and not isinstance(value, bool)]
-        if section_values:
-            values.append(f"{section_label}({', '.join(section_values)})")
-    return "；".join(values) if values else None
+def _display_number(value: Any) -> str | None:
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        return None
+    if value and abs(value) < 0.0001:
+        return f"{value:.3g}"
+    return f"{value:.4f}".rstrip("0").rstrip(".")
+
+
+def _result_metrics(summary: Mapping[str, Any]) -> list[str]:
+    # Show one evaluation scope at a time. Never mix a validation R² with a
+    # final-Test RMSE, nor synthesize missing measurements from other attempts.
+    section = next((summary[key] for key in ("test", "holdout", "external", "val") if isinstance(summary.get(key), Mapping) and summary[key] and not (key == "test" and summary.get("test_status") == "sealed")), summary)
+    lines = []
+    r2 = _display_number(section.get("R2", section.get("R2_val")))
+    rmse = _display_number(section.get("RMSE", section.get("RMSEP")))
+    if r2 is not None:
+        lines.append(f"- 预测效果 R² = {r2}（越接近 1 越好）")
+    if rmse is not None:
+        lines.append(f"- 预测误差 RMSE = {rmse}（越小越好）")
+    accuracy = _display_number(section.get("balanced_accuracy"))
+    if accuracy is not None:
+        lines.append(f"- 平衡准确率 = {accuracy}（各类别准确率的平均值，越接近 1 越好）")
+    return lines
 
 
 def render_grounded_nir_response(
     workflow: Mapping[str, Any],
     *,
     violations: tuple[str, ...] = (),
+    include_downloads: bool = True,
 ) -> str:
-    """Build a bounded, deterministic response from the attempt ledger."""
+    """Explain the current outcome in ordinary language using trusted facts."""
 
     if workflow.get("search_protocol") == "sealed_holdout" and workflow.get("decision_strategy") == "llm_autonomous" and workflow.get("stage") in {"execution", "decision_review", "budget_exhausted", "initial_result", "blocked"}:
         records = _attempt_evidence_records(workflow)
-        failure = workflow.get("continuation_failure") or {}
-        lines = ["自主建模流程尚未完成。"]
-        if failure:
-            detail = "决策工具 JSON 无法解析" if failure.get("invalid_json") else "LLM 未完成必要工具操作"
-            lines.append(f"- 中断原因：{detail}，已达到有限续接次数；并非模型质量门禁自动停止。")
-            lines.append(f"- 未完成的操作：`{failure['required_action']}`")
-        lines.append(f"- 已记录 {len(records)} 个模型实验；验证协议：`sealed_holdout`。")
-        lines.append("- 以下指标来自 Cal CV / Val；同一数据集内部验证，不是外部验证。")
-        for index, record in enumerate(records, 1):
-            summary = record.get("metrics_summary") or {}
-            values = []
-            if isinstance(summary.get("RMSECV"), int | float):
-                values.append(f"Cal CV mean-fold RMSE={summary['RMSECV']}")
-            for scope, label in (("train_cv", "Cal CV OOF"), ("val", "Val")):
-                metrics = summary.get(scope) or {}
-                values.extend(f"{label} {key}={metrics[key]}" for key in ("RMSE", "R2", "RPD") if isinstance(metrics.get(key), int | float))
-            lines.append(f"- 尝试 {index}：`{record.get('experiment_id') or 'unknown'}`，{record.get('method') or 'unknown'}；" + "；".join(values))
-        if failure or workflow.get("stage") in {"blocked", "decision_review", "execution", "budget_exhausted"}:
-            lines.append("- 尚无合法最终保留选择或交付；Test 保持封存，未生成最终测试评价。")
-        return "\n".join(lines)
+        lines = ["建模尚未完成，暂时无法提供完整结果。"]
+        if records:
+            lines.append(f"已记录 {len(records)} 次方法比较，详细过程保留在任务记录中。")
+        ingestion = workflow.get("ingestion_evidence") or {}
+        if ingestion.get("code") == "nir_ingestion_workspace_invalid" and ingestion.get("error"):
+            lines.append(ingestion["error"])
+            lines.append("请在数据集页面补齐设置，保存后重新开始建模。")
+        elif workflow.get("runtime_termination"):
+            source = workflow["runtime_termination"].get("source")
+            lines.append("操作重复多次仍未完成，本次任务已停止。已有结果已保留。" if source == "loop_detection" else "本次任务达到运行限制，已停止。已有结果已保留。")
+        elif workflow.get("continuation_failure"):
+            lines.append("建模过程中未能完成下一步操作，本次任务已停止。可以稍后重新发起建模。")
+        else:
+            lines.append("请查看任务进度，等待完成后再查看最终结果。" if workflow.get("stage") != "blocked" else "本次任务已停止，请检查数据设置后重新开始。")
+        return "\n\n".join(lines)
 
     audit_evidence = workflow.get("audit_evidence")
     audit_evidence = audit_evidence if isinstance(audit_evidence, Mapping) else {}
     if workflow.get("task_type") == "inspection" and audit_evidence:
-        lines = ["数据检查已完成（未执行预处理或建模）。"]
-        lines.append(f"- 工作流状态：`{workflow.get('stage') or 'unknown'}` / `{workflow.get('next_action') or 'unknown'}`")
-        data_path = str(audit_evidence.get("data_path") or workflow.get("data_path") or "")
-        if data_path:
-            lines.append(f"- 文件：`{data_path}`")
-        format_name = audit_evidence.get("format")
-        layout = audit_evidence.get("layout_pattern")
-        if format_name or layout:
-            lines.append(f"- 格式与布局：{format_name or 'unknown'} / {layout or 'unknown'}")
+        lines = ["数据检查已完成。"]
         n_samples = audit_evidence.get("n_samples")
         n_wavelengths = audit_evidence.get("n_wavelengths")
         if isinstance(n_samples, int) and isinstance(n_wavelengths, int):
@@ -705,25 +719,36 @@ def render_grounded_nir_response(
 
     evidence = workflow.get("attempt_evidence")
     if not isinstance(evidence, Mapping):
-        return "当前工作流尚无可引用的建模证据，因此不能报告模型指标、外部验证或部署结论。请先完成与验证目标一致的建模步骤。"
+        return "暂时没有可展示的建模结果。请先上传或选择数据，再开始建模。"
 
     summary = evidence.get("metrics_summary")
     summary = summary if isinstance(summary, Mapping) else {}
     scope = str(evidence.get("validation_scope") or "")
     if scope == "independent_external_validation":
-        scope_text = "独立外部验证"
+        scope_text = "本次测试使用了另外采集的数据。"
         if workflow.get("validation_goal") == "production":
-            scope_text += "（仅证明外部验证结果，不等同于生产可部署）"
+            scope_text += "实际生产使用仍需另外确认。"
     else:
-        scope_text = "同一数据集独立留出（不是外部验证）"
+        scope_text = "本次测试使用从这份数据中单独留出的样本，尚未用另外采集的数据验证。"
 
-    lines = [
-        "原回答包含未被当前运行证据支持的结论，已由证据门禁改写。",
-        "",
-        f"- 验证协议：`{evidence.get('protocol') or 'unknown'}`",
-        f"- 验证范围：{scope_text}",
-        f"- 质量门禁：{'通过' if summary.get('passed') is True else '未通过'}",
-    ]
+    library = workflow.get("model_library") or {}
+    if library.get("status") in {"saved", "reused"}:
+        status = "模型已保存到模型库。你可以打开模型卡片查看详情，并挂载到新对话中使用。"
+    elif workflow.get("registered_model") and library.get("status") == "failed":
+        status = "模型已完成登记，但保存到模型库未成功。可稍后重试保存，无需重新训练。"
+    elif workflow.get("registered_model"):
+        status = "模型已完成登记。"
+    elif workflow.get("stage") == "blocked":
+        status = "本次建模已停止，已记录的结果如下。"
+    else:
+        status = "模型训练和测试已完成。"
+    lines = [status, ""]
+    if summary.get("passed") is True:
+        lines.append("结果已达到本次设定的要求。")
+    elif summary.get("passed") is False:
+        lines.append("结果尚未达到本次设定的要求，可以查看报告中的改进建议。")
+    lines.extend(_result_metrics(summary))
+    lines.append(scope_text)
     raw_range = _numeric_pair(audit_evidence.get("raw_wavelength_range"))
     usable_range = _numeric_pair(audit_evidence.get("usable_wavelength_range"))
     if raw_range:
@@ -734,21 +759,9 @@ def render_grounded_nir_response(
     usable_count = audit_evidence.get("usable_wavelength_count")
     if isinstance(constant_count, int) and isinstance(usable_count, int):
         lines.append(f"- 光谱列：恒定波长列 {constant_count} 个；可用波长 {usable_count} 个（范围说明不代表已删除恒定列）")
-    attempts = _attempt_evidence_records(workflow)
-    for index, attempt in enumerate(attempts, start=1):
-        attempt_number = attempt.get("attempt") or index
-        attempt_summary = attempt.get("metrics_summary")
-        attempt_summary = attempt_summary if isinstance(attempt_summary, Mapping) else {}
-        metric_text = _render_metric_summary(attempt_summary)
-        status = "通过" if attempt.get("passed") is True or attempt_summary.get("passed") is True else "未通过"
-        attempt_line = f"- 尝试 {attempt_number}：质量门禁{status}"
-        if metric_text:
-            attempt_line += f"；{metric_text}"
-        lines.append(attempt_line)
-        if attempt.get("model_path"):
-            lines.append(f"  - 模型产物：`{attempt['model_path']}`")
-        if attempt.get("metrics_path"):
-            lines.append(f"  - 指标产物：`{attempt['metrics_path']}`")
-    if violations:
-        lines.append("- 说明：未采用原回答中与当前证据不一致的数值、验证范围或产物声明。")
+    if workflow.get("stage") == "review" and workflow.get("approval_status") == "pending" and summary.get("passed") is True:
+        lines.extend(["", "如需保存到模型库，回复“同意保存到模型库”即可。"])
+    downloads = [f"[{label}]({evidence[key]})" for label, key in (("模型文件", "model_path"), ("结果数据", "metrics_path")) if evidence.get(key)]
+    if downloads and include_downloads:
+        lines.extend(["", " · ".join(downloads)])
     return "\n".join(lines)

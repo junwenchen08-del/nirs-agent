@@ -728,7 +728,7 @@ class DatasetService:
             rows = (await session.scalars(select(NIRDatasetRow).where(NIRDatasetRow.owner_user_id == owner, NIRDatasetRow.status != "deleted").order_by(NIRDatasetRow.created_at.desc()).limit(100))).all()
             return [_public(row) for row in rows]
 
-    async def preview_dataset(self, owner: str, dataset_id: str) -> dict:
+    async def preview_dataset(self, owner: str, dataset_id: str, *, profile_id: str | None = None) -> dict:
         """Owner-only aggregate preview; preserve source, profiles and workflows."""
         from .preview import build_preview
 
@@ -747,16 +747,19 @@ class DatasetService:
                 .where(
                     NIRDatasetProfileRow.dataset_id == dataset_id,
                     NIRDatasetProfileRow.owner_user_id == owner,
-                    NIRDatasetProfileRow.profile_status == "confirmed",
+                    NIRDatasetProfileRow.profile_status.in_({"confirmed", "superseded"} if profile_id else {"confirmed"}),
+                    *([NIRDatasetProfileRow.id == profile_id] if profile_id else []),
                 )
                 .order_by(NIRDatasetProfileRow.profile_version.desc())
                 .limit(1)
             )
+            if profile_id and profile is None:
+                raise DatasetError("profile_not_found", "训练时的数据解析版本已不可用。")
             path = self.paths.user_nir_dataset_dir(owner, row.id) / PurePosixPath(row.storage_relpath).name
             result = await asyncio.to_thread(build_preview, path, _public_profile(profile) if profile else None)
             # A changed or replaced file must never be presented as this dataset.
             await self._verify_row(session, owner, row)
-            return {"dataset_id": row.id, "source_sha256": row.sha256, **result}
+            return {"dataset_id": row.id, "source_sha256": row.sha256, "profile_id": profile.id if profile else None, **result}
 
     async def _parsing_source(self, session, owner: str, dataset_id: str):
         self._enabled()

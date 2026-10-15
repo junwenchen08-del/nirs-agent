@@ -180,6 +180,15 @@ async function mockLibrary(page: Page) {
     }),
   );
   await page.route(
+    "**/api/nir/models/tablet_assay?version=tablet-v1",
+    (route) => route.fulfill({ json: MODEL }),
+  );
+  await page.route("**/api/langgraph/threads", (route) =>
+    route.fulfill({
+      json: { ...route.request().postDataJSON(), status: "idle", values: {} },
+    }),
+  );
+  await page.route(
     "**/api/nir/models/tablet_assay/versions/tablet-v1/attach",
     (route) =>
       route.fulfill({
@@ -187,6 +196,8 @@ async function mockLibrary(page: Page) {
         contentType: "application/json",
         body: JSON.stringify({
           status: "attached",
+          model_id: MODEL.model_id,
+          version: MODEL.version,
           model_path:
             "/mnt/user-data/outputs/models/tablet_assay/tablet-v1/model.pkl",
         }),
@@ -238,7 +249,7 @@ test("dataset library shows owner-scoped assets, history, attach, and controlled
   );
 });
 
-test("model library labels validation conservatively and attaches an approved version", async ({
+test("model library shows ready cards and mounts an approved version in a new chat", async ({
   page,
 }) => {
   const routes = mockLangGraphAPI(page);
@@ -251,18 +262,8 @@ test("model library labels validation conservatively and attaches an approved ve
   ).toBeVisible();
   await expect(page.getByText("tablet_assay", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("Independent internal holdout; not external validation", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("Validation scope is not production approval", {
-      exact: true,
-    }),
-  ).toBeVisible();
-
-  await page.getByRole("button", { name: "Attach to chat" }).click();
-  await page.getByLabel("Target chat ID").fill("prediction-thread");
-  await page.getByRole("button", { name: "Attach to chat" }).last().click();
-  await expect(page.getByText("Operation completed")).toBeVisible();
+    page.getByRole("button", { name: "Archive", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("link", { name: "Attach to chat" }).click();
+  await expect(page.getByTestId("mounted-model")).toContainText(MODEL.model_id);
 });

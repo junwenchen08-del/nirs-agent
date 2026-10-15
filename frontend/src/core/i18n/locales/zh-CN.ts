@@ -226,9 +226,9 @@ export const zhCN: Translations = {
     datasetsTitle: "光谱数据集库",
     datasetsDescription:
       "管理明确保存的 CSV、TXT 和 MAT 数据，维护解析配置并安全挂载到新会话。",
-    modelsTitle: "持久模型库",
+    modelsTitle: "模型库",
     modelsDescription:
-      "查看通过审批和注册门槛的模型版本、验证范围、来源血缘及跨会话复用状态。",
+      "查看模型使用的数据、处理方法和预测效果，也可以带到新对话中使用。",
     featureDisabledTitle: "NIR 资产库未启用",
     featureDisabledDescription:
       "请由管理员在配置中启用 nir_library，然后重新打开此页面。",

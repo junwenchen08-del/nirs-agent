@@ -345,6 +345,14 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState]):
 
         thread_id = self._get_thread_id(runtime)
         call_hash = _hash_tool_calls(tool_calls)
+        workflow = state.get("nir_workflow") or {}
+        if workflow.get("autonomous_delivery") and workflow.get("search_protocol") == "sealed_holdout" and all(tc.get("name") == "nir_decision_context" for tc in tool_calls):
+            # Every completed experiment requires the same no-argument read.
+            # Only persisted experiment progress distinguishes those reads;
+            # workflow revisions, new call IDs and status refreshes do not.
+            evidence = workflow.get("attempt_evidence") or {}
+            progress = [workflow.get("search_session_id"), evidence.get("experiment_id"), evidence.get("decision_id")]
+            call_hash = hashlib.md5(json.dumps([call_hash, progress], sort_keys=True).encode()).hexdigest()[:12]
 
         with self._lock:
             # Touch / create entry (move to end for LRU)
@@ -485,7 +493,13 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState]):
             messages = state.get("messages", [])
             last_msg = messages[-1]
             content = self._append_text(last_msg.content, warning or _HARD_STOP_MSG)
-            stripped_msg = last_msg.model_copy(update=self._build_hard_stop_update(last_msg, content))
+            update = self._build_hard_stop_update(last_msg, content)
+            update["additional_kwargs"]["agent_termination"] = {"source": "loop_detection", "reason": warning or _HARD_STOP_MSG, "tool_calls": deepcopy(last_msg.tool_calls)}
+            if (state.get("nir_workflow") or {}).get("autonomous_delivery"):
+                # The NIR middleware renders the terminal outcome in Chinese.
+                # Keep the internal reason and rejected call in checkpoint data.
+                update["content"] = last_msg.content
+            stripped_msg = last_msg.model_copy(update=update)
             return {"messages": [stripped_msg]}
 
         if warning:

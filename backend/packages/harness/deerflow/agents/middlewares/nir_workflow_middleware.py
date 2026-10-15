@@ -26,6 +26,7 @@ from deerflow.community.nir.response_grounding import (
     required_nir_workflow_action,
     validate_nir_response,
 )
+from deerflow.community.nir.user_wait import begin_user_wait, question_for_user, resume_user_wait, waiting_for_user, waiting_message
 from deerflow.community.nir.workflow import (
     NIRWorkflowError,
     block_workflow_after_continuation_failure,
@@ -715,6 +716,12 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
     workflow = _state_from_request(request).get("nir_workflow")
     args = request.tool_call.get("args")
     args = args if isinstance(args, Mapping) else {}
+    if waiting_for_user(workflow):
+        own_question = tool_name == "ask_clarification" and request.tool_call.get("id") == workflow["user_question"].get("tool_call_id")
+        if own_question:
+            return None
+        if not own_question and not (tool_name == "nir_workflow" and args.get("action") == "status"):
+            return _denied_message(request, code="nir_waiting_for_user", error="正在等待你的回复，确认前不会继续建模。", workflow=workflow)
     # Honor the user's explicit strategy request before a workflow exists.
     # This rejects a downgrade; it does not invent a modeling decision.
     from deerflow.community.nir.web_entry import web_request
@@ -781,6 +788,8 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
             allowed -= {"nir_search_model", "nir_freeze_search", "nir_finalize_search"}
             allowed |= {"nir_decision_context", "nir_submit_decision", "nir_execute_decision", "nir_decision_history"}
             if workflow.get("autonomous_delivery"):
+                if workflow.get("stage") not in {"blocked", "completed", "registered"}:
+                    allowed |= {"ask_clarification"}
                 if not (workflow.get("delivery_policy") or {}).get("automatic_delivery"):
                     allowed |= {"nir_freeze_search", "nir_finalize_search"}
                 if not workflow.get("search_session_id") and workflow.get("stage") in {"intake", "clarification"}:
@@ -1323,7 +1332,7 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
                 auto = session.get("automatic_delivery") or {}
                 if auto.get("workflow"):
                     stored = auto["workflow"] if auto["workflow"].get("revision", 0) > stored.get("revision", 0) else stored
-                if auto.get("status") in {"queued", "failed"} and not auto.get("lease") and session["stage"] in {"stopped", "frozen", "finalized"}:
+                if not waiting_for_user(stored) and auto.get("status") in {"queued", "failed"} and not auto.get("lease") and session["stage"] in {"stopped", "frozen", "finalized"}:
                     from deerflow.community.nir.automatic_delivery import complete_terminal_delivery
                     from deerflow.community.nir.web_entry import persist_unified_workflow
 
@@ -1355,15 +1364,37 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         if (value.get("automatic_delivery") or {}).get("status") != "delivered":
             return None
         paths = value["automatic_delivery"]
-        text = "模型已冻结，最终独立留出评价和报告交付已完成，等待用户审批。\n\n" + render_grounded_nir_response(workflow)
-        text += "\n\n" + " · ".join(f"[{label}]({paths[key]})" for label, key in (("模型", "model"), ("报告", "report_html"), ("下载包", "bundle")))
+        text = render_grounded_nir_response(workflow, include_downloads=False) + "\n\n报告已生成，可在下方查看或下载。"
+        text += "\n\n" + " · ".join(f"[{label}]({paths[key]})" for label, key in (("模型文件", "model"), ("查看报告", "report_html"), ("下载全部文件", "bundle")))
         return ModelResponse(result=[AIMessage(content=text, additional_kwargs={"nir_deterministic_delivery": True, "nir_delivery_session_id": workflow["search_session_id"]})])
 
+    @staticmethod
+    def _persist_question(state, runtime, workflow):
+        from types import SimpleNamespace
+
+        from deerflow.community.nir.web_entry import persist_unified_workflow
+
+        config = getattr(runtime, "config", None)
+        if not config:
+            from langgraph.config import get_config
+
+            try:
+                config = get_config()
+            except RuntimeError:
+                return
+        persist_unified_workflow(SimpleNamespace(state=state, context=getattr(runtime, "context", None), config=config), workflow)
+
     def before_agent(self, state, runtime):
-        return self._restore_unified_binding(state, runtime)
+        restored = self._restore_unified_binding(state, runtime)
+        workflow = (restored or {}).get("nir_workflow") or state.get("nir_workflow") or {}
+        resumed = resume_user_wait(workflow, state.get("messages") or [])
+        if resumed:
+            self._persist_question(state, runtime, resumed)
+            return {**(restored or {}), "nir_workflow": resumed}
+        return restored
 
     async def abefore_agent(self, state, runtime):
-        return await asyncio.to_thread(self._restore_unified_binding, state, runtime)
+        return await asyncio.to_thread(self.before_agent, state, runtime)
 
     @staticmethod
     def _with_unified_intake(request):
@@ -1432,6 +1463,8 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         stage = workflow.get("stage")
         if not workflow.get("autonomous_delivery"):
             names = {"nir_workflow"}
+        elif waiting_for_user(workflow) or stage == "blocked":
+            names = {"nir_workflow"}
         elif not workflow.get("search_session_id") and workflow.get("missing_inputs"):
             names = {"nir_workflow", "ask_clarification"}
         elif not workflow.get("search_session_id"):
@@ -1450,6 +1483,8 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
             names = {"nir_submit_decision", "nir_decision_history"}
         else:
             names = {"nir_decision_context"}
+        if workflow.get("autonomous_delivery") and not waiting_for_user(workflow) and stage not in {"blocked", "completed", "registered"}:
+            names.add("ask_clarification")
         tools = []
         for item in request.tools:
             name = getattr(item, "name", None)
@@ -1526,12 +1561,19 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
             return request
         from langchain_core.messages import SystemMessage
 
-        view = {key: workflow.get(key) for key in ("stage", "search_session_id", "decision_context_id", "active_decision_id", "retained_experiment_id", "stop_source")}
+        view = {key: workflow.get(key) for key in ("stage", "search_session_id", "decision_context_id", "active_decision_id", "retained_experiment_id", "stop_source", "user_question")}
         view["required_workflow_action"] = required_nir_workflow_action(workflow)
         instruction = (
             "\n<current_sealed_workflow>" + json.dumps(view) + "</current_sealed_workflow>\n"
             "This is the current authoritative process state. Do not repeat preparation after a session is bound. "
             "Use the current context to submit your own decision; this state does not select a model or optimization action."
+            " Write user-facing answers for ordinary Chinese-speaking users: begin with whether the task finished, the result and one useful next step. "
+            "Default to a short Chinese answer. Explain R² as 越接近 1 越好 and RMSE as 越小越好, rounding displayed metrics to four decimal places. "
+            "For internal holdout results, explain: 本次测试使用从这份数据中单独留出的样本，尚未用另外采集的数据验证。 "
+            "Keep protocol names, hashes, internal stages, evidence/quality gates, freezing, raw tool names and experiment ledgers in the report; show technical details only when the user asks. "
+            "Say saved to the model library only after the trusted model_library outcome confirms saved; approval and registration alone do not confirm library storage."
+            " Ask the user only when their input is necessary, using ask_clarification. Once you ask a question or offer a choice, wait for their reply; never ask and execute a choice in the same turn. "
+            "A new reply does not approve registration or select a model automatically. If the reply does not answer the pending question, clarify again rather than choose for the user."
         )
         if (workflow.get("delivery_policy") or {}).get("automatic_delivery"):
             instruction += (
@@ -1693,6 +1735,11 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
 
     @override
     def wrap_model_call(self, request: ModelRequest, handler):
+        workflow = request.state.get("nir_workflow") or {}
+        if waiting_for_user(workflow):
+            return ModelResponse(result=[AIMessage(content=waiting_message(workflow), id="nir-waiting:" + str(workflow["user_question"]["message_id"]), additional_kwargs={"nir_waiting_for_user": True})])
+        if workflow.get("runtime_termination"):
+            return ModelResponse(result=[AIMessage(content=render_grounded_nir_response(workflow), additional_kwargs={"nir_runtime_stopped": True})])
         completed = self._deterministic_delivery_response(request)
         if completed is not None:
             return completed
@@ -1718,6 +1765,11 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
 
     @override
     async def awrap_model_call(self, request: ModelRequest, handler):
+        workflow = request.state.get("nir_workflow") or {}
+        if waiting_for_user(workflow):
+            return ModelResponse(result=[AIMessage(content=waiting_message(workflow), id="nir-waiting:" + str(workflow["user_question"]["message_id"]), additional_kwargs={"nir_waiting_for_user": True})])
+        if workflow.get("runtime_termination"):
+            return ModelResponse(result=[AIMessage(content=render_grounded_nir_response(workflow), additional_kwargs={"nir_runtime_stopped": True})])
         completed = self._deterministic_delivery_response(request)
         if completed is not None:
             return completed
@@ -1904,11 +1956,61 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         termination = message.additional_kwargs.get("nir_program_termination")
         if termination and isinstance(state.get("nir_workflow"), dict):
             workflow = state["nir_workflow"]
-            return {"nir_workflow": {**workflow, "stage": "blocked", "next_action": "report_safety_termination", "stop_source": termination["stop_source"], "revision": workflow["revision"] + 1}}
-        if message.tool_calls:
-            return None
+            stopped = {
+                **workflow,
+                "stage": "blocked",
+                "next_action": "report_safety_termination",
+                "stop_source": termination["stop_source"],
+                "runtime_termination": {"source": termination["stop_source"], "reason": termination.get("reason")},
+                "revision": workflow["revision"] + 1,
+            }
+            self._persist_question(state, runtime, stopped)
+            return {"nir_workflow": stopped, "messages": [message.model_copy(update={"content": render_grounded_nir_response(stopped)})], "jump_to": "end"}
         workflow = state.get("nir_workflow")
         if not isinstance(workflow, dict):
+            return None
+        if waiting_for_user(workflow):
+            return {"jump_to": "end"}
+        termination = message.additional_kwargs.get("agent_termination") or {}
+        if workflow.get("autonomous_delivery") and workflow.get("stage") not in {"blocked", "completed"} and not message.invalid_tool_calls:
+            ask = next((call for call in message.tool_calls or termination.get("tool_calls", []) if call["name"] == "ask_clarification"), None)
+            text = message_content_to_text(message.content)
+            if termination.get("reason"):
+                text = text.replace(termination["reason"], "").strip()
+            question = str(ask["args"].get("question") or "").strip() if ask else question_for_user(text)
+            if question:
+                paused = begin_user_wait(workflow, messages, question, str(message.id), tool_call_id=ask["id"] if ask else None)
+                if not validate_nir_response(waiting_message(paused), paused).passed:
+                    paused["user_question"]["question"] = "请告诉我你希望下一步如何处理。"
+                    paused["user_question"]["sanitized_display"] = True
+                if ask and not validate_nir_response(question + "\n" + str(ask["args"].get("options") or []), paused).passed:
+                    paused["user_question"]["sanitized_display"] = True
+                self._persist_question(state, runtime, paused)
+                additional = {key: value for key, value in message.additional_kwargs.items() if key != "tool_calls"}
+                additional["nir_waiting_for_user"] = True
+                replacement = message.model_copy(update={"content": "" if ask else waiting_message(paused), "tool_calls": [ask] if ask else [], "additional_kwargs": additional})
+                return {"nir_workflow": paused, "messages": [replacement], **({} if ask else {"jump_to": "end"})}
+        if termination and workflow.get("autonomous_delivery"):
+            # A runtime stop is authoritative. Never send it through the
+            # unfinished-workflow retry path or choose a model on its behalf.
+            reason = str(termination["source"]) + "_limit"
+            stopped = {**workflow, "stage": "blocked", "next_action": "report_safety_termination", "revision": workflow["revision"] + 1, "runtime_termination": termination, "stop_source": workflow.get("stop_source") or "tool_failure"}
+            if workflow.get("search_session_id") and runtime is not None:
+                from types import SimpleNamespace
+
+                from langgraph.config import get_config
+
+                from deerflow.community.nir.decision_budget import close_incomplete_workflow
+                from deerflow.community.nir.search_tools import _service
+
+                config = getattr(runtime, "config", None) or get_config()
+                trusted = SimpleNamespace(state=state, context=getattr(runtime, "context", None), config=config)
+                session = close_incomplete_workflow(_service(trusted), workflow["search_session_id"], invalid_json=False, reason=reason)
+                stopped["stop_source"] = session.get("stop_source")
+            self._persist_question(state, runtime, stopped)
+            replacement = message.model_copy(update={"content": render_grounded_nir_response(stopped), "tool_calls": [], "additional_kwargs": {**message.additional_kwargs, "nir_runtime_stopped": True}})
+            return {"nir_workflow": stopped, "messages": [replacement], "jump_to": "end"}
+        if message.tool_calls:
             return None
         required_action = required_nir_workflow_action(workflow)
         if required_action:
@@ -1958,7 +2060,9 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
                     },
                 )
                 return {
-                    "messages": [reminder],
+                    # Retain the raw provider output for audit and repair, but
+                    # do not show an unfinished draft as a final chat answer.
+                    "messages": [message.model_copy(update={"additional_kwargs": {**message.additional_kwargs, "hide_from_ui": True, "nir_unfinished_response": True}}), reminder],
                     "nir_workflow": guarded_workflow,
                     "jump_to": "model",
                 }
@@ -2038,12 +2142,12 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
             "nir_workflow": guarded_workflow,
         }
 
-    @hook_config(can_jump_to=["model"])
+    @hook_config(can_jump_to=["model", "end"])
     @override
     def after_model(self, state: AgentState, runtime: Runtime) -> dict | None:  # noqa: ARG002
         return self._guard_final_response(state, runtime)
 
-    @hook_config(can_jump_to=["model"])
+    @hook_config(can_jump_to=["model", "end"])
     @override
     async def aafter_model(self, state: AgentState, runtime: Runtime) -> dict | None:  # noqa: ARG002
         return self._guard_final_response(state, runtime)

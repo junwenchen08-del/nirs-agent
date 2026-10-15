@@ -454,7 +454,9 @@ def test_middleware_reengages_model_when_failed_attempt_skips_reflection() -> No
 
     assert update is not None
     assert update["jump_to"] == "model"
-    reminder = update["messages"][0]
+    hidden_draft, reminder = update["messages"]
+    assert hidden_draft.id == message.id and hidden_draft.content == message.content
+    assert hidden_draft.additional_kwargs["hide_from_ui"] is True
     assert isinstance(reminder, HumanMessage)
     assert reminder.name == "nir_workflow_completion_reminder"
     assert reminder.additional_kwargs["hide_from_ui"] is True
@@ -539,15 +541,15 @@ def test_grounded_replacement_contains_only_current_evidence() -> None:
 
     rendered = render_grounded_nir_response(workflow, violations=("metric_value_mismatch:r2",))
 
-    assert "0.91234" in rendered
-    assert "3.4567" in rendered
+    assert "0.9123" in rendered
+    assert "RMSE = 0.1235" in rendered
     assert "0.99" not in rendered
-    assert "不是外部验证" in rendered
+    assert "尚未用另外采集的数据验证" in rendered
     assert "/mnt/user-data/outputs/model.pkl" in rendered
     assert validate_nir_response(rendered, workflow).passed is True
 
 
-def test_grounded_replacement_summarizes_all_bounded_attempts() -> None:
+def test_grounded_replacement_shows_current_result_without_full_attempt_ledger() -> None:
     workflow = _review_workflow(validation_goal="external_validation", passed=False)
     workflow["stage"] = "blocked"
     workflow["next_action"] = "report_best_effort"
@@ -574,12 +576,13 @@ def test_grounded_replacement_summarizes_all_bounded_attempts() -> None:
         },
     ]
 
+    workflow["attempt_evidence"] = workflow["attempts"][-1]
     rendered = render_grounded_nir_response(workflow, violations=("metric_value_mismatch:r2",))
 
-    assert "尝试 1" in rendered
-    assert "0.8326" in rendered
-    assert "尝试 2" in rendered
+    assert "尝试 1" not in rendered
+    assert "0.8326" not in rendered
     assert "0.7682" in rendered
+    assert len(workflow["attempts"]) == 2
     assert validate_nir_response(rendered, workflow).passed is True
 
 
@@ -627,7 +630,7 @@ def test_grounded_replacement_renders_completed_inspection_without_modeling() ->
     rendered = render_grounded_nir_response(workflow)
 
     assert "数据检查已完成" in rendered
-    assert "工作流状态：`completed` / `none`" in rendered
+    assert "completed" not in rendered and "next_action" not in rendered
     assert "120" in rendered
     assert "3401" in rendered
     assert "3600.0 → 200.0（降序）" in rendered
@@ -664,7 +667,7 @@ def test_middleware_replaces_stale_inspection_state_with_completed_report() -> N
     assert update is not None
     replacement = update["messages"][0]
     assert replacement.id == "stale-inspection-answer"
-    assert "工作流状态：`completed` / `none`" in replacement.content
+    assert "数据检查已完成" in replacement.content and "completed" not in replacement.content
     assert "3600.0 → 200.0（降序）" in replacement.content
     assert "data_audit" not in replacement.content
     assert replacement.additional_kwargs["nir_response_grounding"]["passed"] is False
@@ -683,7 +686,7 @@ def test_middleware_replaces_unsupported_final_answer_and_records_guard_event() 
     assert update is not None
     replacement = update["messages"][0]
     assert replacement.id == "answer-1"
-    assert "0.91234" in replacement.content
+    assert "0.9123" in replacement.content
     assert "0.99" not in replacement.content
     assert replacement.additional_kwargs["nir_response_grounding"]["passed"] is False
     assert update["nir_workflow"]["response_guard_events"][-1]["violations"] == [
@@ -748,7 +751,7 @@ def test_graph_persists_only_the_grounded_final_answer() -> None:
 
     final_answer = result["messages"][-1]
     assert "0.99" not in final_answer.content
-    assert "0.91234" in final_answer.content
+    assert "0.9123" in final_answer.content
     assert result["nir_workflow"]["response_guard_events"]
 
 
@@ -776,4 +779,16 @@ def test_stream_gate_releases_only_the_corrected_values_message() -> None:
     assert released is corrected
     assert gate.allows_values({"messages": [corrected], "nir_workflow": workflow}) is True
     assert "0.99" not in released.content
-    assert "0.91234" in released.content
+    assert "0.9123" in released.content
+
+
+def test_stream_gate_hides_unfinished_draft_even_before_a_hidden_reminder():
+    workflow = _review_workflow(passed=False)
+    raw = AIMessage(content="Internal promise to continue", id="draft")
+    reminder = HumanMessage(content="Continue", additional_kwargs={"hide_from_ui": True})
+    gate = NIRStreamMessageGate(workflow)
+    assert gate.allows_values({"nir_workflow": workflow, "messages": [raw, reminder]}) is False
+    update = NIRWorkflowMiddleware().after_model({"nir_workflow": workflow, "messages": [raw]}, SimpleNamespace(context={}))
+    state = {"nir_workflow": update["nir_workflow"], "messages": update["messages"]}
+    assert gate.observe_values(state) is None
+    assert gate.allows_values(state) is True

@@ -128,6 +128,8 @@ _AGENT_VIEW_FIELDS = (
     "clarification_questions",
     "approval_status",
     "next_action",
+    "user_question",
+    "runtime_termination",
 )
 _AGENT_OBSERVATION_FIELDS = ("name", "status", "code", "requested_method", "stage_after")
 _HIGH_ASSURANCE_GOAL_MARKERS = (

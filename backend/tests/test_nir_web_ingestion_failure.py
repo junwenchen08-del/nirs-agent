@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from deerflow.community.nir import search_tools
 from deerflow.community.nir.dataset_session import SearchSessionStore
@@ -66,3 +67,40 @@ def test_cv_argument_error_allows_correction_before_ingestion(tmp_path, monkeypa
     assert "nir_workflow" not in result.update
     corrected = search_tools.nir_prepare_search_tool.func(runtime=runtime, cv_folds=3)
     assert corrected.update["nir_workflow"]["search_session_id"]
+
+
+@pytest.mark.parametrize("roles,message", [([1] * 20 + [2] * 6 + [3] * 5 + [0], "待分配"), ([1] * 32, "分别分配")])
+def test_incomplete_saved_roles_stop_before_split_or_session(tmp_path, monkeypatch, roles, message):
+    import nir_core.model.evaluation as evaluation
+
+    from deerflow.agents.middlewares.nir_workflow_middleware import NIRWorkflowMiddleware
+    from deerflow.community.nir.datasets.workspace import Workbook, validate_settings, write_workspace_csv
+    from deerflow.community.nir.workflow import nir_workflow_tool
+
+    runtime, service = runtime_for(tmp_path, monkeypatch)
+    X = np.random.default_rng(937).normal(size=(32, 8))
+    book = Workbook(X, np.arange(8) + 1000, [f"s{i}" for i in range(32)], ["含量"], [[v] for v in X[:, 0]], roles, {})
+    source = tmp_path / "saved.csv"
+    write_workspace_csv(book, validate_settings(book, roles, [1000, 1007]), source)
+    original = source.read_bytes()
+    monkeypatch.setattr(search_tools, "_resolve", lambda *a, **k: str(source))
+    monkeypatch.setattr(evaluation, "split_dataset", lambda *a, **k: pytest.fail("Explicit roles must never be randomized"))
+    monkeypatch.setattr(service, "prepare", lambda *a, **k: pytest.fail("Invalid roles must not start a search session"))
+    command = search_tools.nir_prepare_search_tool.func(runtime=runtime, cv_folds=3)
+    payload = json.loads(command.update["messages"][0].content)
+    assert payload["code"] == "nir_ingestion_workspace_invalid"
+    assert message in payload["error"]
+    assert payload["retryable"] is False
+    workflow = command.update["nir_workflow"]
+    assert workflow["stage"] == "blocked" and not workflow.get("search_session_id")
+    assert str(tmp_path) not in json.dumps(payload)
+    with service.process._connection() as db:
+        assert db.execute("SELECT count(*) FROM search_sessions").fetchone()[0] == 0
+    assert source.read_bytes() == original
+
+    from langchain.agents.middleware.types import ModelRequest
+    from langchain_core.messages import SystemMessage
+
+    request = ModelRequest(model=None, state={"nir_workflow": workflow}, tools=[nir_workflow_tool, search_tools.nir_prepare_search_tool], system_message=SystemMessage(content=""), messages=[])
+    projected = NIRWorkflowMiddleware._with_delivery_contract(request)
+    assert [item.name for item in projected.tools] == ["nir_workflow"]

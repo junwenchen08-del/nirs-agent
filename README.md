@@ -300,12 +300,16 @@ Model Library 入库；缺少结构化证据时显示未记录，不推断成功
 在 `config.yaml` 中把 `nir_library.enabled` 设为 `true` 并重启服务后，侧栏会出现：
 
 - `/workspace/nir/datasets`：从本地上传、分类浏览、重命名、查看光谱、调整样本用途和波段、保存修改、挂载到对话；
-- `/workspace/nir/models`：查看模型版本、验证范围、指标和来源，并执行挂载、归档和删除。
+- `/workspace/nir/models`：搜索模型卡片，查看训练数据、处理方法、参数和预测效果，一键挂载到新对话。
 
-页面只调用当前登录用户范围内的 API，不把原始光谱、模型二进制或宿主机路径放进浏览器
-缓存。空间卡片中的“库写入准入门槛”只决定是否接受新的长期资产，不是对普通上传、线程
-临时副本或沙箱输出的严格总配额。归档只隐藏资产，不释放磁盘；完成精确确认的物理删除才
-回收长期库目录。验证范围说明模型如何被评估，并不等于模型已获生产部署批准。
+点击模型卡片打开详情，中文图表展示真实值与预测值、光谱处理前后对比，并分别标明训练、
+调参和测试数据的 R²、RMSE。关联数据集的概览复用数据集库，优先读取训练时的解析版本。
+模型页不再显示个人空间、归档和删除操作；点击“挂载到对话”后自动打开新对话并挂载精确版本，
+添加待预测数据后再手动发送需求，无需输入对话编号。历史记录缺少图表时明确提示，不重新训练补图。
+详见[模型库使用与实现说明](docs/nir-model-library.md)。
+
+页面只调用当前登录用户范围内的 API；图表只使用有界的已保存结果，不传输模型二进制或宿主机路径。
+验证范围说明模型如何被评估，并不等于模型已获生产部署批准。
 
 对话中要求保存当前上传时，智能体会在数据检查后、离开数据审计阶段前完成保存。跨会话
 预测会先挂载数据集和模型，再在同一个新工作流中重新检查并标准化输入，最后调用预测；不会
@@ -588,6 +592,24 @@ The dataset library now includes a sample editing workbench at
 table, individual/bulk sample roles, linked spectra and numeric/drag band
 selection. Save creates a versioned interpretation while keeping original files
 and prior chat copies intact. New attachments preserve the selected full-resolution
-bands and fixed sample roles; governed regression and classification reuse those
-roles without automatic repartitioning. See the module AGENTS guides for limits
+bands and sample roles. 全部样本均未分配用途时，建模自动划分训练集、验证集和测试集；
+定量分析沿用 60% / 20% / 20% 和固定随机种子，以便复现。
+已指定用途时严格使用固定划分；若仍有待分配样本或缺少必要分区，会用中文提示补齐，
+不会随机覆盖已指定的用途。历史保存版本和已挂载副本同样适用，无需重新上传。
+See the module AGENTS guides for limits
 and maintained regression anchors.
+
+建模对话默认使用简短中文说明是否完成、预测效果和下一步操作。
+R²、RMSE 会附上简单解释，数值默认最多显示四位小数；详细参数和实验过程可在报告中查看。
+训练完成后会提示确认保存，保存成功后说明如何从模型库挂载到新对话。
+结果检查继续保留，内部校验术语和实验编号不会作为默认回复展示。
+
+当建模助手明确询问你的选择时，会暂停等待新回复；刷新页面和系统自动重试不会代替你的回答。
+回复后继续使用同一份数据划分和已完成的实验。生成报告与保存到模型库仍按原有确认流程进行。
+“请回复 1 / 2 / 3”等选择请求也会等待，问题末尾没有问号不影响暂停。
+正常的多轮结果读取不会因参数相同而被误判为重复；反复读取同一结果仍受次数限制。
+达到运行限制时，本次任务会停止并保留已有结果，以中文说明原因；系统不会自动继续重试。
+
+模型详情会自动核对训练文件并显示对应的数据集概览。直接上传后建模也会保存关联，
+无需再次选择数据集。已有模型可根据可核实的原始记录恢复展示；不会重新训练或修改指标。
+恢复后的模型详情会统一显示模型和数据集的来源编号，避免数据已找到但整页无法读取。

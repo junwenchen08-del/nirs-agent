@@ -136,7 +136,8 @@ def test_only_parsing_export_cannot_override_named_roles(tmp_path):
         load_workspace_export(str(path))
 
 
-def test_parsed_regression_keeps_existing_automatic_sealed_ingestion(tmp_path, monkeypatch):
+@pytest.mark.parametrize("parsing_only", [False, True])
+def test_parsed_regression_keeps_existing_automatic_sealed_ingestion(tmp_path, monkeypatch, parsing_only):
     from deerflow.community.nir import search_tools
     from deerflow.community.nir.dataset_session import SearchSessionStore
     from deerflow.community.nir.process import ProcessStore
@@ -147,7 +148,8 @@ def test_parsed_regression_keeps_existing_automatic_sealed_ingestion(tmp_path, m
     y = X[:, 0] * 2 + X[:, 1]
     book = Workbook(X, np.arange(10) + 1000, [f"sample-{i}" for i in range(80)], ["水分"], [[float(v)] for v in y], [0] * 80, {})
     path = tmp_path / "parsed.csv"
-    write_workspace_csv(book, validate_settings(book, book.usages, [1002, 1008]), path, parsing_only=True)
+    write_workspace_csv(book, validate_settings(book, book.usages, [1002, 1008]), path, parsing_only=parsing_only)
+    original = path.read_bytes()
     service = SearchSessionStore(ProcessStore(tmp_path / "private"))
     monkeypatch.setattr(search_tools, "_service", lambda runtime: service)
     monkeypatch.setattr(search_tools, "_resolve", lambda *args, **kwargs: str(path))
@@ -157,12 +159,21 @@ def test_parsed_regression_keeps_existing_automatic_sealed_ingestion(tmp_path, m
     payload = json.loads(result.update["messages"][-1].content)
     assert payload.get("status") != "error", payload
     assert payload["test_status"] == "sealed"
+    from nir_core.model.evaluation import split_dataset
+
+    expected_cal, expected_val, expected_test = split_dataset(X[:, 2:9], y, test_ratio=0.2, val_ratio=0.2, random_state=42)
     with np.load(next((tmp_path / "private").rglob("search.npz")), allow_pickle=False) as data:
-        assert data["X_cal"].shape[1] == 7
+        np.testing.assert_array_equal(data["X_cal"], expected_cal[0])
+        np.testing.assert_array_equal(data["y_val"], expected_val[1])
+        np.testing.assert_array_equal(data["wv"], np.arange(1002, 1009))
         assert "X_test" not in data
+    with np.load(next((tmp_path / "private").rglob("holdout.npz")), allow_pickle=False) as data:
+        np.testing.assert_array_equal(data["X_test"], expected_test[0])
+    assert path.read_bytes() == original
 
 
-def test_parsed_classifier_keeps_automatic_split_when_no_roles_were_assigned(tmp_path, monkeypatch):
+@pytest.mark.parametrize("parsing_only", [False, True])
+def test_parsed_classifier_keeps_automatic_split_when_no_roles_were_assigned(tmp_path, monkeypatch, parsing_only):
     from deerflow.community.nir import classification
 
     rng = np.random.default_rng(42)
@@ -170,7 +181,7 @@ def test_parsed_classifier_keeps_automatic_split_when_no_roles_were_assigned(tmp
     X = rng.normal(scale=0.2, size=(80, 10)) + (np.arange(80) % 2)[:, None] * 3
     book = Workbook(X, np.arange(10) + 1000, [f"sample-{i}" for i in range(80)], ["品种"], [[v] for v in labels], [0] * 80, {})
     path = tmp_path / "parsed.csv"
-    write_workspace_csv(book, validate_settings(book, book.usages, [1000, 1009]), path, parsing_only=True)
+    write_workspace_csv(book, validate_settings(book, book.usages, [1000, 1009]), path, parsing_only=parsing_only)
     monkeypatch.setattr(classification, "_resolve", lambda runtime, path, **kwargs: str(tmp_path / path.rsplit("/", 1)[-1]))
     payload = json.loads(
         classification.nir_train_classifier_tool.func(

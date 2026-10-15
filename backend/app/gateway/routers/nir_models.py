@@ -165,6 +165,15 @@ async def attach_model(
         _raise_model_error(exc)
 
 
+@router.get("/{model_id}/versions/{version}/report")
+@require_permission("threads", "read")
+async def model_report(model_id: str, version: str, request: Request, service: ModelService = Depends(get_model_service)) -> dict:
+    try:
+        return await service.get_report(_owner(request), model_id, version)
+    except ModelError as exc:
+        _raise_model_error(exc)
+
+
 @router.post("/{model_id}/versions/{version}/archive")
 @require_permission("threads", "write")
 async def archive_model(model_id: str, version: str, request: Request, service: ModelService = Depends(get_model_service)) -> dict:

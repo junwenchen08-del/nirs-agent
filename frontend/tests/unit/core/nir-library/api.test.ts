@@ -19,6 +19,9 @@ import {
   fetchNirLibraryEnabled,
   listDatasets,
   listModels,
+  getModel,
+  getModelReport,
+  getDatasetPreview,
   uploadDataset,
   getDatasetParsing,
   previewDatasetParsing,
@@ -325,6 +328,38 @@ describe("NIR library API", () => {
       2,
       "/api/nir/models?include_archived=true",
       { signal: undefined },
+    );
+  });
+
+  test("report and training dataset preview preserve exact version, profile and cancellation", async () => {
+    const signal = new AbortController().signal;
+    const model = { model_id: "corn", version: "v2" };
+    const detail = {
+      model,
+      dataset: null,
+      report: { schema_version: 1, charts: [], metrics: [] },
+    };
+    mockedFetch
+      .mockResolvedValueOnce(jsonResponse(200, model))
+      .mockResolvedValueOnce(jsonResponse(200, detail))
+      .mockResolvedValueOnce(jsonResponse(200, { dataset_id: "ds1" }));
+    await getModel("corn", "v2", signal);
+    await getModelReport("corn", "v2", signal);
+    await getDatasetPreview("ds1", signal, "training profile");
+    expect(mockedFetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/nir/models/corn?version=v2",
+      { signal },
+    );
+    expect(mockedFetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/nir/models/corn/versions/v2/report",
+      { signal },
+    );
+    expect(mockedFetch).toHaveBeenNthCalledWith(
+      3,
+      "/api/nir/datasets/ds1/preview?profile_id=training%20profile",
+      { signal },
     );
   });
 

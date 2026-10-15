@@ -62,7 +62,7 @@ async function openPicker(page: Page) {
   await input.fill("/models");
   await input.press("Enter");
   const dialog = page.getByRole("dialog", {
-    name: /Persistent model library|持久模型库/,
+    name: /Persistent model library|模型库/,
   });
   await expect(dialog).toBeVisible();
   return dialog;

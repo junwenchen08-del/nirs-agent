@@ -61,6 +61,8 @@ def _failure(runtime, exc):
 
 
 def _ingestion_failure(runtime, exc):
+    from .datasets.workspace import WorkspaceError
+
     codes = {
         "Invalid single-target partition shape or numeric integrity": "nir_ingestion_numeric_integrity",
         "Scientific Cal/Val integrity checks failed": "nir_ingestion_scientific_integrity",
@@ -69,8 +71,9 @@ def _ingestion_failure(runtime, exc):
         "X must contain at least 2 samples and 5 wavelengths.": "nir_ingestion_dimensions_unsupported",
     }
     workflow = (runtime.state or {}).get("nir_workflow") or {}
-    code = codes.get(str(exc))
-    if not code or not workflow.get("autonomous_delivery"):
+    workspace_error = isinstance(exc, WorkspaceError)
+    code = "nir_ingestion_workspace_invalid" if workspace_error else codes.get(str(exc))
+    if not code or not workspace_error and not workflow.get("autonomous_delivery"):
         return _failure(runtime, exc)
     logger.error("Governed NIR ingestion failed (%s)", code, exc_info=exc)
     evidence = {
@@ -78,8 +81,15 @@ def _ingestion_failure(runtime, exc):
         "status": "failed",
         "code": code,
         "error_type": type(exc).__name__,
+        "retryable": False,
         "next_step": "Check the explicit target mapping, supported format and numeric input integrity with server diagnostics. Do not guess a different target or retry unchanged input.",
     }
+    if workspace_error:
+        # WorkspaceError contains bounded application messages, never raw paths
+        # or values. Preserve the useful reason instead of the generic failure.
+        evidence.update(error=str(exc), next_step="请在数据集页面补齐提示的设置，保存后重新挂载并开始建模；不要重复提交同一份未修改的数据。")
+    if not workflow.get("autonomous_delivery"):
+        return _result(runtime, {"status": "error", **evidence})
     updated = {**workflow, "stage": "blocked", "audit_status": "failed", "revision": workflow["revision"] + 1, "next_action": "resolve_ingestion", "ingestion_evidence": evidence}
     return _result(runtime, {"status": "error", **evidence}, updated)
 
@@ -183,6 +193,7 @@ def nir_prepare_search_tool(runtime: Runtime, cv_folds: int = 5, y_col: int = 0,
         budget = budget_for_runtime(runtime)
         source = _resolve(runtime, workflow["data_path"], read_only=True)
         budget.check_file(source, stage="sealed_ingestion")
+        source_file = {"virtual_path": workflow["data_path"], "sha256": _sha256_file(source), "size_bytes": Path(source).stat().st_size}
         if Path(source).suffix.lower() == ".npz":
             data = _load_npz_safely(source)
         elif Path(source).suffix.lower() == ".mat":
@@ -211,6 +222,8 @@ def nir_prepare_search_tool(runtime: Runtime, cv_folds: int = 5, y_col: int = 0,
             budget.check_array(data["X_" + name], target_count=1, stage="sealed_partition_integrity")
         options = {"autonomous_rounds": True, "max_decisions": workflow.get("max_decisions", 20), "max_fits": workflow.get("max_fits", 200)} if workflow.get("autonomous_rounds") else {}
         if workflow.get("autonomous_delivery"):
+            if _sha256_file(source) != source_file["sha256"] or Path(source).stat().st_size != source_file["size_bytes"]:
+                raise ValueError("Source changed during ingestion")
             options.update(
                 delivery_policy=workflow["delivery_policy"],
                 task_snapshot={
@@ -218,6 +231,7 @@ def nir_prepare_search_tool(runtime: Runtime, cv_folds: int = 5, y_col: int = 0,
                     for key in ("project_id", "task_type", "analyte", "unit", "domain", "validation_goal", "model_constraint", "pipeline_constraint", "dataset_id", "dataset_profile_id", "dataset_sha256", "workflow_start_call_id")
                 },
             )
+            options["task_snapshot"]["source_file"] = source_file
             if workflow["delivery_policy"].get("automatic_delivery"):
                 options["task_snapshot"]["_workflow_snapshot"] = workflow
         payload = service.prepare(

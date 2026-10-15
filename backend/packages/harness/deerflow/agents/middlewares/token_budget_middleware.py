@@ -161,6 +161,7 @@ class TokenBudgetMiddleware(AgentMiddleware[AgentState]):
             del kwargs["tool_calls"]
         if "function_call" in kwargs:
             del kwargs["function_call"]
+        kwargs["agent_termination"] = {"source": "token_budget", "reason": stop_msg, "tool_calls": msg.tool_calls}
 
         response_metadata = dict(getattr(msg, "response_metadata", {}) or {})
 

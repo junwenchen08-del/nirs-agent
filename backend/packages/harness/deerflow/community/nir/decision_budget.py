@@ -298,16 +298,16 @@ def record_invalid(search, sid, call_id=None):
         return allowed
 
 
-def close_incomplete_workflow(search, sid, *, invalid_json):
+def close_incomplete_workflow(search, sid, *, invalid_json, reason="workflow_continuation_limit"):
     """Persist bounded continuation failure without selecting or testing a model."""
     with search.process._connection(write=True) as db:
         session = search._session(db, sid)
         if session.get("freeze") or session.get("final") or session["stage"] == "stopped":
             return session
         source = "decision_invalid" if invalid_json else "tool_failure"
-        session.update(stage="safety_closed", terminal_failure_source=source, terminal_failure_reason="workflow_continuation_limit", stopped_at=_now())
+        session.update(stage="safety_closed", terminal_failure_source=source, terminal_failure_reason=reason, stopped_at=_now())
         if session.get("stop_source") != "budget":
-            session.update(stop_source=source, stop_reason=["workflow_continuation_limit"])
+            session.update(stop_source=source, stop_reason=[reason])
         search._save(db, session)
         return session
 

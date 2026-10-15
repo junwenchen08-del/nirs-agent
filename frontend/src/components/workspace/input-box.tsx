@@ -68,6 +68,7 @@ import {
   attachDatasetForComposer,
   attachModelForComposer,
   getDataset,
+  getModel,
   useNirLibraryEnabled,
   type NIRDataset,
   type NIRModelVersion,
@@ -248,6 +249,8 @@ export function InputBox({
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [mountedModel, setMountedModel] = useState<MountedModel | null>(null);
   const [modelMounting, setModelMounting] = useState(false);
+  const [modelLibraryMountError, setModelLibraryMountError] = useState(false);
+  const [modelLibraryMountRetry, setModelLibraryMountRetry] = useState(0);
   const modelRequestRef = useRef<AbortController | null>(null);
   const [pendingSuggestion, setPendingSuggestion] = useState<string | null>(
     null,
@@ -432,6 +435,7 @@ export function InputBox({
   useEffect(() => {
     setMountedModel(null);
     setModelMounting(false);
+    setModelLibraryMountError(false);
     setModelPickerOpen(false);
     return () => modelRequestRef.current?.abort();
   }, [threadId]);
@@ -840,6 +844,92 @@ export function InputBox({
     },
     [t.inputBox.modelAttachFailed, t.inputBox.modelAttached, threadId],
   );
+
+  const modelFromLibrary = searchParams.get("model");
+  const modelVersionFromLibrary = searchParams.get("version");
+  useEffect(() => {
+    if (
+      !modelFromLibrary ||
+      !isWelcomeMode ||
+      !enableModelCommand ||
+      !nirLibraryEnabled ||
+      isMock
+    )
+      return;
+    const controller = new AbortController();
+    modelRequestRef.current?.abort();
+    modelRequestRef.current = controller;
+    setModelMounting(true);
+    setModelLibraryMountError(false);
+    async function mountModelFromLibrary() {
+      try {
+        if (!modelVersionFromLibrary) throw new Error("Missing model version");
+        const model = await getModel(
+          modelFromLibrary!,
+          modelVersionFromLibrary,
+          controller.signal,
+        );
+        if (
+          model.status !== "ready" ||
+          model.model_id !== modelFromLibrary ||
+          model.version !== modelVersionFromLibrary
+        )
+          throw new Error("Model identity mismatch");
+        const result = await attachModelForComposer(
+          model.model_id,
+          model.version,
+          threadId,
+          controller.signal,
+        );
+        const selection: MountedModel = {
+          threadId,
+          modelId: model.model_id,
+          version: model.version,
+          modelPath: result.model_path,
+        };
+        if (
+          result.status !== "attached" ||
+          result.model_id !== model.model_id ||
+          result.version !== model.version ||
+          !mountedModelContext(selection, threadId, "model")
+        )
+          throw new Error("Invalid model attachment");
+        if (controller.signal.aborted) return;
+        setMountedModel(selection);
+        const url = new URL(window.location.href);
+        if (
+          url.searchParams.get("model") === modelFromLibrary &&
+          url.searchParams.get("version") === modelVersionFromLibrary
+        ) {
+          url.searchParams.delete("model");
+          url.searchParams.delete("version");
+          window.history.replaceState(
+            window.history.state,
+            "",
+            `${url.pathname}${url.search}${url.hash}`,
+          );
+        }
+      } catch {
+        if (!controller.signal.aborted) setModelLibraryMountError(true);
+      } finally {
+        if (modelRequestRef.current === controller) {
+          modelRequestRef.current = null;
+          setModelMounting(false);
+        }
+      }
+    }
+    void mountModelFromLibrary();
+    return () => controller.abort();
+  }, [
+    modelFromLibrary,
+    modelVersionFromLibrary,
+    threadId,
+    isWelcomeMode,
+    enableModelCommand,
+    nirLibraryEnabled,
+    isMock,
+    modelLibraryMountRetry,
+  ]);
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -1404,6 +1494,36 @@ export function InputBox({
               onClick={() => setLibraryMountRetry((value) => value + 1)}
             >
               {locale.startsWith("zh") ? "重新挂载" : "Retry attachment"}
+            </Button>
+          </div>
+        )}
+        {modelMounting && (
+          <p
+            role="status"
+            className="text-muted-foreground relative z-10 mx-3 mt-3 text-sm"
+          >
+            {t.inputBox.modelAttaching}
+          </p>
+        )}
+        {modelLibraryMountError && (
+          <div
+            role="alert"
+            className="text-destructive relative z-10 mx-3 mt-3 flex flex-wrap items-center gap-2 text-sm"
+          >
+            <span>
+              {locale.startsWith("zh")
+                ? "模型未能挂载，请重试。"
+                : "The model could not be attached. Please retry."}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setModelLibraryMountRetry((value) => value + 1)}
+            >
+              {locale.startsWith("zh")
+                ? "重新挂载模型"
+                : "Retry model attachment"}
             </Button>
           </div>
         )}

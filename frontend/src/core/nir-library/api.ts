@@ -1,6 +1,7 @@
 import { fetch } from "@/core/api/fetcher";
 import { getBackendBaseURL, getLangGraphBaseURL } from "@/core/config";
 
+import { parseModelDetail } from "./model-report";
 import type {
   DatasetParsing,
   DatasetParsingPreview,
@@ -15,6 +16,7 @@ import type {
   NIRDatasetUse,
   NIRDeleteResult,
   NIRModelVersion,
+  NIRModelDetail,
   NIRStorageUsage,
 } from "./types";
 
@@ -82,9 +84,13 @@ export function getDataset(datasetId: string, signal?: AbortSignal) {
   );
 }
 
-export function getDatasetPreview(datasetId: string, signal?: AbortSignal) {
+export function getDatasetPreview(
+  datasetId: string,
+  signal?: AbortSignal,
+  profileId?: string | null,
+) {
   return requestJSON<NIRDatasetPreview>(
-    `/api/nir/datasets/${encoded(datasetId)}/preview`,
+    `/api/nir/datasets/${encoded(datasetId)}/preview${profileId ? `?profile_id=${encoded(profileId)}` : ""}`,
     { signal },
     "暂时无法读取数据预览，请重试。",
   );
@@ -427,6 +433,31 @@ export function attachModel(
     },
     "Failed to attach model",
   );
+}
+
+export function getModel(
+  modelId: string,
+  version: string,
+  signal?: AbortSignal,
+) {
+  return requestJSON<NIRModelVersion>(
+    `/api/nir/models/${encoded(modelId)}?version=${encoded(version)}`,
+    { signal },
+    "暂时无法读取模型，请重试。",
+  );
+}
+
+export async function getModelReport(
+  modelId: string,
+  version: string,
+  signal?: AbortSignal,
+): Promise<NIRModelDetail> {
+  const payload = await requestJSON<unknown>(
+    `/api/nir/models/${encoded(modelId)}/versions/${encoded(version)}/report`,
+    { signal },
+    "暂时无法读取模型详情，请重试。",
+  );
+  return parseModelDetail(payload, modelId, version);
 }
 
 export async function attachModelForComposer(

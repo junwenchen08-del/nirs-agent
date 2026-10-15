@@ -96,6 +96,8 @@ class NIRWorkflowState(TypedDict):
     attempt_evidence: NotRequired[dict | None]
     registered_model: NotRequired[dict | None]
     model_library: NotRequired[dict | None]
+    user_question: NotRequired[dict | None]
+    runtime_termination: NotRequired[dict | None]
     attempts: list[dict]
     reflection: NotRequired[dict | None]
     reflections: list[dict]

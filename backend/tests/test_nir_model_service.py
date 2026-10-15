@@ -48,12 +48,11 @@ async def model_library(tmp_path: Path):
         await engine.dispose()
 
 
-def _registered_package(paths: Paths, *, owner: str = "alice", thread_id: str = "source-thread", model_id: str = "tablet_assay") -> tuple[str, dict]:
+def _registered_package(paths: Paths, *, owner: str = "alice", thread_id: str = "source-thread", model_id: str = "tablet_assay", training_hash: str = "a" * 64, extra_metrics=None) -> tuple[str, dict]:
     output = paths.sandbox_outputs_dir(thread_id, user_id=owner)
     output.mkdir(parents=True, exist_ok=True)
     model_path = output / "candidate.pkl"
     metrics_path = output / "candidate.metrics.json"
-    training_hash = "a" * 64
     metrics = {
         "method": "pls",
         "training_data_hash": training_hash,
@@ -76,6 +75,7 @@ def _registered_package(paths: Paths, *, owner: str = "alice", thread_id: str = 
         "RMSEP": 0.32,
         "RPD": 3.1,
     }
+    metrics.update(extra_metrics or {})
     _write_trusted_model_artifact({"format": "nir_model_artifact", "model": {"kind": "synthetic"}}, str(model_path))
     metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
     _bind_model_metrics(str(model_path), str(metrics_path), training_data_hash=training_hash)

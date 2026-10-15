@@ -13,7 +13,7 @@ from test_nir_unified_agent import UnifiedFakeLLM
 
 from deerflow.community.nir import search_tools
 from deerflow.community.nir.process import runtime_store
-from deerflow.community.nir.response_grounding import render_grounded_nir_response
+from deerflow.community.nir.response_grounding import _attempt_evidence_records, render_grounded_nir_response
 
 
 def test_sealed_evidence_deduplicates_by_experiment_identity():
@@ -21,9 +21,9 @@ def test_sealed_evidence_deduplicates_by_experiment_identity():
     last = {"experiment_id": "exp-last", "metrics_summary": {"val": {"RMSE": 0.44}, "RMSECV": 0.7}}
     workflow = {"search_protocol": "sealed_holdout", "decision_strategy": "llm_autonomous", "stage": "blocked", "attempts": [first, last], "attempt_evidence": last}
     rendered = render_grounded_nir_response(workflow)
-    assert rendered.count("exp-last") == 1
-    assert "尝试 3" not in rendered
-    assert "Val" in rendered and "Test" in rendered
+    assert len(_attempt_evidence_records(workflow)) == 2
+    assert "已记录 2 次方法比较" in rendered
+    assert "exp-last" not in rendered and "Test" not in rendered
 
 
 class MalformedDecisionLLM(UnifiedFakeLLM):
@@ -105,7 +105,8 @@ def test_actual_lead_malformed_json_repairs_or_closes_durably(tmp_path, monkeypa
         assert session["stage"] == "safety_closed"
         assert session["stop_source"] == "decision_invalid" and session["terminal_failure_reason"] == "workflow_continuation_limit"
         assert session["fits"] == 4 and session["freeze"] is None and session["final"] is None
-        assert "JSON" in result["messages"][-1].content and "Test" in result["messages"][-1].content
+        assert "尚未完成" in result["messages"][-1].content and "任务已停止" in result["messages"][-1].content
+        assert wf["continuation_failure"]["invalid_json"] is True
         assert not any("holdout.npz" in p for p in opened)
         assert stored_workflow(store)["stage"] == "blocked"
     else:

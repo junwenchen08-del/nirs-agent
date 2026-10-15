@@ -217,7 +217,7 @@ def write_workspace_csv(book: Workbook, settings: dict, destination: Path, *, pa
 
 
 def load_workspace_export(path: str) -> dict | None:
-    """Recognize explicit UI exports; preserve membership, never randomize it."""
+    """Recognize UI exports and preserve any explicitly assigned membership."""
     if Path(path).suffix.lower() != ".csv":
         return None
     with open(path, "rb") as handle:
@@ -263,10 +263,15 @@ def load_workspace_export(path: str) -> dict | None:
     }
 
 
+def has_fixed_partitions(data: dict) -> bool:
+    """Any explicit role, including exclusion, prevents automatic repartitioning."""
+    return bool(np.any(data["usage"] != "unassigned"))
+
+
 def fixed_regression_partitions(data: dict) -> dict:
     if data["targets"].ndim != 2 or data["targets"].shape[1] != 1:
         raise WorkspaceError("定量分析需要选择一个目标值列。")
-    if data.get("parsing_only"):
+    if not has_fixed_partitions(data):
         result = {"X": data["X"], "y": np.asarray(data["targets"][:, 0], dtype=float)}
         if data["wv"] is not None:
             result["wv"] = data["wv"]

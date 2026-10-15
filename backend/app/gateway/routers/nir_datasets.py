@@ -222,9 +222,9 @@ async def create_profile(
 
 @router.get("/{dataset_id}/preview")
 @require_permission("threads", "read")
-async def preview_dataset(dataset_id: str, request: Request, service: DatasetService = Depends(get_dataset_service)) -> dict:
+async def preview_dataset(dataset_id: str, request: Request, profile_id: str | None = None, service: DatasetService = Depends(get_dataset_service)) -> dict:
     try:
-        return await service.preview_dataset(_owner(request), dataset_id)
+        return await service.preview_dataset(_owner(request), dataset_id, **({"profile_id": profile_id} if profile_id else {}))
     except DatasetError as exc:
         _raise_dataset_error(exc)
 
