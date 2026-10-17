@@ -1013,6 +1013,42 @@ def test_approve_tool_accepts_explicit_user_authorization():
     assert command.update["nir_workflow"]["approval_status"] == "approved"
 
 
+@pytest.mark.parametrize("reply", ["同意保存到模型库", "确认保存到模型库。", "我同意将本次模型保存到模型库！", "同意存入模型库", "确认加入模型库", "同意登记到模型库"])
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_model_library_save_reply_is_valid_approval(reply, wrapped):
+    content = [{"type": "text", "text": "<uploaded_files>corn.mat</uploaded_files>"}, {"type": "text", "text": reply}] if wrapped else reply
+    runtime = SimpleNamespace(state={"nir_workflow": _review_state(), "messages": [HumanMessage(content=content, name="user-input")]}, tool_call_id="approve-library")
+    command = nir_workflow_tool.func(runtime=runtime, action="approve")
+    assert command.update["nir_workflow"]["stage"] == "approved"
+
+
+@pytest.mark.parametrize("reply", ["暂不保存到模型库", "不要保存到模型库", "同意查看结果，但不要保存", "请不要同意保存到模型库", "如何保存到模型库？", "同意保存到模型库吗？", "你让我回复“同意保存到模型库”是什么意思？", "模型效果怎么样？"])
+def test_save_denial_question_or_unrelated_reply_cannot_reuse_earlier_approval(reply):
+    runtime = SimpleNamespace(state={"nir_workflow": _review_state(), "messages": [HumanMessage(content="批准注册模型"), HumanMessage(content=reply)]}, tool_call_id="deny-library")
+    command = nir_workflow_tool.func(runtime=runtime, action="approve")
+    assert "nir_workflow" not in command.update
+
+
+@pytest.mark.parametrize("flags", [{"hide_from_ui": True}, {"dynamic_context_reminder": True}, {"durable_context_data": True}, {"slash_skill_activation": True}])
+def test_injected_context_is_never_model_save_approval(flags):
+    runtime = SimpleNamespace(state={"nir_workflow": _review_state(), "messages": [HumanMessage(content="只查看报告"), HumanMessage(content="同意保存到模型库", additional_kwargs=flags)]}, tool_call_id="deny-injected")
+    command = nir_workflow_tool.func(runtime=runtime, action="approve")
+    assert "nir_workflow" not in command.update
+
+
+def test_rendered_result_advertises_a_reply_accepted_by_the_real_approval_tool():
+    import re
+
+    from test_nir_response_grounding import _review_workflow
+
+    from deerflow.community.nir.response_grounding import render_grounded_nir_response
+
+    workflow = _review_workflow()
+    reply = re.search("回复“([^”]+)”", render_grounded_nir_response(workflow)).group(1)
+    runtime = SimpleNamespace(state={"nir_workflow": workflow, "messages": [HumanMessage(content=reply)]}, tool_call_id="approve-advertised-reply")
+    assert nir_workflow_tool.func(runtime=runtime, action="approve").update["nir_workflow"]["approval_status"] == "approved"
+
+
 def test_nir_workflow_reducer_preserves_evidence_from_lower_revision():
     existing = start_workflow(
         task_type="calibration",

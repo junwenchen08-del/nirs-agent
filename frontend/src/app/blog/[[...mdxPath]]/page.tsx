@@ -32,7 +32,7 @@ const loadBlogPage = cache(async function loadBlogPage(
       try {
         // Try every localized source for the same public /blog slug,
         // then pick the best match for the current locale.
-        const page = await importPage([...slug], lang);
+        const page = await importPage(["posts", ...slug], lang);
         return { lang, page };
       } catch {
         return null;
@@ -71,18 +71,18 @@ const loadBlogPage = cache(async function loadBlogPage(
 export async function generateMetadata(props) {
   const params = await props.params;
   const mdxPath = params.mdxPath ?? [];
-  const { locale } = await getI18n();
+  const { locale, t } = await getI18n();
   const preferredLang = getPreferredBlogLang(locale);
 
   if (mdxPath.length === 0) {
     return {
-      title: "Blog",
+      title: t.blog.title,
     };
   }
 
   if (mdxPath[0] === "tags" && mdxPath[1]) {
     return {
-      title: formatTagName(mdxPath[1]),
+      title: formatTagName(mdxPath[1], preferredLang),
     };
   }
 
@@ -99,7 +99,7 @@ export default async function Page(props) {
   const params = await props.params;
   const searchParams = await props.searchParams;
   const mdxPath = params.mdxPath ?? [];
-  const { locale } = await getI18n();
+  const { locale, t } = await getI18n();
   const localePreferredLang = getPreferredBlogLang(locale);
   const queryLang = searchParams?.lang;
   const preferredLang =
@@ -112,10 +112,10 @@ export default async function Page(props) {
     return (
       <Wrapper
         toc={[]}
-        metadata={{ title: "All Posts", filePath: "blog/index.mdx" }}
+        metadata={{ title: t.blog.allPosts, filePath: "blog/index.mdx" }}
         sourceCode=""
       >
-        <PostList title="All Posts" posts={posts} />
+        <PostList title={t.blog.allPosts} posts={posts} />
       </Wrapper>
     );
   }
@@ -127,7 +127,7 @@ export default async function Page(props) {
     } catch {
       notFound();
     }
-    const title = formatTagName(tag);
+    const title = formatTagName(tag, preferredLang);
     const { posts } = await getBlogIndexData(preferredLang, { tag });
 
     if (posts.length === 0) {
@@ -142,7 +142,7 @@ export default async function Page(props) {
       >
         <PostList
           title={title}
-          description={`${posts.length} posts with the tag “${title}”`}
+          description={t.blog.taggedPosts(title, posts.length)}
           posts={posts}
         />
       </Wrapper>

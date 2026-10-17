@@ -22,7 +22,7 @@ const config = {
       : undefined,
   i18n: {
     locales: ["en", "zh"],
-    defaultLocale: "en",
+    defaultLocale: "zh",
   },
   devIndicators: false,
   async redirects() {

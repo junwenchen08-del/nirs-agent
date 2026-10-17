@@ -39,7 +39,8 @@ def waiting_for_user(workflow) -> bool:
     return isinstance(pending, Mapping) and pending.get("status") == "waiting"
 
 
-def _latest_user(messages):
+def latest_user_message(messages):
+    """Return the latest genuine user reply, excluding injected runtime context."""
     for message in reversed(messages):
         if not isinstance(message, HumanMessage):
             continue
@@ -51,8 +52,16 @@ def _latest_user(messages):
         text = get_original_user_content_text(message.content, flags).strip()
         if not text or text.startswith(("<memory>", "<current_sealed_workflow>")):
             continue
-        return message, hashlib.sha256(text.encode()).hexdigest()
-    return None, None
+        return message
+    return None
+
+
+def _latest_user(messages):
+    message = latest_user_message(messages)
+    if message is None:
+        return None, None
+    text = get_original_user_content_text(message.content, message.additional_kwargs).strip()
+    return message, hashlib.sha256(text.encode()).hexdigest()
 
 
 def begin_user_wait(workflow, messages, question, message_id, *, tool_call_id=None):

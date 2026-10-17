@@ -51,7 +51,7 @@ export function SkillsSection({ className }: { className?: string }) {
     <Section
       className={cn("w-full bg-white/2 px-4 py-24", className)}
       title="自主化学计量学工作流"
-      subtitle="智能体负责规划与协同，nir_core 负责可复现的确定性计算"
+      subtitle="智能体规划分析方案，专业算法完成可复现的计算"
     >
       <div className="container-md mx-auto mt-12 grid grid-cols-1 gap-4 md:grid-cols-5">
         {WORKFLOW.map(({ icon: Icon, step, title, text }, index) => (

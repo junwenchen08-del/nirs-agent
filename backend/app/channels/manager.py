@@ -1,4 +1,4 @@
-"""ChannelManager — consumes inbound messages and dispatches them to the DeerFlow agent via Gateway."""
+"""ChannelManager — consumes inbound messages and dispatches them to the ChemAgent agent via Gateway."""
 
 from __future__ import annotations
 
@@ -64,8 +64,8 @@ STREAM_UPDATE_MIN_CHARS = 60  # flush immediately when this many chars accumulat
 STREAM_MODES = ["messages-tuple", "values"]
 MESSAGE_STREAM_EVENTS = ("messages-tuple", "messages")
 THREAD_BUSY_MESSAGE = "This conversation is already processing another request. Please wait for it to finish and try again."
-BOUND_IDENTITY_REQUIRED_MESSAGE = "Connect this channel from DeerFlow Settings, complete the in-channel connect step, then send your message again."
-BOUND_IDENTITY_UNAVAILABLE_MESSAGE = "Channel connection verification is temporarily unavailable. Please try again later or contact the DeerFlow operator."
+BOUND_IDENTITY_REQUIRED_MESSAGE = "Connect this channel from ChemAgent Settings, complete the in-channel connect step, then send your message again."
+BOUND_IDENTITY_UNAVAILABLE_MESSAGE = "Channel connection verification is temporarily unavailable. Please try again later or contact the ChemAgent operator."
 INBOUND_DEDUPE_TTL_SECONDS = 10 * 60
 INBOUND_DEDUPE_MAX_ENTRIES = 4096
 # Only server-stable provider message ids: client-generated ids (client_msg_id,
@@ -529,13 +529,13 @@ def _safe_user_id_for_run(raw_user_id: str) -> str:
 
 
 def _channel_storage_user_id(msg: InboundMessage) -> str | None:
-    """Resolve the canonical DeerFlow user id for a channel-triggered message.
+    """Resolve the canonical ChemAgent user id for a channel-triggered message.
 
     Single source of truth for both the agent **run identity**
     (``_resolve_run_params`` → ``run_context["user_id"]``) and the **file/artifact
     storage bucket** (``receive_file`` / ``_ingest_inbound_files`` /
     ``_prepare_artifact_delivery``), so the bucket the agent reads/writes always
-    matches where channel files are staged. Prefer the bound DeerFlow owner,
+    matches where channel files are staged. Prefer the bound ChemAgent owner,
     otherwise fall back to the sanitized raw platform user id. Without that
     fallback, an unbound auth-enabled channel would run under ``safe(msg.user_id)``
     but stage files under ``get_effective_user_id()`` (the dispatcher task's unset
@@ -776,7 +776,7 @@ def _format_uploaded_files_block(files: list[dict[str, Any]]) -> str:
 
 
 class ChannelManager:
-    """Core dispatcher that bridges IM channels to the DeerFlow agent.
+    """Core dispatcher that bridges IM channels to the ChemAgent agent.
 
     It reads from the MessageBus inbound queue, creates/reuses threads on
     Gateway's LangGraph-compatible API, sends messages via ``runs.wait``, and publishes
@@ -865,7 +865,7 @@ class ChannelManager:
         configurable["thread_id"] = thread_id
 
         # ``user_id`` drives DeerFlow-owned memory, files, and thread buckets.
-        # For browser-connected IM channels, prefer the DeerFlow account that
+        # For browser-connected IM channels, prefer the ChemAgent account that
         # owns the connection. Preserve the raw platform user under
         # ``channel_user_id`` for platform-facing lookups and audits.
         run_context_identity: dict[str, Any] = {"thread_id": thread_id}
@@ -1135,7 +1135,7 @@ class ChannelManager:
 
         # The manager is the run-creation security boundary, so it does not
         # trust mutable InboundMessage identity fields by themselves. Re-read
-        # the binding by provider identity before creating DeerFlow threads or
+        # the binding by provider identity before creating ChemAgent threads or
         # runs. If the asserted identity does not match, keep only the
         # server-side connection fields as outbound routing hints.
         connection = await self._connection_repo.find_connection_by_external_identity(
@@ -1284,7 +1284,7 @@ class ChannelManager:
         client = self._get_client()
         storage_user_id = _channel_storage_user_id(msg)
 
-        # Look up the existing DeerFlow thread, creating one if this is the
+        # Look up the existing ChemAgent thread, creating one if this is the
         # first message for the chat. topic_id may be None (e.g. Telegram
         # private chats) — the store handles this by using the "channel:chat_id"
         # key without a topic suffix.

@@ -1,5 +1,23 @@
 # AGENTS.md
 
+Chinese is the product default on the server and first browser visit, including
+English browsers. Restore explicit saved language choices; do not infer a new
+preference from navigator.language. Setup/auth feedback and docs/blog navigation
+use the locale dictionaries; docs chrome uses core/i18n/docs.ts. English remains
+an explicit setting. Keep ordinary English E2E fixtures explicit about locale;
+chemagent-chinese.spec.ts checks the actual Chinese default and persisted switch.
+
+Public identity lives in core/branding.ts (ChemAgent and its verified project
+links). Authentication uses spectral backgrounds, and favicon.svg is the native
+molecular/spectral mark. Workspace help opens localized ChemAgent docs; sharing
+uses the current instance origin. No upstream mascot, support/website links,
+marketing docs or research demos ship in public/. Static mode contains only the
+ChemAgent orientation thread. About content is localized. Documentation route
+projection must copy Nextra page maps so it cannot mutate cached blog routes;
+blog imports resolve inside the localized posts directory. Keep compatibility
+storage/protocol keys intact. Browser anchors: chemagent-branding.spec.ts and
+docs-localized-links.spec.ts; public-content guard: core/branding.test.ts.
+
 The autonomous process now uses autonomous-round-explorer/detail/graph.tsx and
 round-diagnostics.tsx. Default navigation is a round timeline; the lazy graph
 draws only recorded feedback and retention links, and fits the selected round
@@ -413,7 +431,6 @@ When adding features:
 3. Write unit tests under `tests/unit/` (`pnpm test`) and E2E tests under `tests/e2e/` (`pnpm test:e2e`)
 4. Run `pnpm check` before committing
 5. Update this `AGENTS.md` when architecture, commands, or conventions change
-
 
 Dataset cards and View details open `/workspace/nir/datasets/[dataset_id]`.
 `nir-library/dataset-workspace.tsx` owns the Chinese/English read-only sample

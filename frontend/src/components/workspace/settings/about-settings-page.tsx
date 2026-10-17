@@ -1,9 +1,11 @@
 "use client";
 
+import { useI18n } from "@/core/i18n/hooks";
 import { SafeStreamdown } from "@/core/streamdown/components";
 
-import { aboutMarkdown } from "./about-content";
+import { getAboutMarkdown } from "./about-content";
 
 export function AboutSettingsPage() {
-  return <SafeStreamdown>{aboutMarkdown}</SafeStreamdown>;
+  const { locale } = useI18n();
+  return <SafeStreamdown>{getAboutMarkdown(locale)}</SafeStreamdown>;
 }

@@ -47,11 +47,11 @@ export function Hero({ className }: { className?: string }) {
       />
       <div className="container-md relative z-10 mx-auto flex h-screen flex-col items-center justify-center px-6">
         <div className="mb-6 rounded-full border border-amber-300/20 bg-amber-300/10 px-4 py-1.5 text-sm font-medium tracking-[0.2em] text-amber-300 backdrop-blur-sm">
-          NIR INTELLIGENCE PLATFORM
+          近红外光谱智能分析平台
         </div>
         <h1 className="flex flex-col items-center gap-3 text-center text-4xl font-bold md:text-6xl lg:flex-row">
           <WordRotate words={NIR_CAPABILITIES} />
-          <span className="text-white">尽在 NIR-Agent</span>
+          <span className="text-white">尽在 ChemAgent</span>
         </h1>
         <p className="text-muted-foreground mt-8 max-w-4xl text-center text-lg leading-relaxed text-shadow-sm md:text-2xl">
           面向近红外光谱分析的专有智能体

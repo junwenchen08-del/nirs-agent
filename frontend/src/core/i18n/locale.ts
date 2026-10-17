@@ -1,6 +1,6 @@
-export const SUPPORTED_LOCALES = ["en-US", "zh-CN"] as const;
+export const SUPPORTED_LOCALES = ["zh-CN", "en-US"] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
-export const DEFAULT_LOCALE: Locale = "en-US";
+export const DEFAULT_LOCALE: Locale = "zh-CN";
 
 export function isLocale(value: string): value is Locale {
   return (SUPPORTED_LOCALES as readonly string[]).includes(value);
@@ -33,22 +33,17 @@ export function normalizeLocale(locale: string | null | undefined): Locale {
     return locale;
   }
 
-  if (locale.toLowerCase().startsWith("zh")) {
+  const language = locale.trim().replaceAll("_", "-").toLowerCase();
+  if (language === "zh" || language.startsWith("zh-")) {
     return "zh-CN";
   }
+  if (language === "en" || language.startsWith("en-")) return "en-US";
 
   return DEFAULT_LOCALE;
 }
 
-// Helper function to detect browser locale
+// The product starts in Chinese. Explicit saved choices are restored by
+// useI18n; the browser's language must not silently override this default.
 export function detectLocale(): Locale {
-  if (typeof window === "undefined") {
-    return DEFAULT_LOCALE;
-  }
-
-  const browserLang =
-    navigator.language ||
-    (navigator as unknown as { userLanguage: string }).userLanguage;
-
-  return normalizeLocale(browserLang);
+  return DEFAULT_LOCALE;
 }

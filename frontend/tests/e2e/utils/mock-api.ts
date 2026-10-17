@@ -49,6 +49,8 @@ export type MockSkill = {
 };
 
 export type MockAPIOptions = {
+  /** Legacy English interaction tests choose English explicitly. */
+  locale?: "en-US" | "zh-CN" | null;
   threads?: MockThread[];
   skills?: MockSkill[];
   uploadLimits?: {
@@ -89,7 +91,7 @@ function mockStreamMessages() {
     {
       type: "ai",
       id: "msg-ai-1",
-      content: "Hello from DeerFlow!",
+      content: "Hello from ChemAgent!",
     },
   ];
 }
@@ -105,6 +107,19 @@ function mockStreamMessages() {
  */
 export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
   const routeRegistrations: Promise<unknown>[] = [];
+  if (options?.locale !== null) {
+    routeRegistrations.push(
+      page.addInitScript((locale) => {
+        if (
+          !document.cookie
+            .split(";")
+            .some((cookie) => cookie.trim().startsWith("locale="))
+        ) {
+          document.cookie = `locale=${locale}; path=/; SameSite=Lax`;
+        }
+      }, options?.locale ?? "en-US"),
+    );
+  }
   const registerRoute = (...args: Parameters<Page["route"]>) => {
     const registration = page.route(...args);
     routeRegistrations.push(registration);
@@ -640,7 +655,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
 
 /**
  * Build a minimal SSE stream that the LangGraph SDK can parse.
- * The stream returns a single AI message: "Hello from DeerFlow!".
+ * The stream returns a single AI message: "Hello from ChemAgent!".
  */
 export function handleRunStream(
   route: Route,

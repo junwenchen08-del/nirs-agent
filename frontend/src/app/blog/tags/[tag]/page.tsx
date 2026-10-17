@@ -24,7 +24,7 @@ export async function generateMetadata(props) {
 export default async function TagPage(props) {
   const params = await props.params;
   const tag = params.tag;
-  const { locale } = await getI18n();
+  const { locale, t } = await getI18n();
   const { posts } = await getBlogIndexData(getPreferredBlogLang(locale), {
     tag,
   });
@@ -33,7 +33,7 @@ export default async function TagPage(props) {
     notFound();
   }
 
-  const title = formatTagName(tag);
+  const title = formatTagName(tag, getPreferredBlogLang(locale));
 
   return (
     <Wrapper
@@ -43,7 +43,7 @@ export default async function TagPage(props) {
     >
       <PostList
         title={title}
-        description={`${posts.length} posts with the tag “${title}”`}
+        description={t.blog.taggedPosts(title, posts.length)}
         posts={posts}
       />
     </Wrapper>

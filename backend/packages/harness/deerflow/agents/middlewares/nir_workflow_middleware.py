@@ -1981,7 +1981,9 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
             if question:
                 paused = begin_user_wait(workflow, messages, question, str(message.id), tool_call_id=ask["id"] if ask else None)
                 if not validate_nir_response(waiting_message(paused), paused).passed:
-                    paused["user_question"]["question"] = "请告诉我你希望下一步如何处理。"
+                    paused["user_question"]["question"] = (
+                        "是否将本次已完成的模型保存到模型库？\n\n请回复“同意保存到模型库”或“暂不保存”。" if workflow.get("stage") == "review" and workflow.get("approval_status") == "pending" else "请告诉我你希望下一步如何处理。"
+                    )
                     paused["user_question"]["sanitized_display"] = True
                 if ask and not validate_nir_response(question + "\n" + str(ask["args"].get("options") or []), paused).passed:
                     paused["user_question"]["sanitized_display"] = True

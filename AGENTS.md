@@ -1,5 +1,11 @@
 # AGENTS.md
 
+Public product identity is ChemAgent. All visible surfaces, bilingual docs,
+notifications, default agent prose and channel replies use that name. Use the
+frontend branding constants for verified project links; local docs are the help
+entry. Preserve legacy import, protocol, storage and environment identities for
+compatibility. See docs/chemagent-branding.md.
+
 Autonomous modeling has a shared round timeline/recorded-relation graph with
 lazy detail and linked Cal/Cal CV/Val diagnostics. Display evidence is captured
 from original search predictions and hash-bound to the exact execution; reads

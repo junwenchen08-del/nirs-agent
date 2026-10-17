@@ -19,7 +19,7 @@ from deerflow.agents.middlewares.nir_workflow_middleware import NIRWorkflowMiddl
 from deerflow.community.nir import search_tools
 from deerflow.community.nir.process import runtime_store
 from deerflow.community.nir.response_grounding import required_nir_workflow_action, validate_nir_response
-from deerflow.community.nir.user_wait import begin_user_wait, question_for_user, resume_user_wait, waiting_for_user
+from deerflow.community.nir.user_wait import begin_user_wait, question_for_user, resume_user_wait, waiting_for_user, waiting_message
 from deerflow.community.nir.web_entry import bind_web_request, stored_workflow
 from deerflow.config import paths
 from deerflow.runtime.user_context import get_effective_user_id
@@ -119,6 +119,21 @@ def test_tool_question_does_not_publish_unverified_metrics_in_its_context():
     content = result.update["messages"][0].content
     assert "0.9999" not in content and "通过外部验证" not in content
     assert "请告诉我" in content
+
+
+def test_review_question_fallback_preserves_an_actionable_save_choice():
+    from test_nir_response_grounding import _review_workflow
+
+    workflow = {**_review_workflow(), "search_protocol": "sealed_holdout", "autonomous_delivery": True}
+    args = {"question": "系统没有识别到批准授权（approval_status 仍为 pending），是否保存验证集 RMSE 0.4191 的模型？", "options": ["批准登记到模型库", "暂不登记"]}
+    message = AIMessage(content="", id="ask-save", tool_calls=[{"id": "save-question", "name": "ask_clarification", "args": args}])
+    update = NIRWorkflowMiddleware().after_model({"nir_workflow": workflow, "messages": [HumanMessage(content="查看报告", id="user"), message]}, SimpleNamespace(context={}))
+    paused = update["nir_workflow"]
+    request = _request("ask_clarification", {"nir_workflow": paused}, args=args, call_id="save-question")
+    content = ClarificationMiddleware().wrap_tool_call(request, lambda _: pytest.fail("Question must wait")).update["messages"][0].content
+    assert "同意保存到模型库" in content and "暂不保存" in content
+    assert "approval_status" not in content and "0.4191" not in content
+    assert validate_nir_response(waiting_message(paused), paused).passed
 
 
 class QuestionLLM(UnifiedFakeLLM):

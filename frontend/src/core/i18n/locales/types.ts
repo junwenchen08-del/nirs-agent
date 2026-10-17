@@ -636,6 +636,22 @@ export interface Translations {
     };
   };
 
+  blog: {
+    title: string;
+    allPosts: string;
+    recentPosts: string;
+    tags: string;
+    language: string;
+    taggedPosts: (title: string, count: number) => string;
+  };
+  setup: {
+    createAdminDescription: string;
+    completeTitle: string;
+    completeDescription: string;
+    creatingAccount: string;
+    completingSetup: string;
+    completeSetup: string;
+  };
   // Login / Auth
   login: {
     signInTitle: string;
@@ -658,6 +674,9 @@ export interface Translations {
     backToHome: string;
     networkError: string;
     authFailed: string;
+    signingIn: string;
+    redirecting: string;
+    redirectingToLogin: string;
     errors: {
       sso_failed: string;
       sso_cancelled: string;

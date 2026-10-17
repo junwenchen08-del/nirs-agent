@@ -15,12 +15,13 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool
 from langgraph.types import Command
 
 from deerflow.agents.thread_state import NIRClarificationQuestion, NIRWorkflowState
 from deerflow.community.nir.decision_facts import model_result_facts, selection_decision_facts
+from deerflow.community.nir.user_wait import latest_user_message
 from deerflow.tools.types import Runtime
 from deerflow.utils.messages import get_original_user_content_text
 
@@ -214,6 +215,10 @@ _APPROVAL_PATTERNS = (
     r"批准",
     r"同意(?:采用|使用|注册)",
     r"确认(?:采用|使用|注册)",
+    # Accept the exact plain-Chinese reply advertised in the result message.
+    # An affirmative statement is required; quoted instructions/questions do
+    # not become consent just because they mention saving to the library.
+    r"^\s*(?:我)?(?:同意|确认)(?:将|把)?(?:本次|这个|当前|该)?(?:模型)?(?:保存到|存入|加入|登记到)模型库\s*[。！!]*\s*$",
     r"注册(?:这个|该)?模型",
     r"\bapprove(?:d)?\b",
     r"\bproceed\s+with\s+(?:the\s+)?registration\b",
@@ -221,6 +226,7 @@ _APPROVAL_PATTERNS = (
 _APPROVAL_DENIAL_PATTERNS = (
     r"(?:不|未|尚未|暂不|不要|拒绝|取消)\s*(?:批准|同意|确认|采用|使用|注册)",
     r"(?:不同意|不确认|不采用|不使用|不注册)",
+    r"(?:不|未|尚未|暂不|不要|拒绝|取消|稍后再)\s*(?:保存|存入|加入|登记|入库)",
     r"\b(?:do\s+not|don't|not|never|decline|reject|cancel)\b.{0,40}\b(?:approve(?:d)?|agree|proceed|register|registration)\b",
     r"\bwithout\s+(?:my\s+)?approval\b",
 )
@@ -1319,17 +1325,14 @@ def registration_is_approved(state: dict | None) -> bool:
 
 def _latest_user_explicitly_approved(runtime: Runtime) -> bool:
     messages = (runtime.state or {}).get("messages") or []
-    for message in reversed(messages):
-        if not isinstance(message, HumanMessage):
-            continue
-        if message.additional_kwargs.get("hide_from_ui"):
-            continue
-        text = get_original_user_content_text(message.content, message.additional_kwargs)
-        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APPROVAL_DENIAL_PATTERNS):
-            return False
-        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APPROVAL_PATTERNS):
-            return True
-    return False
+    message = latest_user_message(messages)
+    if message is None:
+        return False
+    text = get_original_user_content_text(message.content, message.additional_kwargs)
+    text = re.sub(r"<uploaded_files>.*?</uploaded_files>", "", text, flags=re.S)
+    if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APPROVAL_DENIAL_PATTERNS):
+        return False
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APPROVAL_PATTERNS)
 
 
 def _runtime_identifier(runtime: Runtime, key: str) -> str | None:

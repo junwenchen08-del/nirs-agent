@@ -1,9 +1,6 @@
 import type { MetaRecord } from "nextra";
 
 const meta: MetaRecord = {
-  weekly: {
-    title: "周报",
-  },
+  "chemagent-workflow": { title: "ChemAgent 分析流程" },
 };
-
 export default meta;

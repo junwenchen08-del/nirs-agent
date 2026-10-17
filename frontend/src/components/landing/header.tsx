@@ -2,11 +2,10 @@ import { GitBranchIcon } from "lucide-react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
+import { BRAND } from "@/core/branding";
 import type { Locale } from "@/core/i18n/locale";
 import { getI18n } from "@/core/i18n/server";
 import { cn } from "@/lib/utils";
-
-const GITEE_PROJECT_URL = "https://gitee.com/starlightsir/nirs-agent";
 
 export type HeaderProps = {
   className?: string;
@@ -27,11 +26,11 @@ export async function Header({ className, homeURL, locale }: HeaderProps) {
     >
       <div className="flex items-center gap-6">
         <a
-          href={homeURL ?? GITEE_PROJECT_URL}
+          href={homeURL ?? BRAND.repositoryUrl}
           target={isExternalHome ? "_blank" : "_self"}
           rel={isExternalHome ? "noopener noreferrer" : undefined}
         >
-          <h1 className="font-serif text-xl">NIR-Agent</h1>
+          <h1 className="font-serif text-xl">{BRAND.name}</h1>
         </a>
       </div>
       <nav className="mr-8 ml-auto flex items-center gap-8 text-sm font-medium">
@@ -62,9 +61,13 @@ export async function Header({ className, homeURL, locale }: HeaderProps) {
           asChild
           className="group relative z-10"
         >
-          <a href={GITEE_PROJECT_URL} target="_blank" rel="noopener noreferrer">
+          <a
+            href={BRAND.repositoryUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             <GitBranchIcon className="size-4" />
-            Gitee 项目
+            ChemAgent 项目
           </a>
         </Button>
       </div>

@@ -22,8 +22,8 @@ export function Footer({ className }: FooterProps) {
         </p>
       </div>
       <div className="text-muted-foreground container mb-8 flex flex-col items-center justify-center text-xs">
-        <p>Built on DeerFlow · Licensed under MIT License</p>
-        <p>&copy; {year} NIR-Agent</p>
+        <p>ChemAgent · 近红外光谱智能分析平台</p>
+        <p>&copy; {year} ChemAgent</p>
       </div>
     </footer>
   );

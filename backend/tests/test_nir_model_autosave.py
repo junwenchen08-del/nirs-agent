@@ -18,7 +18,7 @@ from deerflow.agents.middlewares.nir_workflow_middleware import NIRWorkflowMiddl
 from deerflow.community.nir import model_autosave, model_tools, modeling
 from deerflow.community.nir.models.service import ModelError
 from deerflow.community.nir.registration import nir_register_model_tool
-from deerflow.community.nir.workflow import transition_workflow
+from deerflow.community.nir.workflow import nir_workflow_tool, transition_workflow
 from deerflow.config.nir_library_config import NIRLibraryConfig
 
 model_library = _model_library_fixture
@@ -106,10 +106,11 @@ async def test_async_agent_registration_finishes_with_a_listable_model(enabled_a
         metrics_path=package["attempt_evidence"]["metrics_path"],
         attempt_evidence={**package["attempt_evidence"], "tool_name": "nir_train_model"},
     )
-    workflow = transition_workflow(workflow, action="approve")
+    approval = nir_workflow_tool.func(runtime=_runtime("同意保存到模型库", workflow=workflow), action="approve")
+    workflow = approval.update["nir_workflow"]
     request = _request(
         "nir_register_model",
-        {"nir_workflow": workflow, "messages": [HumanMessage(content="同意注册模型")]},
+        {"nir_workflow": workflow, "messages": [HumanMessage(content="同意保存到模型库")]},
         context={"user_id": "alice", "thread_id": "source-thread", "run_id": "run-one"},
         args={"model_id": "tablet_new", "model_path": package["attempt_evidence"]["model_path"], "metrics_path": package["attempt_evidence"]["metrics_path"]},
     )

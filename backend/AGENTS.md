@@ -1,5 +1,19 @@
 # AGENTS.md
 
+Default Lead prompt identity, Gateway API documentation and IM connection/reply
+copy use ChemAgent. Existing Python package names, wire headers, environment
+variables and data locations are compatibility contracts. Custom agent names
+remain configurable. test_lead_agent_prompt.py checks the default rendered prompt
+and custom-name preservation; channel connection suites cover emitted copy.
+
+The advertised Chinese reply `同意保存到模型库` is valid registration approval.
+Approval reads only the latest genuine user reply, excluding runtime context;
+older consent cannot override a current denial, question or unrelated message.
+Registration and library autosave still require the approved exact artifacts and
+the existing owner/policy/integrity gates. Sanitized review questions preserve a
+clear save/defer choice without unchecked metrics or internal status labels.
+Anchors: test_nir_workflow.py, test_nir_model_autosave.py, test_nir_user_wait.py.
+
 Round diagnostics retain safe_search's original Cal fit/Cal OOF/Val predictions
 in SearchFit memory only. The trusted search executor writes bounded immutable
 diagnostics caches and hashes; chart failures preserve successful numeric/model
