@@ -24,6 +24,17 @@ def test_four_families_train_without_a_holdout_argument(family):
     assert result.model.predict(arrays()[2]).shape == (16,)
 
 
+def test_search_retains_original_oof_and_val_predictions_without_extra_fits():
+    result = fit_search_model(*arrays(), method="ridge", steps=[], cv_folds=3, parameter_plan={"strategy": "fixed", "fixed_params": {"alpha": 2.0}, "search_space": {}, "max_trials": 1, "max_fits": 4})
+    assert set(result.predictions) == {"calibration", "calibration_cv", "validation"}
+    assert result.fits == 4
+    X, y, X_val, y_val = arrays()
+    np.testing.assert_allclose(result.predictions["validation"], result.model.predict(X_val))
+    for scope, actual in (("calibration", y), ("calibration_cv", y), ("validation", y_val)):
+        metric = {"calibration": "train", "calibration_cv": "train_cv", "validation": "val"}[scope]
+        assert np.sqrt(np.mean((result.predictions[scope] - actual) ** 2)) == pytest.approx(result.metrics[metric]["RMSE"])
+
+
 def test_preprocessing_is_fitted_inside_each_cv_fold(monkeypatch):
     seen = []
     original = PreprocessingPipeline.fit

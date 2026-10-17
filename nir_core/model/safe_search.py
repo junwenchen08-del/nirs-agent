@@ -7,7 +7,7 @@ High-level family/pipeline choice is deliberately left to the caller.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 from typing import Callable
@@ -54,6 +54,7 @@ class SearchFit:
     trials: list[dict]
     fits: int
     cv_manifest: dict
+    predictions: dict[str, np.ndarray] = field(default_factory=dict)
 
 
 def _candidates(method, upper):
@@ -230,6 +231,7 @@ def fit_search_model(
     fitted_count += 1
     model = CalibratedRegressor(preprocessor, estimator, wv)
     val_prediction = model.predict(X_val)
+    cal_prediction = model.predict(X_cal)
     metrics = {
         "evaluation_scope": "validation",
         "test_status": "sealed",
@@ -237,7 +239,7 @@ def fit_search_model(
         "n_components": best_params.get("n_components"),
         "n_samples": len(X_cal),
         "train": {
-            **compute_metrics(y_cal, model.predict(X_cal)),
+            **compute_metrics(y_cal, cal_prediction),
             "scope": "calibration",
         },
         "train_cv": {
@@ -264,4 +266,9 @@ def fit_search_model(
         trials,
         fitted_count,
         cv_manifest,
+        {
+            "calibration": cal_prediction,
+            "calibration_cv": best_predictions,
+            "validation": val_prediction,
+        },
     )

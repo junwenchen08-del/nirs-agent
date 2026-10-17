@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { chartColors, seriesColor } from "@/core/nir/chart-theme";
 import {
   displayedPointSummary,
   type ProcessChart,
@@ -9,14 +10,6 @@ import {
 import { formatProcessNumber } from "@/core/nir/process-display";
 import { cn } from "@/lib/utils";
 
-const colors = [
-  "#2563eb",
-  "#059669",
-  "#d97706",
-  "#9333ea",
-  "#dc2626",
-  "#0891b2",
-];
 const height = 330,
   left = 64,
   top = 24,
@@ -159,6 +152,11 @@ export function ProcessChartView({
     ];
   };
   const summary = displayedPointSummary(chart, selected);
+  // The chart reads a short identifier, matching the data table below; the
+  // complete recorded id stays in that table and in technical records.
+  const hoverId = hover
+    ? (chart.sample_ids?.[hover.index]?.slice(0, 8) ?? "")
+    : "";
   if (chart.evidence_status !== "available")
     return (
       <p className="rounded-lg border border-dashed p-6 text-sm">
@@ -198,9 +196,7 @@ export function ProcessChartView({
             : {fmt(xs[hover.index])} {chart.x_unit} ·{" "}
             {axisLabel(chart.y_label, zh)}:{" "}
             {fmt(lineSeries[hover.series]?.values[hover.index])} {chart.y_unit}
-            {chart.sample_ids?.[hover.index]
-              ? ` · #${chart.sample_ids[hover.index]}`
-              : ""}
+            {hoverId ? ` · ${zh ? "样本标识" : "Sample ID"} ${hoverId}` : ""}
           </span>
         ) : (
           <span>
@@ -348,7 +344,7 @@ export function ProcessChartView({
               x2={sx(high)}
               y1={sy(low)}
               y2={sy(high)}
-              stroke="#64748b"
+              stroke={chartColors.raw}
               strokeDasharray="5 5"
             />
           )}
@@ -358,7 +354,7 @@ export function ProcessChartView({
               x2={right}
               y1={sy(0)}
               y2={sy(0)}
-              stroke="#64748b"
+              stroke={chartColors.raw}
               strokeDasharray="5 5"
             />
           )}
@@ -369,7 +365,7 @@ export function ProcessChartView({
                 y={top + 65}
                 width={Math.max(3, Math.abs(sx(range.end) - sx(range.start)))}
                 height={80}
-                fill="#059669"
+                fill={chartColors.retained}
                 opacity=".6"
               >
                 <title>
@@ -390,8 +386,8 @@ export function ProcessChartView({
                   }
                   fill={
                     selected.includes(chart.sample_ids?.[index] ?? "")
-                      ? "#d97706"
-                      : colors[seriesIndex % colors.length]
+                      ? chartColors.diagnostic
+                      : seriesColor(seriesIndex)
                   }
                   opacity=".8"
                   tabIndex={0}
@@ -419,7 +415,7 @@ export function ProcessChartView({
                     (right - left) / Math.max(1, xs.length) - 3,
                   )}
                   height={bottom - sy(y)}
-                  fill={colors[seriesIndex % colors.length]}
+                  fill={seriesColor(seriesIndex)}
                   opacity=".7"
                 />
               ))
@@ -427,7 +423,7 @@ export function ProcessChartView({
               <polyline
                 key={series.id}
                 fill="none"
-                stroke={colors[seriesIndex % colors.length]}
+                stroke={seriesColor(seriesIndex)}
                 strokeWidth="1.7"
                 opacity=".8"
                 points={curvePaths[seriesIndex]}
@@ -440,9 +436,9 @@ export function ProcessChartView({
               y={Math.min(brush.from[1], brush.to[1])}
               width={Math.abs(brush.from[0] - brush.to[0])}
               height={Math.abs(brush.from[1] - brush.to[1])}
-              fill="#2563eb"
+              fill={chartColors.processed}
               opacity=".15"
-              stroke="#2563eb"
+              stroke={chartColors.processed}
             />
           )}
         </g>
@@ -467,7 +463,7 @@ export function ProcessChartView({
                 )
               }
             >
-              <span style={{ color: colors[index % colors.length] }}>● </span>
+              <span style={{ color: seriesColor(index) }}>● </span>
               {chart.type === "spectra"
                 ? zh
                   ? `样本 ${index + 1}`

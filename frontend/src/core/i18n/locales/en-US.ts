@@ -213,6 +213,7 @@ export const enUS: Translations = {
     workspace: "Workspace",
     chats: "Chats",
     nirLibrary: "NIR asset library",
+    nirProcess: "Modeling process",
     methods: "Method library",
   },
 

@@ -5,6 +5,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 rs.mock("@/core/i18n/hooks", () => ({ useI18n: () => ({ locale: "zh-CN" }) }));
 rs.mock("@/core/artifacts/utils", () => ({ urlOfArtifact: () => "/download" }));
 rs.mock("@/core/nir/process-hooks", () => ({ useProcessResource: rs.fn() }));
+rs.mock("@/core/nir/round-hooks", () => ({
+  useRoundHistory: rs.fn(() => ({ rows: [], total: 0, refetch: rs.fn() })),
+}));
 
 import { AutonomousProcess } from "@/components/workspace/nir/autonomous-process";
 import {
@@ -32,6 +35,7 @@ import {
   validationSeries,
 } from "@/core/nir/autonomous";
 import { useProcessResource } from "@/core/nir/process-hooks";
+import { useRoundHistory } from "@/core/nir/round-hooks";
 
 const summary = {
   schema_version: 1,
@@ -578,7 +582,12 @@ test("runtime custom requests still allowlist the four user budget fields", () =
   ).toEqual({ max_fits: 8 });
 });
 
-test("default timeline lazily excludes decision, rejection and Test chart requests", () => {
+test("default timeline loads the selected round and excludes rejection and Test chart requests", () => {
+  rs.mocked(useRoundHistory).mockReturnValue({
+    rows: [parseDecision({ ...decision, round_index: 1 })!],
+    total: 25,
+    refetch: rs.fn(),
+  } as unknown as ReturnType<typeof useRoundHistory>);
   const mocked = rs.mocked(useProcessResource);
   mocked.mockReset();
   mocked.mockImplementation(
@@ -607,10 +616,11 @@ test("default timeline lazily excludes decision, rejection and Test chart reques
   expect(mocked.mock.calls.map((call) => call[1])).toEqual([
     null,
     "autonomous/search_a",
-    "autonomous/search_a/decisions?offset=0&limit=10",
+    "autonomous/search_a/decisions/d_a",
+    null,
   ]);
   expect(mocked.mock.calls[2]?.[2]).toBe(false);
-  expect(html).toContain("1–1 / 25");
+  expect(html).toContain("已加载 1 / 25 次决策");
   expect(html).not.toContain("已注册");
 });
 

@@ -35,7 +35,9 @@ export function useProcessResource<T>(
       ),
     enabled: Boolean(user && resource),
     staleTime:
-      resource?.includes("charts/") || resource?.includes("spectra/")
+      resource?.includes("charts/") ||
+      resource?.includes("spectra/") ||
+      resource?.includes("diagnostics/")
         ? Infinity
         : 2000,
     retry: (count, error) =>

@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { useI18n } from "@/core/i18n/hooks";
 import { loadNIRWorkflowState } from "@/core/nir/api";
+import { chartColors } from "@/core/nir/chart-theme";
 import { processCandidateLabel } from "@/core/nir/presentation";
 import { ProcessAPIError } from "@/core/nir/process-api";
 import {
@@ -33,6 +34,7 @@ import {
 } from "@/core/nir/process-display";
 import { useProcessResource } from "@/core/nir/process-hooks";
 import { selectNIRProcessView } from "@/core/nir/process-selectors";
+import { roundWorkflowPollingInterval } from "@/core/nir/round-process";
 import { selectNIRWorkflow } from "@/core/nir/selectors";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +59,13 @@ export function ProcessWorkspace({ threadId }: { threadId: string }) {
     retry: false,
     refetchOnWindowFocus: true,
     staleTime: 5000,
+    refetchInterval: (query) => {
+      const interval = roundWorkflowPollingInterval(query.state.data);
+      return interval === false
+        ? false
+        : Math.min(30000, interval * 2 ** query.state.fetchFailureCount);
+    },
+    refetchIntervalInBackground: false,
   });
   useEffect(
     () => () => {
@@ -927,7 +936,7 @@ function LegacyProcessWorkspace({ threadId }: { threadId: string }) {
                 >
                   <polyline
                     fill="none"
-                    stroke="#2563eb"
+                    stroke={chartColors.processed}
                     strokeWidth="2"
                     points={scores
                       .map(
@@ -953,8 +962,8 @@ function LegacyProcessWorkspace({ threadId }: { threadId: string }) {
                         fill={
                           value ===
                           Math.min(...scores.map((point) => point.value))
-                            ? "#059669"
-                            : "#2563eb"
+                            ? chartColors.retained
+                            : chartColors.processed
                         }
                       >
                         <title>

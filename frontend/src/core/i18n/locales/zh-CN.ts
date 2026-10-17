@@ -205,6 +205,7 @@ export const zhCN: Translations = {
     workspace: "工作区",
     chats: "对话",
     nirLibrary: "数据集与模型",
+    nirProcess: "建模过程",
     methods: "方法库",
   },
 

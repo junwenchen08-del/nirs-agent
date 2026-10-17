@@ -142,3 +142,10 @@ async def autonomous_rejections(thread_id: str, session_id: str, request: Reques
 async def autonomous_spectra(thread_id: str, session_id: str, experiment_id: str, request: Request):
     view = await _autonomous(request, thread_id)
     return JSONResponse(await _read(view.spectra, session_id, experiment_id), headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/autonomous/{session_id}/diagnostics/{experiment_id}")
+@require_permission("threads", "read", owner_check=True)
+async def autonomous_round_diagnostics(thread_id: str, session_id: str, experiment_id: str, request: Request):
+    view = await _autonomous(request, thread_id)
+    return JSONResponse(await _read(view.diagnostics, session_id, experiment_id), headers={"Cache-Control": "private, no-store"})

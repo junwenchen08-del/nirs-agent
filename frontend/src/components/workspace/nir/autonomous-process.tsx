@@ -5,19 +5,11 @@ import { useEffect, useState } from "react";
 import { urlOfArtifact } from "@/core/artifacts/utils";
 import { useI18n } from "@/core/i18n/hooks";
 import {
-  actionLabel,
-  decisionPipelineLabel,
   autonomousIntakeStatus,
-  autonomousDecisionPageSize,
   autonomousLifecycleFacts,
   autonomousTestStatusLabel,
-  executionLabel,
   experimentMarkers,
   isAutonomousTerminal,
-  metricRows,
-  parameterTrials,
-  parseDecision,
-  parseDecisionPage,
   parseFinalChart,
   parseRejectionPage,
   parseSummary,
@@ -26,17 +18,14 @@ import {
   text,
   validationSeries,
   type AutonomousSummary,
-  type DecisionView,
 } from "@/core/nir/autonomous";
-import { type ProcessChart } from "@/core/nir/process-contract";
-import {
-  factValue,
-  formatProcessNumber as fmt,
-} from "@/core/nir/process-display";
+import { formatProcessNumber as fmt } from "@/core/nir/process-display";
 import { useProcessResource } from "@/core/nir/process-hooks";
 
+import { EvidenceChart, Metrics } from "./autonomous-evidence";
+import { AutonomousRoundExplorer } from "./autonomous-round-explorer";
 import { CalSpectraComparison } from "./cal-spectra";
-import { ProcessChartView, plotLabel } from "./process-chart";
+import { plotLabel } from "./process-chart";
 import { ProcessFacts } from "./process-facts";
 
 const stageLabels: Record<string, [string, string]> = {
@@ -92,211 +81,6 @@ const deliveryLabels: Record<string, [string, string]> = {
     "Delivery cancelled; evidence preserved",
   ],
 };
-
-function Metrics({ value }: { value: unknown }) {
-  const { locale } = useI18n();
-  const zh = locale === "zh-CN";
-  const rows = metricRows(value);
-  return rows.length ? (
-    <div className="grid gap-3 md:grid-cols-2">
-      {rows.map((row) => (
-        <div key={row.label} className="rounded border p-3 text-sm">
-          <strong>
-            {zh
-              ? ({
-                  Cal: "校准集拟合（Cal）",
-                  "Cal CV": "校准交叉验证（Cal CV，折外预测）",
-                  Val: "验证集（Val）",
-                  Test: "最终测试集（Test）",
-                }[row.label ?? ""] ?? row.label)
-              : row.label}
-            {!zh && row.label === "Cal CV" ? " (OOF)" : ""}
-          </strong>
-          <span className="text-muted-foreground ml-2 text-xs">
-            {String(factValue("scope", row.values.scope, zh))} ·{" "}
-            {zh ? "样本数" : "n"}={fmt(row.values.n)}
-          </span>
-          <div className="mt-2 flex gap-4">
-            {["RMSE", "R2", "RPD"].map((key) => (
-              <span key={key}>
-                {key === "R2" ? "R²" : key}:{" "}
-                {key in row.values ? fmt(row.values[key]) : "—"}
-              </span>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  ) : null;
-}
-
-function RecordedNarrative({ value, zh }: { value: string; zh: boolean }) {
-  if (!value) return <span>{zh ? "未记录" : "Not recorded"}</span>;
-  if (!zh || /[\u3400-\u9fff]/u.test(value))
-    return <span className="whitespace-pre-wrap">{value}</span>;
-  return (
-    <details className="text-sm">
-      <summary className="text-muted-foreground cursor-pointer">
-        历史理由为英文，展开查看原始记录
-      </summary>
-      <p className="mt-2 whitespace-pre-wrap" lang="en">
-        {value}
-      </p>
-    </details>
-  );
-}
-
-function EvidenceChart({
-  x,
-  y,
-  type,
-  scope,
-  zh,
-  ids,
-  sampling = "persisted_evidence",
-  nTotal,
-}: {
-  x: number[];
-  y: number[];
-  type: string;
-  scope: string;
-  zh: boolean;
-  ids?: string[];
-  sampling?: string;
-  nTotal?: number;
-}) {
-  const [zoom, setZoom] = useState<[number, number]>([0, 1]);
-  const [selected, setSelected] = useState<string[]>([]);
-  if (
-    !x.length ||
-    x.length !== y.length ||
-    ![...x, ...y].every(Number.isFinite)
-  )
-    return <p>{zh ? "图表证据不可用。" : "Chart evidence unavailable."}</p>;
-  const chart: ProcessChart = {
-    chart_schema_version: 1,
-    chart_id: `${type}_${scope}`,
-    run_id: "",
-    attempt_id: "",
-    step_execution_id: "",
-    evidence_status: "available",
-    type,
-    scope,
-    x,
-    y,
-    x_label:
-      type === "trend"
-        ? "round"
-        : type === "cv"
-          ? "candidate_index"
-          : "reference",
-    y_label:
-      type === "residual"
-        ? "residual"
-        : type === "cv"
-          ? "RMSECV"
-          : type === "trend"
-            ? scope
-            : "prediction",
-    sample_ids: ids,
-    n_total: nTotal ?? x.length,
-    n_returned: x.length,
-    sampling,
-  };
-  return (
-    <ProcessChartView
-      chart={chart}
-      zh={zh}
-      zoom={zoom}
-      onZoom={setZoom}
-      selected={selected}
-      onSelect={setSelected}
-    />
-  );
-}
-
-function ParameterTrials({ value, zh }: { value: unknown; zh: boolean }) {
-  const trials = parameterTrials(value);
-  const [offset, setOffset] = useState(0);
-  const page = trials.slice(offset, offset + autonomousDecisionPageSize);
-  const points = page.filter(
-    (trial): trial is typeof trial & { RMSECV: number } =>
-      trial.RMSECV !== null,
-  );
-  return (
-    <div className="mt-3 space-y-3">
-      <p className="text-muted-foreground text-xs">
-        {zh
-          ? "只显示已记录的 Cal CV 参数评价；候选序号保留实际搜索顺序，折叠或翻页不会重新训练。"
-          : "Recorded Cal CV evaluations only, in actual search order. Expanding or paging never retrains."}
-      </p>
-      {points.length > 0 && (
-        <EvidenceChart
-          x={points.map((trial) => trial.index)}
-          y={points.map((trial) => trial.RMSECV)}
-          type="cv"
-          scope="calibration_cv"
-          zh={zh}
-          nTotal={trials.length}
-        />
-      )}
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr>
-              <th>{zh ? "候选序号" : "Candidate"}</th>
-              <th>{zh ? "实际参数" : "Actual parameters"}</th>
-              <th>{zh ? "Cal CV RMSE（折均值）" : "Cal CV mean-fold RMSE"}</th>
-              <th>{zh ? "各折 RMSE" : "Fold RMSE"}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {page.map((trial) => (
-              <tr key={trial.index} className="border-t">
-                <td className="py-2">{trial.index}</td>
-                <td className="max-w-80 break-words">
-                  <ProcessFacts value={trial.parameters} zh={zh} />
-                </td>
-                <td>{fmt(trial.RMSECV)}</td>
-                <td>{trial.fold_rmse.map(fmt).join(" / ") || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {!trials.length && (
-        <p>
-          {zh
-            ? "没有可展示的 Cal CV 参数证据。"
-            : "No Cal CV parameter evidence available."}
-        </p>
-      )}
-      {trials.length > autonomousDecisionPageSize && (
-        <div className="flex justify-between text-sm">
-          <button
-            type="button"
-            disabled={offset === 0}
-            onClick={() =>
-              setOffset(Math.max(0, offset - autonomousDecisionPageSize))
-            }
-          >
-            {zh ? "上一页" : "Previous"}
-          </button>
-          <span>
-            {offset + 1}–{offset + page.length} / {trials.length}
-          </span>
-          <button
-            type="button"
-            disabled={offset + page.length >= trials.length}
-            onClick={() => setOffset(offset + autonomousDecisionPageSize)}
-          >
-            {zh ? "下一页" : "Next"}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function Trends({ summary, zh }: { summary: AutonomousSummary; zh: boolean }) {
   const [metric, setMetric] = useState<"RMSE" | "R2">("RMSE");
@@ -369,153 +153,6 @@ function Trends({ summary, zh }: { summary: AutonomousSummary; zh: boolean }) {
         </table>
       </div>
     </section>
-  );
-}
-
-function DecisionDetails({
-  threadId,
-  sid,
-  decision,
-  zh,
-  poll,
-}: {
-  threadId: string;
-  sid: string;
-  decision: DecisionView;
-  zh: boolean;
-  poll: boolean;
-}) {
-  const data = useProcessResource<unknown>(
-    threadId,
-    `autonomous/${sid}/decisions/${decision.decision_id}`,
-    poll && ["accepted", "executing"].includes(decision.status),
-  );
-  const [showTrials, setShowTrials] = useState(false);
-  const details = parseDecision(data.data);
-  if (data.isError)
-    return (
-      <p role="alert">
-        {zh
-          ? "详细证据读取失败，可关闭后重试；不会重新训练。"
-          : "Evidence read failed; reopening retries the read only."}
-      </p>
-    );
-  if (!details)
-    return (
-      <p>
-        {data.isPending
-          ? zh
-            ? "正在读取持久决策证据…"
-            : "Reading persisted evidence…"
-          : zh
-            ? "详细决策证据缺失或格式不可用。"
-            : "Detailed evidence is missing or invalid."}
-      </p>
-    );
-  const proposal = details.proposal ?? {},
-    feedback = details.feedback ?? {};
-  const trials = Array.isArray(feedback.trials) ? feedback.trials : [];
-  return (
-    <div className="mt-3 space-y-4">
-      <div>
-        <h4 className="font-medium">
-          {zh
-            ? "主要观察、不确定性与假设"
-            : "Observations, uncertainty and hypotheses"}
-        </h4>
-        <ProcessFacts
-          zh={zh}
-          value={{
-            observations: proposal.observations,
-            uncertainties: proposal.uncertainties,
-            hypotheses: proposal.hypotheses,
-            evidence_refs: proposal.evidence_refs,
-          }}
-        />
-      </div>
-      <div>
-        <h4 className="font-medium">
-          {zh
-            ? "LLM 比较的候选动作（提出不代表执行）"
-            : "LLM alternatives (proposals are not executions)"}
-        </h4>
-        <ProcessFacts
-          zh={zh}
-          value={{
-            alternatives: proposal.alternatives,
-            selected_alternative_id: proposal.selected_alternative_id,
-            not_selected_reasons: proposal.not_selected_reasons,
-          }}
-        />
-      </div>
-      <div>
-        <h4 className="font-medium">
-          {zh
-            ? "已接受配置与参数授权"
-            : "Accepted configuration and parameter authorization"}
-        </h4>
-        <ProcessFacts
-          zh={zh}
-          value={{
-            accepted_spec: details.accepted_spec,
-            expected_fits: proposal.expected_fits,
-            expected_improvement: proposal.expected_improvement,
-            stop_evidence: proposal.stop_evidence,
-            retained_experiment_id: proposal.retained_experiment_id,
-          }}
-        />
-      </div>
-      {details.feedback && (
-        <div>
-          <h4 className="font-medium">
-            {zh
-              ? "实际执行与预期效果对照"
-              : "Execution and expectation feedback"}
-          </h4>
-          <Metrics value={{ metrics: feedback.metrics, stage: "searching" }} />
-          <ProcessFacts
-            zh={zh}
-            value={{
-              actual_configuration: feedback.actual_configuration,
-              actual_parameters: feedback.actual_parameters,
-              comparisons: feedback.comparisons,
-              expected_improvement: feedback.expected_improvement,
-              fits: feedback.fits,
-              elapsed_seconds: feedback.elapsed_seconds,
-              failure_reason: feedback.failure_reason,
-              error_type: feedback.error_type,
-              cv_settings: feedback.cv_settings,
-            }}
-          />
-        </div>
-      )}
-      {trials.length > 0 && (
-        <details onToggle={(event) => setShowTrials(event.currentTarget.open)}>
-          <summary className="cursor-pointer text-sm">
-            {zh
-              ? `实际参数候选的 Cal CV 结果（${trials.length}）`
-              : `Actual Cal CV parameter trials (${trials.length})`}
-          </summary>
-          {showTrials && <ParameterTrials zh={zh} value={trials} />}
-        </details>
-      )}
-      <details>
-        <summary className="cursor-pointer text-xs">
-          {zh
-            ? "决策与实验身份 / 调用来源"
-            : "Decision/experiment identity and model origin"}
-        </summary>
-        <ProcessFacts
-          zh={zh}
-          value={{
-            decision_id: details.decision_id,
-            context_id: details.context_id,
-            experiment_id: details.experiment_id,
-            origin: details.origin,
-          }}
-        />
-      </details>
-    </div>
   );
 }
 
@@ -676,27 +313,10 @@ export function AutonomousProcess({
     true,
   );
   const summary = parseSummary(summaryQuery.data);
-  const [offset, setOffset] = useState(0),
-    [expanded, setExpanded] = useState<string | null>(null),
-    [showRejections, setShowRejections] = useState(false);
+  const [showRejections, setShowRejections] = useState(false);
   useEffect(() => {
-    setOffset(0);
-    setExpanded(null);
     setShowRejections(false);
   }, [threadId, sid]);
-  const timeline = useProcessResource<{
-    data: unknown[];
-    total: number;
-    next_offset: number | null;
-  }>(
-    threadId,
-    sid
-      ? `autonomous/${sid}/decisions?offset=${offset}&limit=${autonomousDecisionPageSize}`
-      : null,
-    !summary || !isAutonomousTerminal(summary.stage),
-  );
-  const page = parseDecisionPage(timeline.data, offset),
-    rows = page.data;
   const [tab, setTab] = useState<"timeline" | "charts" | "delivery">(
     "timeline",
   );
@@ -734,7 +354,7 @@ export function AutonomousProcess({
   const deliveryStage = text(record(summary.automatic_delivery).status);
   return (
     <div
-      className="min-h-0 space-y-4 overflow-y-auto p-4"
+      className="min-h-0 w-full flex-1 space-y-4 overflow-y-auto p-4"
       data-testid="autonomous-process"
     >
       <section className="rounded-xl border p-4">
@@ -837,7 +457,7 @@ export function AutonomousProcess({
           >
             {
               {
-                timeline: ["决策时间线", "Decision timeline"],
+                timeline: ["建模过程", "Modeling process"],
                 charts: ["验证与图表", "Validation and charts"],
                 delivery: ["最终模型与下载", "Model and downloads"],
               }[key][zh ? 0 : 1]
@@ -865,116 +485,13 @@ export function AutonomousProcess({
               />
             )}
           </details>
-          {timeline.isError && (
-            <p role="alert">
-              {zh ? "决策列表读取失败，请刷新进展。" : "Timeline read failed."}
-            </p>
-          )}
-          {!rows.length && (
-            <p>
-              {zh
-                ? "尚无已接受决策；无训练结果时不显示模型排名。"
-                : "No accepted decisions yet; no models are ranked without execution."}
-            </p>
-          )}
-          {rows.map((item) => (
-            <article key={item.decision_id} className="rounded-xl border p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="font-medium">
-                  {zh ? "第" : "Round "}
-                  {fmt(item.round_index)}
-                  {zh ? "轮 · " : " · "}
-                  {actionLabel(item.action, zh)}
-                </h3>
-                <span className="rounded border px-2 py-1 text-xs">
-                  {executionLabel(item.status, zh)}
-                </span>
-              </div>
-              <p className="mt-2 font-medium">
-                {["STOP", "RETAIN"].includes(item.action)
-                  ? zh
-                    ? "保留已选实验，不新增拟合"
-                    : "Retain selected experiment; no new fits"
-                  : decisionPipelineLabel(item.selected, zh)}
-              </p>
-              <div className="mt-2 text-sm">
-                <RecordedNarrative value={item.rationale} zh={zh} />
-              </div>
-              <div className="text-muted-foreground mt-2 text-xs">
-                {zh ? "预期效果：" : "Expected: "}
-                <RecordedNarrative value={item.expected_outcome} zh={zh} />
-              </div>
-              {item.feedback && (
-                <>
-                  <Metrics
-                    value={{
-                      stage: "searching",
-                      metrics: item.feedback.metrics,
-                    }}
-                  />
-                  <p className="mt-2 text-xs">
-                    {zh ? "实际拟合 / 耗时：" : "Actual fits / seconds: "}
-                    {fmt(item.feedback.fits)} /{" "}
-                    {fmt(item.feedback.elapsed_seconds)}
-                  </p>
-                  {item.feedback.failure_reason !== undefined && (
-                    <p role="alert" className="text-destructive text-sm">
-                      {text(item.feedback.failure_reason)}
-                    </p>
-                  )}
-                </>
-              )}
-              <button
-                type="button"
-                className="mt-3 text-sm underline"
-                aria-expanded={expanded === item.decision_id}
-                onClick={() =>
-                  setExpanded(
-                    expanded === item.decision_id ? null : item.decision_id,
-                  )
-                }
-              >
-                {zh
-                  ? "查看观察、候选比较和实际配置"
-                  : "Inspect observations, alternatives and configuration"}
-              </button>
-              {expanded === item.decision_id && (
-                <DecisionDetails
-                  threadId={threadId}
-                  sid={sid}
-                  decision={item}
-                  zh={zh}
-                  poll={!isAutonomousTerminal(summary.stage)}
-                />
-              )}
-            </article>
-          ))}
-          <div className="flex items-center justify-between text-sm">
-            <button
-              type="button"
-              disabled={!offset}
-              onClick={() => {
-                setOffset(Math.max(0, offset - autonomousDecisionPageSize));
-                setExpanded(null);
-              }}
-            >
-              {zh ? "上一页" : "Previous"}
-            </button>
-            <span>
-              {offset + (rows.length ? 1 : 0)}–{offset + rows.length} /{" "}
-              {fmt(page.total)}
-            </span>
-            <button
-              type="button"
-              disabled={page.next_offset == null}
-              onClick={() => {
-                if (page.next_offset !== null) setOffset(page.next_offset);
-                setExpanded(null);
-              }}
-            >
-              {zh ? "下一页" : "Next"}
-            </button>
-          </div>
+          <AutonomousRoundExplorer
+            key={`${threadId}:${sid}`}
+            threadId={threadId}
+            summary={summary}
+            workflow={workflow}
+            zh={zh}
+          />
         </section>
       )}
       {tab === "charts" && (
@@ -1063,7 +580,6 @@ export function AutonomousProcess({
         className="rounded border px-3 py-2 text-sm"
         onClick={() => {
           void summaryQuery.refetch();
-          void timeline.refetch();
         }}
       >
         {zh ? "刷新进展（只读）" : "Refresh progress (read-only)"}

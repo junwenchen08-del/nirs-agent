@@ -1,5 +1,11 @@
 # AGENTS.md
 
+Autonomous modeling has a shared round timeline/recorded-relation graph with
+lazy detail and linked Cal/Cal CV/Val diagnostics. Display evidence is captured
+from original search predictions and hash-bound to the exact execution; reads
+never retrain or reopen Test. Historical gaps remain explicit. See
+docs/nir-round-process.md and the backend/frontend module guides.
+
 NIR automatic publication appends trusted model/HTML/ZIP references via the
 existing artifact reducer and labels the deterministic message with its session.
 Chat restores old published deliveries through the existing owner-scoped GET;

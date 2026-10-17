@@ -1,23 +1,10 @@
 "use client";
 
+import { chartColors, chartInk, seriesColor } from "@/core/nir/chart-theme";
 import { formatProcessNumber } from "@/core/nir/process-display";
 import { chartMetric, scopeLabel } from "@/core/nir-library/model-report";
 import type { ModelChart, ModelMetric } from "@/core/nir-library/types";
 
-const colors = [
-  "#007eb8",
-  "#ff7f0e",
-  "#7c3aed",
-  "#059669",
-  "#dc2626",
-  "#ca8a04",
-  "#db2777",
-  "#475569",
-  "#0891b2",
-  "#4f46e5",
-  "#65a30d",
-  "#9333ea",
-];
 const tick = (value: number) =>
   Number(value.toPrecision(4)).toLocaleString(undefined, {
     maximumSignificantDigits: 4,
@@ -49,7 +36,7 @@ export function PredictionFigure({
   const x = (v: number) => 86 + ((v - min) / (max - min)) * 350;
   const y = (v: number) => 420 - ((v - min) / (max - min)) * 350;
   const training = chart.scope === "calibration";
-  const color = training ? colors[0]! : colors[1]!;
+  const color = training ? seriesColor(0) : seriesColor(1);
   const title = `${method} · ${scopeLabel(chart.scope, zh)}`;
   return (
     <figure
@@ -79,12 +66,15 @@ export function PredictionFigure({
           width="350"
           height="350"
           fill="none"
-          stroke="#111827"
+          stroke={chartInk.axis}
           strokeWidth="1.2"
         />
         {ticks(min, max).map((v, i) => (
-          <g key={i} fontSize="12" fill="#334155">
-            <path d={`M ${x(v)} 420 v 5 M 81 ${y(v)} h 5`} stroke="#111827" />
+          <g key={i} fontSize="12" fill={chartInk.tick}>
+            <path
+              d={`M ${x(v)} 420 v 5 M 81 ${y(v)} h 5`}
+              stroke={chartInk.axis}
+            />
             <text x={x(v)} y="442" textAnchor="middle">
               {tick(v)}
             </text>
@@ -98,7 +88,7 @@ export function PredictionFigure({
           y1="420"
           x2="436"
           y2="70"
-          stroke="#ef2323"
+          stroke={chartColors.reference}
           strokeWidth="2"
         />
         {chart.x.map((v, i) =>
@@ -149,7 +139,7 @@ export function PredictionFigure({
           rx="3"
           fill="white"
           fillOpacity="0.9"
-          stroke="#e2e8f0"
+          stroke={chartInk.border}
         />
         {training ? (
           <circle cx="275" cy="373" r="4" fill={color} />
@@ -168,7 +158,7 @@ export function PredictionFigure({
           y1="392"
           x2="283"
           y2="392"
-          stroke="#ef2323"
+          stroke={chartColors.reference}
           strokeWidth="2"
         />
         <text x="289" y="396" fontSize="12">
@@ -240,20 +230,20 @@ export function SpectraFigure({
           width="370"
           height="240"
           fill="none"
-          stroke="#111827"
+          stroke={chartInk.axis}
           strokeWidth="1.2"
         />
         {ticks(first, last).map((v, i) => (
-          <g key={i} fontSize="12" fill="#334155">
-            <path d={`M ${x(v)} 300 v 5`} stroke="#111827" />
+          <g key={i} fontSize="12" fill={chartInk.tick}>
+            <path d={`M ${x(v)} 300 v 5`} stroke={chartInk.axis} />
             <text x={x(v)} y="324" textAnchor="middle">
               {tick(v)}
             </text>
           </g>
         ))}
         {ticks(min, max).map((v, i) => (
-          <g key={i} fontSize="12" fill="#334155">
-            <path d={`M 75 ${y(v)} h 5`} stroke="#111827" />
+          <g key={i} fontSize="12" fill={chartInk.tick}>
+            <path d={`M 75 ${y(v)} h 5`} stroke={chartInk.axis} />
             <text x="69" y={y(v) + 4} textAnchor="end">
               {tick(v)}
             </text>
@@ -263,7 +253,7 @@ export function SpectraFigure({
           <path
             key={curve.id}
             fill="none"
-            stroke={colors[index % colors.length]}
+            stroke={seriesColor(index)}
             opacity="0.75"
             strokeWidth="1.2"
             d={curve.values

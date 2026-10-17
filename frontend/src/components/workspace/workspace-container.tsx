@@ -44,6 +44,10 @@ export function WorkspaceHeader({
       return parts.slice(1, 3);
     }
   }, [pathname]);
+  const section = useMemo(() => pathname?.split("/")[3], [pathname]);
+  // `/workspace/nir` has no page of its own: the library label would misname the
+  // process explorer, and linking there would 404.
+  const nirRoot = segments?.[0] === "workspace" && segments?.[1] === "nir";
   return (
     <header
       className={cn(
@@ -69,16 +73,16 @@ export function WorkspaceHeader({
               <>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
-                  {segments.length >= 2 ? (
+                  {nirRoot ? (
+                    <BreadcrumbPage>
+                      {nameOfSegment(segments[1], t, section)}
+                    </BreadcrumbPage>
+                  ) : (
                     <BreadcrumbLink asChild>
                       <Link href={`/${segments[0]}/${segments[1]}`}>
-                        {nameOfSegment(segments[1], t)}
+                        {nameOfSegment(segments[1], t, section)}
                       </Link>
                     </BreadcrumbLink>
-                  ) : (
-                    <BreadcrumbPage>
-                      {nameOfSegment(segments[1], t)}
-                    </BreadcrumbPage>
                   )}
                 </BreadcrumbItem>
               </>
@@ -129,11 +133,17 @@ export function WorkspaceBody({
 function nameOfSegment(
   segment: string | undefined,
   t: ReturnType<typeof useI18n>["t"],
+  section?: string,
 ) {
   if (!segment) return t.common.home;
   if (segment === "workspace") return t.breadcrumb.workspace;
   if (segment === "chats") return t.breadcrumb.chats;
   if (segment === "methods") return t.breadcrumb.methods;
-  if (segment === "nir") return t.breadcrumb.nirLibrary;
+  if (segment === "nir") {
+    if (section === "process") return t.breadcrumb.nirProcess;
+    if (section === "datasets") return t.sidebar.nirDatasets;
+    if (section === "models") return t.sidebar.nirModels;
+    return t.breadcrumb.nirLibrary;
+  }
   return segment[0]?.toUpperCase() + segment.slice(1);
 }

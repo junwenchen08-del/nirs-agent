@@ -54,6 +54,9 @@ export interface DecisionView {
   decision_id: string;
   context_id: string;
   experiment_id: string | null;
+  base_experiment_id: string | null;
+  retained_experiment_id: string | null;
+  diagnostics_status: string;
   round_index: number | null;
   action: string;
   status: string;
@@ -66,6 +69,7 @@ export interface DecisionView {
   proposal?: Facts;
   accepted_spec?: Facts;
   feedback?: Facts & { metrics?: Facts };
+  next_decision?: DecisionView | null;
 }
 export interface AutonomousSummary {
   schema_version: 1;
@@ -75,6 +79,8 @@ export interface AutonomousSummary {
   test_status: string;
   autonomous_delivery: boolean;
   decision_count: number | null;
+  comparison_group_id: string;
+  data_context: Facts;
   budget: Facts;
   task: Facts;
   stop_source: string;
@@ -172,7 +178,10 @@ export function modelingChatContext<T extends object>(context: T): T {
     ),
   ) as T;
 }
-export function parseDecision(raw: unknown): DecisionView | null {
+export function parseDecision(
+  raw: unknown,
+  includeNext = true,
+): DecisionView | null {
   const value = record(raw);
   if (!text(value.decision_id)) return null;
   const selected = safeFacts(value.selected),
@@ -185,6 +194,9 @@ export function parseDecision(raw: unknown): DecisionView | null {
     decision_id: text(value.decision_id),
     context_id: text(value.context_id),
     experiment_id: text(value.experiment_id) || null,
+    base_experiment_id: text(value.base_experiment_id) || null,
+    retained_experiment_id: text(value.retained_experiment_id) || null,
+    diagnostics_status: text(value.diagnostics_status) || "not_recorded",
     round_index: number(value.round_index),
     action: text(value.action),
     status: text(value.status),
@@ -199,6 +211,9 @@ export function parseDecision(raw: unknown): DecisionView | null {
       : "—",
     selected,
     origin: safeFacts(value.origin),
+    ...(includeNext && Object.hasOwn(value, "next_decision")
+      ? { next_decision: parseDecision(value.next_decision, false) }
+      : {}),
     ...(value.proposal ? { proposal: safeFacts(value.proposal) } : {}),
     ...(value.accepted_spec
       ? { accepted_spec: safeFacts(value.accepted_spec) }
@@ -225,7 +240,7 @@ export function parseDecisionPage(raw: unknown, offset: number) {
     data: Array.isArray(value.data)
       ? value.data
           .slice(0, autonomousDecisionPageSize)
-          .map(parseDecision)
+          .map((item) => parseDecision(item))
           .filter((item): item is DecisionView => item !== null)
       : [],
     total:
@@ -338,6 +353,8 @@ export function parseSummary(raw: unknown): AutonomousSummary | null {
     test_status: text(value.test_status),
     autonomous_delivery: value.autonomous_delivery === true,
     decision_count: number(value.decision_count),
+    comparison_group_id: text(value.comparison_group_id),
+    data_context: safeFacts(value.data_context),
     task: safeFacts(value.task),
     budget: safeFacts(value.budget),
     stop_source: text(value.stop_source),

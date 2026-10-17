@@ -74,6 +74,11 @@ class AutonomousView:
         execution = json.loads(row["execution"]) if row["execution"] else None
         selected = next((item for item in proposal["alternatives"] if item["id"] == proposal["selected_alternative_id"]), None)
         result = {key: value.get(key) for key in ("decision_id", "context_id", "experiment_id", "round_index", "action", "decision_time", "base_experiment_id", "retained_experiment_id", "reserved_fits")}
+        # STOP/RETAIN keep these identities in their immutable proposal rather
+        # than the outer training record. Project the original recorded links.
+        for key in ("base_experiment_id", "retained_experiment_id"):
+            if key not in value:
+                result[key] = _safe(proposal.get(key))
         result.update(status=row["status"], selected=_safe(selected), rationale=_safe(proposal["rationale"]), expected_outcome=_safe(proposal["expected_outcome"]), alternative_count=len(proposal["alternatives"]))
         origin = value["origin"]
         result["origin"] = {key: origin.get(key) for key in ("source", "model_name", "model_class", "verification_kind", "issued_at", "agent_run_id")}
@@ -95,6 +100,7 @@ class AutonomousView:
             )
             result["feedback"] = _safe({key: execution[key] for key in keys if key in execution})
             result["feedback"]["metrics"] = scoped_metrics(execution.get("metrics"))
+            result["diagnostics_status"] = "available" if execution.get("diagnostics_sha256") else "failed" if execution.get("diagnostics_error_type") else "not_recorded"
             if details:
                 result["feedback"]["trials"] = _safe(execution.get("trials", []))
         if details:
@@ -113,9 +119,12 @@ class AutonomousView:
         with self._read() as db:
             self._session(db, sid)
             row = db.execute("SELECT * FROM initial_decisions WHERE session_id=? AND id=?", (sid, _id(did))).fetchone()
+            following = db.execute("SELECT * FROM initial_decisions WHERE session_id=? AND rowid > (SELECT rowid FROM initial_decisions WHERE session_id=? AND id=?) ORDER BY rowid LIMIT 1", (sid, sid, did)).fetchone()
         if not row:
             raise KeyError(did)
-        return self._record(row, details=True)
+        result = self._record(row, details=True)
+        result["next_decision"] = self._record(following) if following else None
+        return result
 
     def rejections(self, sid, offset=0):
         with self._read() as db:
@@ -184,6 +193,16 @@ class AutonomousView:
             "best_val_experiment_id": best,
             "active_decision_id": session.get("active_decision_id"),
             "decision_count": len(records),
+            "comparison_group_id": _digest([sid, session["binding"], session["cv_manifest"]]),
+            "data_context": _safe(
+                {
+                    "partition_counts": session["counts"],
+                    "cv_folds": session["cv_folds"],
+                    "calibration_samples": session["profile"].get("n_samples"),
+                    "n_features": session["profile"].get("n_wavelengths"),
+                    "unit": session.get("task_snapshot", {}).get("unit"),
+                }
+            ),
             "trends": trends,
             "metrics": scoped_metrics((final or {}).get("metrics"), final=bool(final)),
             "quality": _safe((final or {}).get("metrics", {}).get("quality")),
@@ -228,6 +247,43 @@ class AutonomousView:
                 raise ValueError("Cal chart integrity mismatch")
             return payload
         except (OSError, ValueError):
+            return {**missing, "evidence_status": "unavailable", "reason": "missing_or_corrupt_evidence"}
+
+    def diagnostics(self, sid, eid):
+        """Serve only the immutable display cache for this exact experiment."""
+        from ._common import _read_regular_bytes
+        from .round_diagnostics import validate_round_diagnostics
+
+        with self._read() as db:
+            session = self._session(db, sid)
+            row = db.execute("SELECT result,artifact_hash FROM search_experiments WHERE session_id=? AND id=? AND status='succeeded'", (sid, _id(eid))).fetchone()
+        if not row:
+            raise KeyError(eid)
+        result = json.loads(row["result"])
+        missing = {"schema_version": 1, "session_id": sid, "experiment_id": eid, "evidence_status": "failed" if result.get("diagnostics_error_type") else "not_recorded"}
+        if not result.get("diagnostics_sha256"):
+            return missing
+        try:
+            path = self.process.root / "sessions" / _id(sid) / (_id(eid) + ".diagnostics.json")
+            if any(parent.is_symlink() for parent in (path, *path.parents)):
+                raise ValueError("Unsafe round chart cache")
+            raw = _read_regular_bytes(path, label="Round diagnostics", limit=CHART_LIMIT)
+            payload = json.loads(raw)
+            if not isinstance(payload, dict) or (
+                hashlib.sha256(raw).hexdigest() != result["diagnostics_sha256"]
+                or payload.get("session_id") != sid
+                or payload.get("experiment_id") != eid
+                or payload.get("decision_id") != result.get("decision_id")
+                or payload.get("model_hash") != row["artifact_hash"]
+                or payload.get("comparison_group_id") != _digest([sid, session["binding"], session["cv_manifest"]])
+            ):
+                raise ValueError("Round chart integrity mismatch")
+            validate_round_diagnostics(payload)
+            for scope, chart in payload["charts"].items():
+                if chart["n_total"] != session["counts"]["validation" if scope == "validation" else "calibration"]:
+                    raise ValueError("Round chart population differs from the locked split")
+            return payload
+        except (OSError, ValueError, TypeError, KeyError):
             return {**missing, "evidence_status": "unavailable", "reason": "missing_or_corrupt_evidence"}
 
     def chart(self, sid, scope):

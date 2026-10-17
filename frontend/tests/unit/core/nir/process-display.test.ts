@@ -5,6 +5,7 @@ import {
   factLabel,
   factValue,
   formatProcessNumber,
+  isInlineScalarFactList,
   isTechnicalFact,
   resolveProcessCandidate,
 } from "@/core/nir/process-display";
@@ -86,4 +87,21 @@ test("keeps identifiers and unknown fields in technical details", () => {
   expect(isTechnicalFact("split_hash")).toBe(true);
   expect(isTechnicalFact("future_internal_field")).toBe(true);
   expect(isTechnicalFact("cv_rmse")).toBe(false);
+});
+
+test("inline scalar search grids stay short, bounded and free of nested records", () => {
+  expect(isInlineScalarFactList([1, 10, 100])).toBe(true);
+  expect(isInlineScalarFactList(["scale", 0.01, 0.1])).toBe(true);
+  expect(isInlineScalarFactList([true, false])).toBe(true);
+  expect(isInlineScalarFactList(Array.from({ length: 12 }, (_, i) => i))).toBe(
+    true,
+  );
+  expect(isInlineScalarFactList(Array.from({ length: 13 }, (_, i) => i))).toBe(
+    false,
+  );
+  expect(isInlineScalarFactList([])).toBe(false);
+  expect(isInlineScalarFactList([null])).toBe(false);
+  expect(isInlineScalarFactList([{ window: 7 }])).toBe(false);
+  expect(isInlineScalarFactList([[1, 2]])).toBe(false);
+  expect(isInlineScalarFactList({ n_components: [1, 2] })).toBe(false);
 });

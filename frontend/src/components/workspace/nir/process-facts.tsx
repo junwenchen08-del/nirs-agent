@@ -3,6 +3,7 @@ import {
   factLabel,
   factValue,
   formatProcessNumber,
+  isInlineScalarFactList,
   isTechnicalFact,
 } from "@/core/nir/process-display";
 
@@ -35,7 +36,18 @@ export function ProcessFacts({ value, zh }: { value: unknown; zh: boolean }) {
       </span>
     );
   if (Array.isArray(value))
-    return (
+    return isInlineScalarFactList(value) ? (
+      <ul className="flex flex-wrap gap-1.5">
+        {value.map((item, index) => (
+          <li
+            key={index}
+            className="bg-muted rounded px-2 py-0.5 text-xs tabular-nums"
+          >
+            <ProcessFacts value={item} zh={zh} />
+          </li>
+        ))}
+      </ul>
+    ) : (
       <ol className="space-y-2">
         {value.map((item, index) => (
           <li key={index} className="rounded-md border p-2">

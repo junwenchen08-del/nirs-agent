@@ -291,6 +291,28 @@ class SearchSessionStore:
                     # A display failure never changes the chosen model or runs
                     # a fallback experiment. Preserve the numeric success.
                     result["spectra_error_type"] = type(exc).__name__
+                from .round_diagnostics import capture_round_diagnostics
+
+                try:
+                    diagnostics = capture_round_diagnostics(
+                        data["y_cal"],
+                        data["y_val"],
+                        fitted.predictions,
+                        session_id=session_id,
+                        experiment_id=experiment_id,
+                        decision_id=decision_id,
+                        model_hash=digest,
+                        comparison_group_id=_digest([session_id, session["binding"], session["cv_manifest"]]),
+                        unit=session.get("task_snapshot", {}).get("unit"),
+                    )
+                    raw = _json(diagnostics).encode("utf-8")
+                    if len(raw) > CHART_LIMIT:
+                        raise ValueError("Round diagnostics exceed bounded chart size")
+                    with (path / (experiment_id + ".diagnostics.json")).open("xb") as file:
+                        file.write(raw)
+                    result["diagnostics_sha256"] = _sha256_file(str(path / (experiment_id + ".diagnostics.json")))
+                except Exception as exc:
+                    result["diagnostics_error_type"] = type(exc).__name__
             if decision_id is not None:
                 result["decision_id"] = decision_id
             with self.process._connection(write=True) as db:

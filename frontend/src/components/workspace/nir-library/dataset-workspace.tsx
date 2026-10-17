@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/core/i18n/hooks";
+import { chartColors, seriesColor } from "@/core/nir/chart-theme";
 import {
   getDataset,
   getDatasetWorkspace,
@@ -22,7 +23,6 @@ import {
 
 import { FeatureDisabled } from "./dataset-library";
 
-const COLORS = ["#64748b", "#2563eb", "#d97706", "#16a34a", "#a1a1aa"];
 const selectClass =
   "border-input bg-background h-7 rounded border px-2 text-sm";
 
@@ -364,7 +364,7 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
               {text("个样本", "samples")}
             </strong>
             {labels.map((label, i) => (
-              <span key={label} style={{ color: COLORS[i] }}>
+              <span key={label} style={{ color: seriesColor(i) }}>
                 {label} {counts[i]}
               </span>
             ))}
@@ -600,7 +600,9 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
                           <td className="border-r border-b px-3 py-1.5">
                             <select
                               className={selectClass}
-                              style={{ color: COLORS[usages[row.index] ?? 0] }}
+                              style={{
+                                color: seriesColor(usages[row.index] ?? 0),
+                              }}
                               aria-label={`${text("样本用途", "Sample role")} ${row.index + 1}`}
                               value={usages[row.index] ?? 0}
                               disabled={saving}
@@ -867,7 +869,7 @@ function SpectrumPlot({
                   x(Math.max(G.xmin, Math.min(G.xmax, activeRange[0]))),
               )}
               height="150"
-              fill="#3b82f6"
+              fill={chartColors.processed}
               opacity=".1"
             />
           )}
@@ -889,7 +891,7 @@ function SpectrumPlot({
                 key={curve.index}
                 d={path}
                 fill="none"
-                stroke={COLORS[usages[curve.index] ?? 0]}
+                stroke={seriesColor(usages[curve.index] ?? 0)}
                 strokeWidth="1.4"
                 opacity=".75"
               >

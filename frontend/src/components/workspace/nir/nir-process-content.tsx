@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useI18n } from "@/core/i18n/hooks";
+import { chartColors } from "@/core/nir/chart-theme";
 import {
   candidateLabel,
   methodLabel,
@@ -97,13 +98,13 @@ function MetricTrend({ view, zh }: { view: ProcessView; zh: boolean }) {
             <polyline
               points={points.map((p, i) => `${x(i)},${y(p.value)}`).join(" ")}
               fill="none"
-              stroke="#2563eb"
+              stroke={chartColors.processed}
               strokeWidth="2"
             />
             <polyline
               points={points.map((p, i) => `${x(i)},${y(p.best)}`).join(" ")}
               fill="none"
-              stroke="#059669"
+              stroke={chartColors.retained}
               strokeWidth="2"
               strokeDasharray="4 3"
             />
@@ -111,7 +112,12 @@ function MetricTrend({ view, zh }: { view: ProcessView; zh: boolean }) {
         )}
         {points.map((p, i) => (
           <g key={p.attempt}>
-            <circle cx={x(i)} cy={y(p.value)} r="4" fill="#2563eb" />
+            <circle
+              cx={x(i)}
+              cy={y(p.value)}
+              r="4"
+              fill={chartColors.processed}
+            />
             <text
               x={x(i)}
               y="104"

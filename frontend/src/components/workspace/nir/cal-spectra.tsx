@@ -29,13 +29,19 @@ export function CalSpectraComparison({
   threadId,
   summary,
   zh,
+  experimentId,
 }: {
   threadId: string;
   summary: AutonomousSummary;
   zh: boolean;
+  experimentId?: string;
 }) {
   const [choice, setChoice] = useState("");
-  const experiments = summary.spectra_experiments;
+  const experiments = experimentId
+    ? summary.spectra_experiments.filter(
+        (item) => item.experiment_id === experimentId,
+      )
+    : summary.spectra_experiments;
   const current =
     experiments.find((item) => item.experiment_id === choice) ??
     experiments.find(
@@ -61,7 +67,7 @@ export function CalSpectraComparison({
           ? "曲线仅来自 Cal，使用该实验实际拟合的预处理状态。查看、切换与刷新不会训练，也不会读取 Test。"
           : "Cal only, transformed by this experiment's fitted state. Viewing, switching and refreshing never trains or reads Test."}
       </p>
-      {current && (
+      {current && !experimentId && (
         <label className="flex items-center gap-2 text-sm">
           {zh ? "实验" : "Experiment"}
           <select

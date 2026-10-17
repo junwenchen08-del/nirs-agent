@@ -151,6 +151,7 @@ export interface Translations {
     workspace: string;
     chats: string;
     nirLibrary: string;
+    nirProcess: string;
     methods: string;
   };
 

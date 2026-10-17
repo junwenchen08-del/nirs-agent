@@ -1,5 +1,16 @@
 # AGENTS.md
 
+Round diagnostics retain safe_search's original Cal fit/Cal OOF/Val predictions
+in SearchFit memory only. The trusted search executor writes bounded immutable
+diagnostics caches and hashes; chart failures preserve successful numeric/model
+results and fit counts. AutonomousView.diagnostics and its owner-checked route
+verify exact execution/model/comparison identity and finite aligned points,
+without opening arrays, estimators or Test. Old caches are never reconstructed.
+Autonomous detail projects the next persisted decision; graph edges use the
+existing base/retained IDs and do not relax execution policy. No migration or
+scientific/approval policy changes. See docs/nir-round-process.md, the shared
+round-diagnostics contract, and test_nir_round_diagnostics.py.
+
 Successful sealed publication passes explicit model/HTML/ZIP references to
 search_tools._result; other tool responses never infer attachments from payload
 claims. STOP/RETAIN automatic delivery shares this path. The artifact reducer

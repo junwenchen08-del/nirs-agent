@@ -79,3 +79,31 @@ def test_empty_legacy_autonomous_read_does_not_create_storage(tmp_path, monkeypa
     client = TestClient(app)
     assert client.get("/api/threads/legacy/nir-process/autonomous").json()["data"] == []
     assert not (paths.thread_dir("legacy", user_id="alice") / "nir-process").exists()
+
+
+def test_round_diagnostic_route_checks_owner_and_immutable_execution(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    paths = Paths(tmp_path)
+    service, ctx, result, _ = stopped_session(tmp_path / "seed")
+    sid, eid = ctx["session_id"], result["experiment_id"]
+    destination = paths.thread_dir("thread", user_id="alice") / "nir-process"
+    cache = destination / "sessions" / sid
+    cache.mkdir(parents=True)
+    (destination / "index.sqlite3").write_bytes(service.search.process.db.read_bytes())
+    (cache / (eid + ".diagnostics.json")).write_bytes((service.search._dir(sid) / (eid + ".diagnostics.json")).read_bytes())
+    monkeypatch.setattr(nir_process, "get_paths", lambda: paths)
+    monkeypatch.setattr(nir_process, "get_current_user", AsyncMock(return_value="alice"))
+    app = make_authed_test_app()
+    app.include_router(nir_process.router)
+    client = TestClient(app)
+    route = f"/api/threads/thread/nir-process/autonomous/{sid}/diagnostics/{eid}"
+    before = (destination / "index.sqlite3").read_bytes()
+    with patch("numpy.load", side_effect=AssertionError("GET cannot load arrays")), patch("joblib.load", side_effect=AssertionError("GET cannot load a model")):
+        response = client.get(route)
+        assert response.status_code == 200 and response.json()["charts"]["validation"]["n_total"] == 12
+        assert client.get(route.replace(eid, "exp_unknown")).status_code == 404
+        assert client.get(route.replace(sid, "search_unknown")).status_code == 404
+    assert (destination / "index.sqlite3").read_bytes() == before
+    app.state.thread_store.check_access = AsyncMock(return_value=False)
+    assert client.get(route).status_code == 404

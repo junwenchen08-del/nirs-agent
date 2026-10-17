@@ -2,6 +2,11 @@ import { methodLabel, protocolLabel } from "./presentation";
 import { type ProcessCandidate, stableJSON } from "./process-contract";
 
 const LABELS: Record<string, [string, string]> = {
+  data_context: ["数据与评价范围", "Data and evaluation context"],
+  partition_counts: ["固定划分样本数", "Fixed partition counts"],
+  calibration_samples: ["校准样本数", "Calibration samples"],
+  n_features: ["光谱变量数", "Spectral variables"],
+  cv_folds: ["交叉验证折数", "CV folds"],
   action: ["决策动作", "Decision action"],
   status: ["执行状态", "Execution status"],
   strategy: ["参数策略", "Parameter strategy"],
@@ -173,6 +178,23 @@ export function formatProcessNumber(value: unknown): string {
 
 export function factLabel(key: string, zh: boolean): string | null {
   return LABELS[key]?.[zh ? 0 : 1] ?? null;
+}
+
+/** Search grids are short scalar lists; as boxed rows they read as dead inputs. */
+const INLINE_FACT_LIST_LIMIT = 12;
+
+export function isInlineScalarFactList(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= INLINE_FACT_LIST_LIMIT &&
+    value.every(
+      (item) =>
+        typeof item === "string" ||
+        typeof item === "number" ||
+        typeof item === "boolean",
+    )
+  );
 }
 
 export function isTechnicalFact(key: string): boolean {

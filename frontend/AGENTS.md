@@ -1,5 +1,26 @@
 # AGENTS.md
 
+The autonomous process now uses autonomous-round-explorer/detail/graph.tsx and
+round-diagnostics.tsx. Default navigation is a round timeline; the lazy graph
+draws only recorded feedback and retention links, and fits the selected round
+with its recorded neighbours instead of the whole history so a long chain stays
+readable (the canvas controls still show every node). The infinite history query
+uses existing owner/thread-scoped process keys and 20-record pages. Manual
+selection stays pinned during updates, including terminal summary revisions;
+URL session/decision/layout references restore only within the matching session.
+Round charts bind session, decision, experiment and comparison identity, share
+sample selection/zoom, and allow only Cal/Cal CV/Val. Missing old points stay
+missing. Actual configuration is distinct from accepted plans. Next decisions
+come from the server's persisted successor, never from inferred prose.
+round-next-recommendation.tsx presents that model-issued pre-execution proposal
+as the next-round recommendation: pipeline, preprocessing/fixed parameters,
+search range, rationale and expected outcome. Its execution status/link is
+separate. Never substitute fitted parameters/scores or infer a new suggestion
+on page reads. Missing proposals, stopped searches and stale detail responses
+remain explicit. Pending accepted proposals display before execution completes.
+See docs/nir-round-process.md and nir-round-process.spec.ts for evidence-backed
+browser QA; HTTP interception is not a production/provider acceptance claim.
+
 Model details distinguish unverified dataset linkage from old model age. A
 server-recovered dataset link uses the existing pinned-profile preview and full
 dataset navigation; no extra manual selection is required. Raw-file linkage with
@@ -55,7 +76,7 @@ DeerFlow Frontend is a Next.js 16 web interface for an AI agent system. It commu
 | `pnpm typecheck` | TypeScript type check (`tsc --noEmit`)            |
 | `pnpm start`     | Start production server                           |
 
-Unit tests live under `tests/unit/` and mirror the `src/` layout (e.g., `tests/unit/core/api/stream-mode.test.ts` tests `src/core/api/stream-mode.ts`). Powered by Rstest; import source modules via the `@/` path alias.
+Unit tests live under `tests/unit/` and mirror the `src/` layout (e.g., `tests/unit/core/api/stream-mode.test.ts` tests `src/core/api/stream-mode.ts`). Powered by Rstest; import source modules via the `@/` path alias. Markup-level regressions use `.test.tsx` files with `renderToStaticMarkup` (e.g., `tests/unit/components/workspace/nir/process-facts.test.tsx`); `rstest.config.ts` discovers both extensions.
 
 E2E tests live under `tests/e2e/` and use Playwright with Chromium. They mock all backend APIs via `page.route()` network interception and test real page interactions (navigation, chat input, streaming responses). Config: `playwright.config.ts`.
 
@@ -145,9 +166,13 @@ tuning/CV, never the final holdout. Missing evidence stays explicit, and
 registration is read from a recorded workflow event rather than inferred from
 `completed`. Ordinary chats render no trigger.
 `core/nir/presentation.ts` maps recorded method IDs and reason codes to short
-localized explanations. The selection tab leads with the chosen options and
-training-only comparison, while raw codes and candidate IDs stay in collapsed
-technical details. Unknown reasons remain explicitly unexplained.
+localized explanations. Every NIR chart takes its color from
+`core/nir/chart-theme.ts` (`chartSeries` by data index, `chartColors`/`chartInk`
+by meaning); a component that inlines a chart hex literal fails
+`tests/unit/core/nir/chart-theme.test.ts`. The selection tab leads with the
+chosen options and training-only comparison, while raw codes and candidate IDs
+stay in collapsed technical details. Unknown reasons remain explicitly
+unexplained.
 The durable process explorer also uses `core/nir/process-display.ts` and
 `process-facts.tsx` for Chinese metric/parameter labels, bounded number display
 and collapsed original records. Candidate configuration is linked only by an
