@@ -1,72 +1,40 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo } from "react";
 
 import { useI18n } from "@/core/i18n/hooks";
 import { cn } from "@/lib/utils";
 
-import { AuroraText } from "../ui/aurora-text";
-
-let waved = false;
-
-function WelcomeDescription({ children }: { children: string }) {
-  return (
-    <p className="max-w-full text-wrap break-words whitespace-pre-line">
-      {children}
-    </p>
-  );
-}
-
 export function Welcome({
   className,
-  mode,
 }: {
   className?: string;
   mode?: "ultra" | "pro" | "thinking" | "flash";
 }) {
-  const { t } = useI18n();
-  const searchParams = useSearchParams();
-  const isUltra = useMemo(() => mode === "ultra", [mode]);
-  const colors = useMemo(() => {
-    if (isUltra) {
-      return ["#efefbb", "#e9c665", "#e3a812"];
-    }
-    return ["var(--color-foreground)"];
-  }, [isUltra]);
-  useEffect(() => {
-    waved = true;
-  }, []);
+  const { t, locale } = useI18n();
+  const skill = useSearchParams().get("mode") === "skill";
+  const zh = locale === "zh-CN";
   return (
     <div
       className={cn(
-        "mx-auto flex w-full max-w-full flex-col items-center justify-center gap-2 px-4 py-4 text-center sm:px-8",
+        "mx-auto flex w-full flex-col items-center gap-3 px-4 py-6 text-center",
         className,
       )}
     >
-      <div className="max-w-full text-2xl font-bold">
-        {searchParams.get("mode") === "skill" ? (
-          `✨ ${t.welcome.createYourOwnSkill} ✨`
-        ) : (
-          <div className="flex max-w-full flex-wrap items-center justify-center gap-2">
-            <div className={cn("inline-block", !waved ? "animate-wave" : "")}>
-              {isUltra ? "🚀" : "👋"}
-            </div>
-            <AuroraText colors={colors}>{t.welcome.greeting}</AuroraText>
-          </div>
-        )}
-      </div>
-      {searchParams.get("mode") === "skill" ? (
-        <div className="text-muted-foreground max-w-full text-sm">
-          <WelcomeDescription>
-            {t.welcome.createYourOwnSkillDescription}
-          </WelcomeDescription>
-        </div>
-      ) : (
-        <div className="text-muted-foreground max-w-full text-sm">
-          <WelcomeDescription>{t.welcome.description}</WelcomeDescription>
-        </div>
-      )}
+      <h1 className="text-[28px] leading-snug font-semibold">
+        {skill
+          ? t.welcome.createYourOwnSkill
+          : zh
+            ? "开始一次光谱分析"
+            : "Start a spectral analysis"}
+      </h1>
+      <p className="text-muted-foreground max-w-xl text-sm leading-relaxed whitespace-pre-line">
+        {skill
+          ? t.welcome.createYourOwnSkillDescription
+          : zh
+            ? "上传光谱数据，或选择已有数据集与模型，告诉我你想分析什么。"
+            : "Upload spectra or choose a saved dataset or model, then describe your task."}
+      </p>
     </div>
   );
 }

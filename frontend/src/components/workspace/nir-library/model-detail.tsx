@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SectionTabs } from "@/components/workspace/section-tabs";
 import { useI18n } from "@/core/i18n/hooks";
 import { methodLabel } from "@/core/nir/presentation";
 import { factLabel, formatProcessNumber } from "@/core/nir/process-display";
@@ -24,6 +25,7 @@ import {
 } from "@/core/nir-library";
 import {
   modelChatPath,
+  modelDisplayName,
   scopeLabel,
   simpleStep,
 } from "@/core/nir-library/model-report";
@@ -51,6 +53,14 @@ export function ModelDetail({
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
   const [datasetRefresh, setDatasetRefresh] = useState(0);
+  const [section, setSection] = useState<"results" | "data" | "methods">(
+    "results",
+  );
+  const [scope, setScope] = useState("");
+  useEffect(() => {
+    setSection("results");
+    setScope("");
+  }, [modelId, version]);
 
   useEffect(() => {
     if (featureLoading || !enabled) return;
@@ -152,8 +162,37 @@ export function ModelDetail({
     );
   }
   const report = detail?.report;
+  const scopes = [
+    ...new Set([
+      ...(report?.metrics.map((row) => row.scope) ?? []),
+      ...(report?.charts
+        .filter((chart) => chart.type === "prediction")
+        .map((row) =>
+          row.scope === "holdout"
+            ? "final_test"
+            : row.scope === "tuning"
+              ? "validation"
+              : row.scope,
+        ) ?? []),
+    ]),
+  ];
+  const currentScope = scopes.includes(scope)
+    ? scope
+    : scopes.includes("final_test")
+      ? "final_test"
+      : scopes.includes("validation")
+        ? "validation"
+        : (scopes[0] ?? "");
   const predictions =
-    report?.charts.filter((chart) => chart.type === "prediction") ?? [];
+    report?.charts.filter(
+      (chart) =>
+        chart.type === "prediction" &&
+        (chart.scope === "holdout"
+          ? "final_test"
+          : chart.scope === "tuning"
+            ? "validation"
+            : chart.scope) === currentScope,
+    ) ?? [];
   const spectra =
     report?.charts.filter((chart) => chart.type === "spectra") ?? [];
   return (
@@ -191,7 +230,7 @@ export function ModelDetail({
             <div className="min-w-0 space-y-2">
               <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-2xl font-semibold break-words">
-                  {detail.model.model_id}
+                  {modelDisplayName(detail.model, zh)}
                 </h1>
                 <Badge variant="secondary">
                   {methodLabel(report.method ?? detail.model.method, zh)}
@@ -213,32 +252,30 @@ export function ModelDetail({
               <Button asChild>
                 <Link href={modelChatPath(detail.model)}>
                   <LinkIcon className="size-4" />
-                  {text("挂载到新对话", "Use in a new chat")}
+                  {text("在新对话中使用", "Use in a new chat")}
                 </Link>
               </Button>
             )}
           </header>
-          <div className="bg-muted/40 rounded-xl px-4 py-3 text-sm leading-relaxed">
-            {text(
-              "使用方法：点击“挂载到新对话”，添加要预测的数据，再用日常语言说明需求。系统会沿用这个模型和配套的光谱处理步骤。",
-              "To use this model, open a new chat, add the data to predict and describe what you need. The saved model and its processing steps are reused.",
-            )}
-          </div>
-          <nav
-            aria-label={text("模型详情目录", "Model report sections")}
-            className="flex flex-wrap gap-2 border-b pb-4"
+          <SectionTabs
+            id="model-sections"
+            label={text("模型详情目录", "Model report sections")}
+            value={section}
+            onChange={setSection}
+            items={[
+              { key: "results", label: text("预测效果", "Prediction results") },
+              { key: "data", label: text("训练数据", "Training data") },
+              { key: "methods", label: text("处理方法", "Processing steps") },
+            ]}
+          />
+          <section
+            id="model-sections-panel-results"
+            role="tabpanel"
+            aria-labelledby="model-sections-results"
+            tabIndex={0}
+            hidden={section !== "results"}
+            className="space-y-4"
           >
-            {[
-              ["results", text("预测效果", "Prediction results")],
-              ["data", text("使用的数据", "Training data")],
-              ["methods", text("处理方法", "Processing steps")],
-            ].map(([id, label]) => (
-              <Button key={id} asChild variant="outline" size="sm">
-                <a href={`#${id}`}>{label}</a>
-              </Button>
-            ))}
-          </nav>
-          <section id="results" className="scroll-mt-6 space-y-4">
             <div>
               <h2 className="text-lg font-semibold">
                 {text("预测效果", "Prediction results")}
@@ -250,52 +287,85 @@ export function ModelDetail({
                 )}
               </p>
             </div>
+            {scopes.length > 0 && (
+              <label className="flex flex-wrap items-center gap-3 text-sm">
+                {text("评价范围", "Evaluation scope")}
+                <select
+                  className="bg-card rounded-md border p-2"
+                  aria-label={text("评价范围", "Evaluation scope")}
+                  value={currentScope}
+                  onChange={(event) => setScope(event.target.value)}
+                >
+                  {scopes.map((key) => (
+                    <option key={key} value={key}>
+                      {scopeLabel(key, zh)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {report.metrics.length ? (
-              <div className="grid gap-3 md:grid-cols-3">
-                {report.metrics.map((metric) => (
-                  <div className="rounded-xl border p-4" key={metric.scope}>
-                    <p className="text-sm font-medium">
-                      {scopeLabel(metric.scope, zh)}
-                      {metric.n !== null
-                        ? ` · ${metric.n} ${text("个样本", "samples")}`
-                        : ""}
-                    </p>
-                    <div className="mt-4 grid grid-cols-2 gap-3">
-                      <div>
-                        <p className="text-muted-foreground text-xs">
-                          {text("贴合程度 R²", "Fit R²")}
-                        </p>
-                        <p className="mt-1 text-2xl font-semibold tabular-nums">
-                          {formatProcessNumber(metric.R2)}
-                        </p>
+              <div className="grid gap-3">
+                {report.metrics
+                  .filter((metric) => metric.scope === currentScope)
+                  .map((metric) => (
+                    <div className="rounded-xl border p-4" key={metric.scope}>
+                      <p className="text-sm font-medium">
+                        {scopeLabel(metric.scope, zh)}
+                        {metric.n !== null
+                          ? ` · ${metric.n} ${text("个样本", "samples")}`
+                          : ""}
+                      </p>
+                      <div className="mt-4 grid grid-cols-2 gap-3">
+                        <div>
+                          <p className="text-muted-foreground text-xs">
+                            {text("贴合程度 R²", "Fit R²")}
+                          </p>
+                          <p className="mt-1 text-2xl font-semibold tabular-nums">
+                            {formatProcessNumber(metric.R2)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">
+                            {text("预测误差 RMSE", "Prediction error RMSE")}
+                          </p>
+                          <p className="mt-1 text-2xl font-semibold tabular-nums">
+                            {formatProcessNumber(metric.RMSE)}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-muted-foreground text-xs">
-                          {text("预测误差 RMSE", "Prediction error RMSE")}
-                        </p>
-                        <p className="mt-1 text-2xl font-semibold tabular-nums">
-                          {formatProcessNumber(metric.RMSE)}
-                        </p>
-                      </div>
-                    </div>
-                    <p className="text-muted-foreground mt-3 text-xs">
-                      {metric.scope === "calibration"
-                        ? text(
-                            "模型学习过的数据，不能单凭这项判断预测效果。",
-                            "Used to fit the model; this alone cannot establish prediction performance.",
-                          )
-                        : metric.scope === "validation"
-                          ? text(
-                              "用于选择处理方法和参数的数据。",
-                              "Used to choose processing steps and parameters.",
-                            )
-                          : text(
-                              "用于检查模型预测效果的数据。",
-                              "Used to check prediction performance.",
+                      {metric.MAE !== null && (
+                        <details className="mt-3 text-sm">
+                          <summary className="cursor-pointer">
+                            {text("其他已记录指标", "Other recorded metrics")}
+                          </summary>
+                          <p className="mt-2">
+                            {text(
+                              "平均绝对误差 MAE",
+                              "Mean absolute error MAE",
                             )}
-                    </p>
-                  </div>
-                ))}
+                            ：{formatProcessNumber(metric.MAE)}
+                          </p>
+                        </details>
+                      )}
+                      <p className="text-muted-foreground mt-3 text-xs">
+                        {metric.scope === "calibration"
+                          ? text(
+                              "模型学习过的数据，不能单凭这项判断预测效果。",
+                              "Used to fit the model; this alone cannot establish prediction performance.",
+                            )
+                          : metric.scope === "validation"
+                            ? text(
+                                "用于选择处理方法和参数的数据。",
+                                "Used to choose processing steps and parameters.",
+                              )
+                            : text(
+                                "用于检查模型预测效果的数据。",
+                                "Used to check prediction performance.",
+                              )}
+                      </p>
+                    </div>
+                  ))}
               </div>
             ) : (
               <Missing
@@ -322,7 +392,7 @@ export function ModelDetail({
               )}
             </p>
             {predictions.length ? (
-              <div className="grid gap-4 lg:grid-cols-2">
+              <div className="grid gap-4">
                 {predictions.map((chart, i) => (
                   <PredictionFigure
                     key={i}
@@ -346,7 +416,14 @@ export function ModelDetail({
               />
             )}
           </section>
-          <section id="data" className="scroll-mt-6 space-y-4 border-t pt-6">
+          <section
+            id="model-sections-panel-data"
+            role="tabpanel"
+            aria-labelledby="model-sections-data"
+            tabIndex={0}
+            hidden={section !== "data"}
+            className="space-y-4"
+          >
             <h2 className="flex items-center gap-2 text-lg font-semibold">
               <DatabaseIcon className="size-5" />
               {text("使用的数据", "Training data")}
@@ -436,7 +513,14 @@ export function ModelDetail({
               />
             )}
           </section>
-          <section id="methods" className="scroll-mt-6 space-y-4 border-t pt-6">
+          <section
+            id="model-sections-panel-methods"
+            role="tabpanel"
+            aria-labelledby="model-sections-methods"
+            tabIndex={0}
+            hidden={section !== "methods"}
+            className="space-y-4"
+          >
             <div>
               <h2 className="text-lg font-semibold">
                 {text("处理方法", "Processing steps")}
@@ -516,6 +600,7 @@ export function ModelDetail({
             </summary>
             <dl className="mt-4 grid gap-3 sm:grid-cols-2">
               {[
+                [text("模型标识", "Model ID"), detail.model.model_id],
                 [text("版本", "Version"), detail.model.version],
                 [
                   text("保存时间", "Saved"),

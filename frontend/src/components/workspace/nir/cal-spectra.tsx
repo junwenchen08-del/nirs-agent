@@ -2,7 +2,11 @@
 
 import { useState } from "react";
 
-import { parseCalSpectra, type AutonomousSummary } from "@/core/nir/autonomous";
+import {
+  parseCalSpectra,
+  record,
+  type AutonomousSummary,
+} from "@/core/nir/autonomous";
 import { methodLabel } from "@/core/nir/presentation";
 import { type ProcessChart } from "@/core/nir/process-contract";
 import { useProcessResource } from "@/core/nir/process-hooks";
@@ -87,8 +91,20 @@ export function CalSpectraComparison({
       {query.isError ? (
         <p role="alert">
           {zh ? "Cal 图表缓存读取失败。" : "Cal plot cache read failed."}
+          <button
+            type="button"
+            className="ml-2 underline"
+            onClick={() => void query.refetch()}
+          >
+            {zh ? "重试读取" : "Retry read"}
+          </button>
         </p>
-      ) : value ? (
+      ) : value &&
+        (!experimentId ||
+          value.decision_id ===
+            summary.spectra_experiments.find(
+              (item) => item.experiment_id === experimentId,
+            )?.decision_id) ? (
         <>
           <ProcessFacts
             value={{
@@ -106,7 +122,7 @@ export function CalSpectraComparison({
                 : "Axis units unspecified; original channel indices are used when no wavelength axis exists."}
             </p>
           )}
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="process-plot-pair">
             <CalPlot
               key={`${current?.experiment_id}_before`}
               chart={value.before}
@@ -125,9 +141,13 @@ export function CalSpectraComparison({
             ? zh
               ? "正在读取 Cal 光谱缓存…"
               : "Reading Cal spectra cache…"
-            : zh
-              ? "本实验未记录可用 Cal 光谱，不为历史运行重新计算。"
-              : "No Cal spectra recorded; historical runs are not recomputed."}
+            : record(query.data).evidence_status === "available"
+              ? zh
+                ? "光谱身份或结构校验失败，未显示不匹配的曲线。"
+                : "Spectral identity or schema mismatch; curves were not displayed."
+              : zh
+                ? "本实验未记录可用 Cal 光谱，不为历史运行重新计算。"
+                : "No Cal spectra recorded; historical runs are not recomputed."}
         </p>
       )}
     </section>

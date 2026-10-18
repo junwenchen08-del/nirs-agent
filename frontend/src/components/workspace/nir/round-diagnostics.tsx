@@ -42,10 +42,7 @@ function LinkedPlots({
   const [zoom, setZoom] = useState<[number, number]>([0, 1]);
   const [selected, setSelected] = useState<string[]>([]);
   return (
-    <div
-      className="grid min-w-0 gap-4 xl:grid-cols-2"
-      data-testid="round-linked-plots"
-    >
+    <div className="process-plot-pair min-w-0" data-testid="round-linked-plots">
       {(["prediction", "residual"] as const).map((type) => {
         const chart: ProcessChart = {
           chart_schema_version: 1,
@@ -111,9 +108,15 @@ export function RoundDiagnostics({
     decision.decision_id,
     summary.comparison_group_id,
   );
-  const selectedScope = scopes.find((item) => item[0] === scope)!;
-  const points = charts?.[scope];
   const metrics = record(decision.feedback?.metrics);
+  const recordedScopes = scopes.filter(
+    (item) => Object.keys(record(metrics[item[1]])).length || charts?.[item[0]],
+  );
+  const options = recordedScopes.length ? recordedScopes : [...scopes];
+  const currentScope =
+    options.find((item) => item[0] === scope) ?? options[0] ?? scopes[0];
+  const selectedScope = currentScope;
+  const points = charts?.[currentScope[0]];
   return (
     <section
       className="min-w-0 space-y-4"
@@ -123,10 +126,10 @@ export function RoundDiagnostics({
         {zh ? "评价范围" : "Evaluation scope"}
         <select
           className="bg-background max-w-full rounded-md border p-2"
-          value={scope}
+          value={currentScope[0]}
           onChange={(event) => setScope(event.target.value)}
         >
-          {scopes.map(([value, , labelZh, labelEn]) => (
+          {options.map(([value, , labelZh, labelEn]) => (
             <option key={value} value={value}>
               {zh ? labelZh : labelEn}
             </option>
@@ -148,7 +151,7 @@ export function RoundDiagnostics({
       )}
       {points ? (
         <LinkedPlots
-          key={`${decision.decision_id}:${scope}`}
+          key={`${decision.decision_id}:${currentScope[0]}`}
           points={points}
           sid={summary.session_id}
           decision={decision}
@@ -171,17 +174,21 @@ export function RoundDiagnostics({
                 ? zh
                   ? "正在读取本轮诊断图…"
                   : "Reading round diagnostics…"
-                : record(query.data).evidence_status === "unavailable"
+                : record(query.data).evidence_status === "available" && !charts
                   ? zh
-                    ? "本轮图表文件缺失或损坏。"
-                    : "The saved charts are missing or corrupt."
-                  : record(query.data).evidence_status === "failed"
+                    ? "诊断图身份或结构校验失败，未展示不匹配的数据。"
+                    : "Diagnostic identity or schema mismatch; points were not displayed."
+                  : record(query.data).evidence_status === "unavailable"
                     ? zh
-                      ? "本轮训练已完成，但诊断图保存失败。"
-                      : "Training succeeded, but saving diagnostics failed."
-                    : zh
-                      ? "本轮当时未记录可用的诊断图，已有指标保留。"
-                      : "No usable diagnostic points were recorded for this round; metrics remain available."}
+                      ? "本轮图表文件缺失或损坏。"
+                      : "The saved charts are missing or corrupt."
+                    : record(query.data).evidence_status === "failed"
+                      ? zh
+                        ? "本轮训练已完成，但诊断图保存失败。"
+                        : "Training succeeded, but saving diagnostics failed."
+                      : zh
+                        ? "本轮当时未记录可用的诊断图，已有指标保留。"
+                        : "No usable diagnostic points were recorded for this round; metrics remain available."}
           {completed && !query.isPending && (
             <button
               type="button"

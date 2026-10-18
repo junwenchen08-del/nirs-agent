@@ -194,7 +194,7 @@ export const zhCN: Translations = {
     channels: "渠道",
     recentChats: "最近的对话",
     demoChats: "演示对话",
-    nirDatasets: "光谱数据集库",
+    nirDatasets: "数据集库",
     nirModels: "模型库",
     methods: "方法库",
   },
@@ -223,7 +223,7 @@ export const zhCN: Translations = {
   },
 
   nirLibrary: {
-    datasetsTitle: "光谱数据集库",
+    datasetsTitle: "数据集库",
     datasetsDescription:
       "管理明确保存的 CSV、TXT 和 MAT 数据，维护解析配置并安全挂载到新会话。",
     modelsTitle: "模型库",

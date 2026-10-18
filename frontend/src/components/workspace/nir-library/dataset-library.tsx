@@ -8,6 +8,7 @@ import {
   UploadIcon,
   RefreshCwIcon,
   Trash2Icon,
+  MoreHorizontalIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -30,32 +31,30 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/core/i18n/hooks";
 import {
-  confirmDatasetProfile,
-  createDatasetProfile,
   deleteDataset,
-  getDataset,
   getDatasetPreview,
   listDatasets,
-  listDatasetUses,
   renameDataset,
   uploadDataset,
   useNirLibraryEnabled,
   type NIRDataset,
-  type NIRDatasetDetail,
-  type NIRDatasetUse,
 } from "@/core/nir-library";
 import type {
   DatasetAnalysisType,
   NIRDatasetPreview,
 } from "@/core/nir-library/types";
 
-import { DatasetParsingSettings } from "./dataset-parsing-settings";
-import { DatasetPreview } from "./dataset-preview";
+import { DatasetDetailsPanel } from "./dataset-details-panel";
 import { formatBytes } from "./storage-usage-card";
 
 type DialogKind = "upload" | "rename" | "delete" | "details" | null;
@@ -92,12 +91,6 @@ export function DatasetLibrary() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
-  const [detail, setDetail] = useState<NIRDatasetDetail | null>(null);
-  const [detailError, setDetailError] = useState(false);
-  const [uses, setUses] = useState<NIRDatasetUse[]>([]);
-  const [taskType, setTaskType] = useState("calibration");
-  const [schemaStatus, setSchemaStatus] = useState("confirmed_mapping");
-  const [mappingJson, setMappingJson] = useState("{}");
   const [parsingExpanded, setParsingExpanded] = useState(false);
 
   const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
@@ -125,30 +118,6 @@ export function DatasetLibrary() {
       });
     return () => controller.abort();
   }, [enabled, featureLoading, refreshKey]);
-
-  useEffect(() => {
-    if (dialog !== "details" || !selected) return;
-    const controller = new AbortController();
-    Promise.all([
-      getDataset(selected.id, controller.signal),
-      listDatasetUses(selected.id, controller.signal),
-    ])
-      .then(([datasetDetail, history]) => {
-        if (controller.signal.aborted) return;
-        setDetail(datasetDetail);
-        setUses(history);
-        setDetailError(false);
-      })
-      .catch((reason: unknown) => {
-        if (!controller.signal.aborted) {
-          setDetailError(true);
-          toast.error(
-            reason instanceof Error ? reason.message : String(reason),
-          );
-        }
-      });
-    return () => controller.abort();
-  }, [dialog, selected, refreshKey]);
 
   useEffect(() => {
     if (!enabled || loading) return;
@@ -223,9 +192,6 @@ export function DatasetLibrary() {
     setUploadFile(null);
     setUploadError(null);
     setDeleteConfirmation("");
-    setDetail(null);
-    setDetailError(false);
-    setUses([]);
     setParsingExpanded(
       expandParsing ||
         (!!dataset && previews[dataset.id]?.status === "needs_mapping"),
@@ -277,32 +243,19 @@ export function DatasetLibrary() {
           </Button>
         </div>
       </div>
-      <div
-        className="grid grid-cols-2 gap-3 sm:grid-cols-4"
+      <p
+        className="text-muted-foreground flex flex-wrap gap-x-5 gap-y-1 text-sm"
         data-testid="dataset-summary"
       >
-        {[
-          [text("数据集数量", "Datasets"), datasets.length],
-          [
-            text("可使用数据集", "Available datasets"),
-            datasets.filter((dataset) => dataset.status === "ready").length,
-          ],
-          [
-            text("文件总大小", "Total file size"),
-            formatBytes(
-              datasets.reduce((sum, dataset) => sum + dataset.size_bytes, 0),
-            ),
-          ],
-          [text("支持的文件格式", "Supported formats"), "CSV · TXT · MAT"],
-        ].map(([label, value]) => (
-          <div key={label} className="bg-card rounded-xl border p-4">
-            <p className="text-muted-foreground text-xs">{label}</p>
-            <p className="mt-2 text-xl font-semibold">
-              {loading ? "—" : value}
-            </p>
-          </div>
-        ))}
-      </div>
+        <span>
+          {text("共", "Total")} {loading ? "—" : datasets.length}{" "}
+          {text("个数据集", "datasets")}
+        </span>
+        <span>
+          {text("文件总大小", "Total file size")}{" "}
+          {formatBytes(datasets.reduce((sum, row) => sum + row.size_bytes, 0))}
+        </span>
+      </p>
       <Tabs
         value={analysisType}
         onValueChange={(value) =>
@@ -359,25 +312,21 @@ export function DatasetLibrary() {
       ) : filtered.length === 0 ? (
         <p className="text-muted-foreground py-8 text-center">{copy.empty}</p>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="dataset-resource-grid">
           {filtered.map((dataset) => (
             <Card
               key={dataset.id}
               data-testid="nir-dataset-card"
-              className="cursor-pointer transition-shadow hover:shadow-md"
-              onClick={() =>
-                router.push(
-                  `/workspace/nir/datasets/${encodeURIComponent(dataset.id)}`,
-                )
-              }
+              className="hover:border-primary/40 gap-3 transition-colors"
             >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <CardTitle className="truncate text-base">
+                    <CardTitle className="min-w-0 text-base">
                       <button
                         type="button"
-                        className="text-left focus-visible:underline"
+                        className="line-clamp-2 text-left break-words hover:underline"
+                        title={dataset.name}
                         onClick={() =>
                           router.push(
                             `/workspace/nir/datasets/${encodeURIComponent(dataset.id)}`,
@@ -395,39 +344,41 @@ export function DatasetLibrary() {
                       }
                     </CardDescription>
                   </div>
-                  <Badge variant="outline">
-                    {copy.statuses[dataset.status] ?? dataset.status}
-                  </Badge>
+                  {dataset.status !== "ready" && (
+                    <Badge variant="outline">
+                      {copy.statuses[dataset.status] ?? dataset.status}
+                    </Badge>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
-                <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                  <span className="text-muted-foreground">{copy.file}</span>
-                  <span className="truncate">
-                    {dataset.original_filename ?? "—"}
-                  </span>
-                  <span className="text-muted-foreground">{copy.size}</span>
-                  <span>{formatBytes(dataset.size_bytes)}</span>
-                  <span className="text-muted-foreground">{copy.created}</span>
-                  <span>{dateText(dataset.created_at, locale)}</span>
-                </div>
-                {previews[dataset.id]?.status === "ready" && (
-                  <p className="text-muted-foreground text-xs">
-                    {text("样本", "Samples")}：
-                    {previews[dataset.id]?.sample_count?.toLocaleString() ??
-                      "—"}{" "}
-                    · {text("光谱变量", "Spectral variables")}：
-                    {previews[dataset.id]?.feature_count?.toLocaleString() ??
-                      "—"}
-                  </p>
-                )}
+                <p className="font-medium">
+                  {previews[dataset.id]?.status === "ready"
+                    ? `${previews[dataset.id]?.sample_count?.toLocaleString() ?? "—"} ${text("个样本", "samples")} · ${previews[dataset.id]?.feature_count?.toLocaleString() ?? "—"} ${text("个光谱变量", "spectral variables")}`
+                    : (previewErrors[dataset.id] ??
+                      text("数据结构待确认", "Structure pending confirmation"))}
+                </p>
+                <p className="text-muted-foreground text-sm">
+                  {text("目标：", "Target: ")}
+                  {previews[dataset.id]?.targets.length
+                    ? previews[dataset.id]!.targets.map(
+                        (item) => item.name,
+                      ).join("、")
+                    : text("待确认", "Unconfirmed")}
+                </p>
+                <p className="text-muted-foreground text-xs break-words">
+                  {dataset.original_filename} ·{" "}
+                  {formatBytes(dataset.size_bytes)} ·{" "}
+                  {dateText(dataset.created_at, locale)}
+                </p>
                 <div
-                  className="flex flex-wrap gap-2 pt-1"
+                  className="mt-auto flex flex-wrap items-center gap-2 border-t pt-3"
                   onClick={(event) => event.stopPropagation()}
                 >
                   {dataset.status === "ready" && (
                     <Button
                       size="sm"
+                      variant="outline"
                       onClick={() =>
                         router.push(
                           `/workspace/chats/new?dataset=${encodeURIComponent(dataset.id)}`,
@@ -435,7 +386,7 @@ export function DatasetLibrary() {
                       }
                     >
                       <LinkIcon className="size-4" />
-                      {text("挂载到对话", "Attach to chat")}
+                      {text("在新对话中使用", "Use in a new chat")}
                     </Button>
                   )}
                   <Button
@@ -448,14 +399,7 @@ export function DatasetLibrary() {
                     }
                   >
                     <BarChart3Icon className="size-4" />
-                    {text("查看详情", "View details")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => open("details", dataset)}
-                  >
-                    {text("数据概览", "Data overview")}
+                    {text("打开工作台", "Open workspace")}
                   </Button>
                   {previews[dataset.id]?.status === "needs_mapping" && (
                     <Button
@@ -463,27 +407,46 @@ export function DatasetLibrary() {
                       variant="outline"
                       onClick={() => open("details", dataset, true)}
                     >
-                      {text("解析设置", "Parsing settings")}
+                      {text("确认数据结构", "Confirm structure")}
                     </Button>
                   )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => open("rename", dataset)}
-                  >
-                    <PencilIcon className="size-4" />
-                    {copy.rename}
-                  </Button>
-                  {dataset.status === "archived" && (
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => open("delete", dataset)}
-                    >
-                      <Trash2Icon className="size-4" />
-                      {copy.delete}
-                    </Button>
-                  )}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="ml-auto size-8"
+                        aria-label={`${text("更多操作", "More actions")}：${dataset.name}`}
+                      >
+                        <MoreHorizontalIcon className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onSelect={() => open("details", dataset)}
+                      >
+                        <BarChart3Icon className="size-4" />
+                        {text(
+                          "数据概览与解析版本",
+                          "Overview and parsing versions",
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => open("rename", dataset)}
+                      >
+                        <PencilIcon className="size-4" />
+                        {copy.rename}
+                      </DropdownMenuItem>
+                      {dataset.status === "archived" && (
+                        <DropdownMenuItem
+                          onSelect={() => open("delete", dataset)}
+                        >
+                          <Trash2Icon className="size-4" />
+                          {copy.delete}
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </CardContent>
             </Card>
@@ -500,7 +463,7 @@ export function DatasetLibrary() {
             <DialogTitle>{text("上传数据集", "Upload dataset")}</DialogTitle>
             <DialogDescription>
               {text(
-                "从电脑选择 CSV、TXT 或 MAT 文件。上传后可查看数据，也可点击“挂载到对话”或在对话中输入 /datasets 调用。",
+                "从电脑选择 CSV、TXT 或 MAT 文件。上传后可在工作台检查数据，再带入新对话。支持 CSV、TXT 和 MAT 格式。",
                 "Choose a CSV, TXT or MAT file. After uploading, view the data or use Attach to chat or /datasets in a chat.",
               )}
             </DialogDescription>
@@ -659,218 +622,14 @@ export function DatasetLibrary() {
               )}
             </DialogDescription>
           </DialogHeader>
-          {selected && previews[selected.id] ? (
-            <DatasetPreview preview={previews[selected.id]!} />
-          ) : (
-            <div className="space-y-2">
-              <p className="text-muted-foreground text-sm">
-                {selected && previewErrors[selected.id]
-                  ? previewErrors[selected.id]
-                  : copy.loading}
-              </p>
-              {selected && previewErrors[selected.id] && (
-                <Button variant="outline" onClick={refresh}>
-                  {copy.refresh}
-                </Button>
-              )}
-            </div>
+          {selected && (
+            <DatasetDetailsPanel
+              key={selected.id}
+              dataset={selected}
+              expandParsing={parsingExpanded}
+              onSaved={refresh}
+            />
           )}
-          <details
-            className="space-y-3 rounded-lg border p-4"
-            open={parsingExpanded}
-            onToggle={(event) => setParsingExpanded(event.currentTarget.open)}
-          >
-            <summary className="cursor-pointer font-medium">
-              {text("解析设置", "Parsing settings")}
-            </summary>
-            {selected && parsingExpanded && (
-              <DatasetParsingSettings
-                datasetId={selected.id}
-                sourceSha={selected.sha256}
-                disabled={busy || selected.status !== "ready"}
-                onSaved={refresh}
-              />
-            )}
-            <details className="space-y-3 rounded-lg border p-3">
-              <summary className="cursor-pointer text-sm font-medium">
-                {text("高级设置与解析版本", "Advanced settings and versions")}
-              </summary>
-              {detailError ? (
-                <div className="space-y-2 text-sm">
-                  <p>
-                    {text(
-                      "解析设置读取失败，请重试。",
-                      "Parsing settings could not be loaded. Retry.",
-                    )}
-                  </p>
-                  <Button variant="outline" onClick={refresh}>
-                    {copy.refresh}
-                  </Button>
-                </div>
-              ) : !detail ? (
-                <p className="text-muted-foreground text-sm">{copy.loading}</p>
-              ) : detail.profiles.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  {copy.noProfiles}
-                </p>
-              ) : (
-                detail.profiles.map((item) => (
-                  <div key={item.id} className="rounded-lg border p-3 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-mono text-xs">
-                        v{item.profile_version} · {item.id}
-                      </span>
-                      <Badge variant="outline">
-                        {copy.statuses[item.profile_status] ??
-                          item.profile_status}
-                      </Badge>
-                    </div>
-                    <p className="text-muted-foreground mt-1">
-                      {item.task_type === "classification"
-                        ? groupLabels.classification
-                        : item.task_type === "calibration"
-                          ? groupLabels.regression
-                          : text("查看光谱", "Inspect spectra")}{" "}
-                      ·{" "}
-                      {item.schema_status === "needs_user_mapping"
-                        ? text("需要确认列对应关系", "Column mapping needed")
-                        : text("已有解析设置", "Parsing settings available")}
-                    </p>
-                    {item.profile_status === "draft" &&
-                      item.schema_status !== "needs_user_mapping" && (
-                        <Button
-                          className="mt-2"
-                          size="sm"
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() =>
-                            action(
-                              () =>
-                                confirmDatasetProfile(item.dataset_id, item.id),
-                              false,
-                            )
-                          }
-                        >
-                          {copy.confirmProfile}
-                        </Button>
-                      )}
-                  </div>
-                ))
-              )}
-              <div className="space-y-2 rounded-lg border p-3">
-                <h4 className="text-sm font-medium">{copy.createProfile}</h4>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <FormField label={copy.taskType}>
-                    <select
-                      className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                      value={taskType}
-                      onChange={(event) => setTaskType(event.target.value)}
-                    >
-                      <option value="calibration">
-                        {text("定量分析", "Quantitative analysis")}
-                      </option>
-                      <option value="classification">
-                        {text("分类识别", "Classification")}
-                      </option>
-                      <option value="inspection">
-                        {text("仅查看光谱", "Inspect spectra only")}
-                      </option>
-                    </select>
-                  </FormField>
-                  <FormField label={copy.schemaStatus}>
-                    <select
-                      className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                      value={schemaStatus}
-                      onChange={(event) => setSchemaStatus(event.target.value)}
-                    >
-                      <option value="confirmed_mapping">
-                        {text("已确认列对应关系", "Confirmed column mapping")}
-                      </option>
-                      <option value="auto">
-                        {text("自动识别", "Automatic detection")}
-                      </option>
-                      <option value="legacy_auto_layout">
-                        {text("旧格式自动识别", "Legacy format detection")}
-                      </option>
-                      <option value="needs_user_mapping">
-                        {text("需要确认列对应关系", "Column mapping needed")}
-                      </option>
-                      <option value="spectra_only">
-                        {text("只包含光谱数据", "Spectra only")}
-                      </option>
-                    </select>
-                  </FormField>
-                </div>
-                <FormField label={copy.mappingJson}>
-                  <Textarea
-                    value={mappingJson}
-                    onChange={(event) => setMappingJson(event.target.value)}
-                    rows={5}
-                    className="font-mono text-xs"
-                  />
-                </FormField>
-                <Button
-                  size="sm"
-                  disabled={busy || !selected}
-                  onClick={() => {
-                    let mapping: unknown;
-                    try {
-                      mapping = JSON.parse(mappingJson);
-                    } catch {
-                      toast.error(copy.invalidJson);
-                      return;
-                    }
-                    if (
-                      !mapping ||
-                      typeof mapping !== "object" ||
-                      Array.isArray(mapping)
-                    ) {
-                      toast.error(copy.invalidJson);
-                      return;
-                    }
-                    void action(
-                      () =>
-                        createDatasetProfile(selected!.id, {
-                          taskType,
-                          schemaStatus,
-                          mapping: mapping as Record<string, unknown>,
-                        }),
-                      false,
-                    );
-                  }}
-                >
-                  {copy.createProfile}
-                </Button>
-              </div>
-            </details>
-          </details>
-          <details className="space-y-3 rounded-lg border p-4">
-            <summary className="cursor-pointer font-medium">
-              {text("使用记录", "Usage history")}
-            </summary>
-            {uses.length === 0 ? (
-              <p className="text-muted-foreground text-sm">{copy.noHistory}</p>
-            ) : (
-              uses.map((item) => (
-                <div
-                  key={item.attachment_id}
-                  className="rounded-lg border p-3 text-sm"
-                >
-                  <div className="flex justify-between gap-3">
-                    <span className="font-mono text-xs">{item.thread_id}</span>
-                    <Badge variant="outline">
-                      {copy.statuses[item.status] ?? item.status}
-                    </Badge>
-                  </div>
-                  <p className="text-muted-foreground mt-1">
-                    {text("分析记录", "Run")}: {item.run_id ?? "—"} ·{" "}
-                    {text("解析版本", "Parsing profile")}:{" "}
-                    {item.profile_id ?? "—"}
-                  </p>
-                </div>
-              ))
-            )}
-          </details>
         </DialogContent>
       </Dialog>
     </div>

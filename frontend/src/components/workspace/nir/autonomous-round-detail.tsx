@@ -19,7 +19,9 @@ import { useProcessResource } from "@/core/nir/process-hooks";
 import { roundConfiguration } from "@/core/nir/round-process";
 
 import { ParameterTrials, RecordedNarrative } from "./autonomous-evidence";
+import { Trends } from "./autonomous-final-views";
 import { CalSpectraComparison } from "./cal-spectra";
+import { NodeDetailTabs, type NodeDetailTab } from "./node-detail-tabs";
 import { ProcessFacts } from "./process-facts";
 import { RoundDiagnostics } from "./round-diagnostics";
 import { RoundNextRecommendation } from "./round-next-recommendation";
@@ -30,18 +32,20 @@ export function AutonomousRoundDetail({
   decision,
   zh,
   onSelect,
+  tab,
+  onTabChange,
 }: {
   threadId: string;
   summary: AutonomousSummary;
   decision: DecisionView;
   zh: boolean;
   onSelect: (decision: DecisionView) => void;
+  tab: NodeDetailTab;
+  onTabChange: (tab: NodeDetailTab) => void;
 }) {
-  const [selectedTab, setTab] = useState<"config" | "evaluation" | "reason">(
-    "evaluation",
-  );
-  const [spectraOpen, setSpectraOpen] = useState(false);
-  const [trialsOpen, setTrialsOpen] = useState(false);
+  const [chartGroup, setChartGroup] = useState<
+    "prediction" | "spectra" | "search" | "trend"
+  >("prediction");
   const query = useProcessResource<unknown>(
     threadId,
     `autonomous/${summary.session_id}/decisions/${decision.decision_id}`,
@@ -59,7 +63,6 @@ export function AutonomousRoundDetail({
   const details =
     parsed?.decision_id === decision.decision_id ? parsed : decision;
   const stopping = ["STOP", "RETAIN"].includes(details.action);
-  const tab = stopping ? "reason" : selectedTab;
   const configuration = roundConfiguration(details);
   const proposal = details.proposal ?? {};
   const feedback = details.feedback ?? {};
@@ -74,33 +77,29 @@ export function AutonomousRoundDetail({
       ].join(" → ")
     : decisionPipelineLabel(details.selected, zh);
   const id = `round-detail-${decision.decision_id}`;
+  const metrics = record(record(feedback.metrics).val);
   return (
     <section
-      className="bg-card min-w-0 space-y-4 rounded-xl border p-4"
+      className="process-detail-pane bg-card rounded-xl border"
       aria-label={zh ? "轮次详情" : "Round detail"}
       data-testid="round-detail"
       data-decision-id={decision.decision_id}
     >
-      <header>
-        <h3 className="text-lg font-medium">
-          {stopping
-            ? actionLabel(details.action, zh)
-            : zh
-              ? `第 ${fmt(details.round_index)} 轮 · ${actionLabel(details.action, zh)}`
-              : `Round ${fmt(details.round_index)} · ${actionLabel(details.action, zh)}`}
-        </h3>
-        <p className="text-muted-foreground mt-1 text-xs">
-          {stopping
-            ? zh
-              ? "停止选择已记录"
-              : "Recorded stop selection"
-            : executionLabel(details.status, zh)}
-          {typeof feedback.elapsed_seconds === "number"
-            ? ` · ${fmt(feedback.elapsed_seconds)} ${zh ? "秒" : "s"}`
-            : ""}
-        </p>
+      <header className="shrink-0 space-y-2 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <h3 className="text-lg font-semibold">
+            {stopping
+              ? actionLabel(details.action, zh)
+              : zh
+                ? `第 ${fmt(details.round_index)} 轮 · ${actionLabel(details.action, zh)}`
+                : `Round ${fmt(details.round_index)} · ${actionLabel(details.action, zh)}`}
+          </h3>
+          <span className="text-muted-foreground bg-muted rounded px-2 py-1 text-xs">
+            {executionLabel(details.status, zh)}
+          </span>
+        </div>
         {!stopping && (
-          <p className="bg-muted mt-3 rounded-lg p-3 text-sm">
+          <p className="text-sm break-words">
             {configuration.actual
               ? zh
                 ? "实际方案："
@@ -111,55 +110,83 @@ export function AutonomousRoundDetail({
             {pipeline}
           </p>
         )}
+        {!stopping && Object.keys(metrics).length > 0 && (
+          <div>
+            <p className="text-muted-foreground text-xs">
+              {zh ? "验证集（Val）" : "Validation (Val)"}
+              {typeof metrics.n === "number"
+                ? ` · ${metrics.n} ${zh ? "个样本" : "samples"}`
+                : ""}
+            </p>
+            <dl className="mt-2 flex flex-wrap gap-6">
+              {["RMSE", "R2", "RPD"].map((key) => (
+                <div key={key}>
+                  <dt className="text-muted-foreground text-xs">
+                    {key === "R2" ? "R²" : key}
+                  </dt>
+                  <dd className="text-2xl font-semibold tabular-nums">
+                    {fmt(metrics[key])}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
       </header>
-      {query.isError && (
-        <div role="alert" className="text-sm">
-          {zh
-            ? "详细记录读取失败，当前显示已读取的轮次摘要。"
-            : "Detail read failed; showing the loaded round summary."}
-          <button
-            className="ml-2 underline"
-            type="button"
-            onClick={() => void query.refetch()}
-          >
-            {zh ? "重新读取" : "Retry"}
-          </button>
-        </div>
-      )}
+      <NodeDetailTabs value={tab} onChange={onTabChange} id={id} zh={zh} />
       <div
-        className="flex flex-wrap gap-1 border-b"
-        role="tablist"
-        aria-label={zh ? "轮次信息" : "Round information"}
-      >
-        {(["config", "evaluation", "reason"] as const)
-          .filter((key) => !stopping || key === "reason")
-          .map((key) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              id={`${id}-${key}`}
-              aria-selected={tab === key}
-              aria-controls={`${id}-panel`}
-              onClick={() => setTab(key)}
-              className={`border-b-2 px-3 py-2 text-sm ${tab === key ? "border-primary font-medium" : "text-muted-foreground border-transparent"}`}
-            >
-              {
-                {
-                  config: ["方案与参数", "Configuration"],
-                  evaluation: ["指标与图表", "Metrics and plots"],
-                  reason: ["决策依据", "Decision evidence"],
-                }[key][zh ? 0 : 1]
-              }
-            </button>
-          ))}
-      </div>
-      <div
+        className="process-detail-body space-y-4 p-4"
         id={`${id}-panel`}
         role="tabpanel"
         aria-labelledby={`${id}-${tab}`}
-        className="min-w-0 space-y-4"
+        tabIndex={0}
       >
+        {query.isError && (
+          <p role="alert" className="text-sm">
+            {zh
+              ? "详细记录读取失败，当前显示轮次摘要。"
+              : "Detail read failed; showing the loaded summary."}
+            <button
+              type="button"
+              className="ml-2 underline"
+              onClick={() => void query.refetch()}
+            >
+              {zh ? "重新读取" : "Retry"}
+            </button>
+          </p>
+        )}
+        {tab === "overview" && (
+          <>
+            <h4 className="text-sm font-semibold">
+              {zh ? "使用的方法与动作" : "Methods and action"}
+            </h4>
+            <p className="text-sm">
+              {stopping ? actionLabel(details.action, zh) : pipeline}
+            </p>
+            <h4 className="text-sm font-semibold">
+              {zh ? "本轮选择依据" : "Recorded rationale"}
+            </h4>
+            <RecordedNarrative value={details.rationale} zh={zh} />
+            <h4 className="text-sm font-semibold">
+              {zh ? "原始预期" : "Original expectation"}
+            </h4>
+            <RecordedNarrative value={details.expected_outcome} zh={zh} />
+            <ProcessFacts
+              value={{
+                elapsed_seconds: feedback.elapsed_seconds,
+                failure_reason: feedback.failure_reason,
+                comparisons: feedback.comparisons,
+                retained_experiment_id: details.retained_experiment_id,
+              }}
+              zh={zh}
+            />
+            <p className="text-muted-foreground text-xs">
+              {zh
+                ? "参数、各范围指标与图表、下一轮原始建议分别在上方主分区查看。"
+                : "Use the tabs for parameters, scoped diagnostics and the original next proposal."}
+            </p>
+          </>
+        )}
         {tab === "config" && (
           <>
             <p className="text-sm font-medium">
@@ -235,53 +262,87 @@ export function AutonomousRoundDetail({
                 <ProcessFacts value={configuration.optimization} zh={zh} />
               </dd>
             </dl>
-            <details
-              onToggle={(event) => setTrialsOpen(event.currentTarget.open)}
-            >
-              <summary className="cursor-pointer text-sm">
-                {zh ? "参数候选与交叉验证" : "Parameter trials and CV"}
-              </summary>
-              {trialsOpen && (
-                <ParameterTrials value={feedback.trials} zh={zh} />
-              )}
-            </details>
-            <details
-              onToggle={(event) => setSpectraOpen(event.currentTarget.open)}
-            >
-              <summary className="cursor-pointer text-sm">
+
+            <h4 className="text-sm font-semibold">
+              {zh
+                ? "固定模型参数（执行前）"
+                : "Fixed model parameters (before execution)"}
+            </h4>
+            <ProcessFacts
+              value={record(details.selected.pipeline).fixed_params}
+              zh={zh}
+            />
+            <h4 className="text-sm font-semibold">
+              {zh ? "最终拟合参数" : "Final fitted parameters"}
+            </h4>
+            {configuration.actual ? (
+              <ProcessFacts value={configuration.parameters} zh={zh} />
+            ) : (
+              <p className="text-muted-foreground text-sm">
                 {zh
-                  ? "预处理前后光谱"
-                  : "Spectra before and after preprocessing"}
-              </summary>
-              {spectraOpen && details.experiment_id && (
+                  ? "本轮尚无成功执行的最终参数。"
+                  : "No successful fitted parameters recorded."}
+              </p>
+            )}
+          </>
+        )}
+        {tab === "evaluation" && (
+          <>
+            {!stopping && (
+              <div
+                className="flex flex-wrap gap-2"
+                role="group"
+                aria-label={zh ? "图表分组" : "Chart groups"}
+              >
+                {(["prediction", "spectra", "search", "trend"] as const).map(
+                  (key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-pressed={chartGroup === key}
+                      className={`rounded-md border px-3 py-2 text-xs ${chartGroup === key ? "bg-accent text-accent-foreground border-primary" : ""}`}
+                      onClick={() => setChartGroup(key)}
+                    >
+                      {
+                        {
+                          prediction: ["预测诊断", "Prediction"],
+                          spectra: ["光谱对照", "Spectra"],
+                          search: ["参数搜索", "Parameter search"],
+                          trend: ["轮次比较", "Round comparison"],
+                        }[key][zh ? 0 : 1]
+                      }
+                    </button>
+                  ),
+                )}
+              </div>
+            )}
+            {stopping || chartGroup === "trend" ? (
+              <Trends summary={summary} zh={zh} />
+            ) : chartGroup === "prediction" ? (
+              <RoundDiagnostics
+                key={details.decision_id}
+                threadId={threadId}
+                summary={summary}
+                decision={details}
+                zh={zh}
+              />
+            ) : chartGroup === "spectra" ? (
+              details.experiment_id ? (
                 <CalSpectraComparison
                   threadId={threadId}
                   summary={summary}
                   experimentId={details.experiment_id}
                   zh={zh}
                 />
-              )}
-            </details>
-          </>
-        )}
-        {tab === "evaluation" && (
-          <>
-            <RoundDiagnostics
-              key={details.decision_id}
-              threadId={threadId}
-              summary={summary}
-              decision={details}
-              zh={zh}
-            />
-            {Object.keys(record(feedback.comparisons)).length > 0 && (
-              <details>
-                <summary className="cursor-pointer text-sm">
+              ) : (
+                <p className="text-sm">
                   {zh
-                    ? "与已有方案比较"
-                    : "Comparison with recorded experiments"}
-                </summary>
-                <ProcessFacts value={feedback.comparisons} zh={zh} />
-              </details>
+                    ? "本轮尚无实验光谱记录。"
+                    : "No experiment spectra recorded for this round."}
+                </p>
+              )
+            ) : (
+              <ParameterTrials value={feedback.trials} zh={zh} />
             )}
           </>
         )}
@@ -344,20 +405,19 @@ export function AutonomousRoundDetail({
                 zh={zh}
               />
             </details>
+
+            <RoundNextRecommendation
+              current={details}
+              next={next}
+              terminal={isAutonomousTerminal(summary.stage)}
+              loading={query.isPending}
+              failed={query.isError}
+              zh={zh}
+              onSelect={onSelect}
+            />
           </>
         )}
-      </div>
-      <footer className="space-y-2 border-t pt-3 text-sm">
-        <RoundNextRecommendation
-          current={details}
-          next={next}
-          terminal={isAutonomousTerminal(summary.stage)}
-          loading={query.isPending}
-          failed={query.isError}
-          zh={zh}
-          onSelect={onSelect}
-        />
-        <details className="text-xs">
+        <details className="border-t pt-3 text-xs">
           <summary className="cursor-pointer">
             {zh
               ? "追溯信息与完整配置"
@@ -375,6 +435,11 @@ export function AutonomousRoundDetail({
             zh={zh}
           />
         </details>
+      </div>
+      <footer className="text-muted-foreground shrink-0 border-t px-4 py-2 text-xs">
+        {zh
+          ? "方法、参数、结果与建议均来自本节点记录"
+          : "Methods, parameters, results and advice use this node's records"}
       </footer>
     </section>
   );

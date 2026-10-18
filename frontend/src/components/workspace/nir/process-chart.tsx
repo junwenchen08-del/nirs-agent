@@ -1,7 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { chartColors, seriesColor } from "@/core/nir/chart-theme";
 import {
   displayedPointSummary,
@@ -70,6 +76,7 @@ export function ProcessChartView({
   onZoom,
   selected,
   onSelect,
+  expanded = false,
 }: {
   chart: ProcessChart;
   zh: boolean;
@@ -77,7 +84,10 @@ export function ProcessChartView({
   onZoom: (range: [number, number]) => void;
   selected: string[];
   onSelect: (ids: string[]) => void;
+  expanded?: boolean;
 }) {
+  const clipId = useId().replaceAll(":", "");
+  const [enlarged, setEnlarged] = useState(false);
   const [hidden, setHidden] = useState<string[]>([]);
   const [hover, setHover] = useState<{ index: number; series: number } | null>(
     null,
@@ -166,420 +176,488 @@ export function ProcessChartView({
       </p>
     );
   return (
-    <section
-      className="bg-card min-w-0 rounded-xl border p-4"
-      aria-label={`${plotLabel(chart.type, zh)} ${plotLabel(chart.scope, zh)}`}
-    >
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-medium">{plotLabel(chart.type, zh)}</h3>
-        <span className="text-muted-foreground text-xs">
-          {plotLabel(chart.scope, zh)} ·{" "}
-          {chart.type === "distribution"
-            ? `${chart.n_returned} ${zh ? "分箱" : "bins"} / ${chart.n_total} ${zh ? "样本" : "samples"}`
-            : `${chart.n_returned}/${chart.n_total} ${chart.type === "wavelength" ? (zh ? "保留变量 / 全部变量" : "retained / total variables") : chart.type === "cv" ? (zh ? "显示候选 / 记录候选" : "displayed / recorded candidates") : chart.type === "trend" ? (zh ? "显示实验 / 记录实验" : "displayed / recorded experiments") : zh ? "显示样本 / 全量样本" : "displayed / total samples"}`}
-          {chart.axis_total !== undefined &&
-            ` · ${chart.axis_returned}/${chart.axis_total} ${zh ? "显示变量 / 全部变量" : "displayed / total variables"}`}
-        </span>
-      </div>
-      <div
-        className="text-muted-foreground flex min-h-7 flex-wrap gap-2 text-xs"
-        aria-live="polite"
+    <>
+      <section
+        className="bg-card min-w-0 rounded-xl border p-3"
+        aria-label={`${plotLabel(chart.type, zh)} ${plotLabel(chart.scope, zh)}`}
       >
-        {hover ? (
-          <span>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">{plotLabel(chart.type, zh)}</h3>
+          {!expanded && (
+            <button
+              type="button"
+              className="text-primary ml-auto rounded border px-2 py-1 text-xs"
+              aria-label={`${zh ? "放大" : "Enlarge"}：${plotLabel(chart.type, zh)}`}
+              onClick={() => setEnlarged(true)}
+            >
+              {zh ? "放大" : "Enlarge"}
+            </button>
+          )}
+          <span className="text-muted-foreground min-h-8 w-full text-xs">
+            {plotLabel(chart.scope, zh)} ·{" "}
+            {chart.type === "distribution"
+              ? `${chart.n_returned} ${zh ? "分箱" : "bins"} / ${chart.n_total} ${zh ? "样本" : "samples"}`
+              : `${chart.n_returned}/${chart.n_total} ${chart.type === "wavelength" ? (zh ? "保留变量 / 全部变量" : "retained / total variables") : chart.type === "cv" ? (zh ? "显示候选 / 记录候选" : "displayed / recorded candidates") : chart.type === "trend" ? (zh ? "显示实验 / 记录实验" : "displayed / recorded experiments") : zh ? "显示样本 / 全量样本" : "displayed / total samples"}`}
+            {chart.axis_total !== undefined &&
+              ` · ${chart.axis_returned}/${chart.axis_total} ${zh ? "显示变量 / 全部变量" : "displayed / total variables"}`}
+          </span>
+        </div>
+        <div
+          className="text-muted-foreground flex min-h-7 flex-wrap gap-2 text-xs"
+          aria-live="polite"
+        >
+          {hover ? (
+            <span>
+              {plotLabel(
+                chart.x_label === "wavelength"
+                  ? "wavelength_axis"
+                  : chart.x_label,
+                zh,
+              )}
+              : {fmt(xs[hover.index])} {chart.x_unit} ·{" "}
+              {axisLabel(chart.y_label, zh)}:{" "}
+              {fmt(lineSeries[hover.series]?.values[hover.index])}{" "}
+              {chart.y_unit}
+              {hoverId ? ` · ${zh ? "样本标识" : "Sample ID"} ${hoverId}` : ""}
+            </span>
+          ) : (
+            <span>
+              {zh
+                ? "悬停读取数值；拖动框选显示点；下方可缩放和重置。"
+                : "Hover for values; drag to select displayed points; zoom or reset below."}
+            </span>
+          )}
+        </div>
+        {scatter && chart.sample_ids?.length ? (
+          <label className="my-2 flex flex-wrap items-center gap-2 text-xs">
+            {zh ? "选中样本" : "Selected sample"}
+            <select
+              aria-label={zh ? "选中样本" : "Selected sample"}
+              className="bg-background max-w-full rounded border px-2 py-1"
+              value={selected.length === 1 ? selected[0] : ""}
+              onChange={(event) =>
+                onSelect(event.target.value ? [event.target.value] : [])
+              }
+            >
+              <option value="">{zh ? "全部样本" : "All samples"}</option>
+              {chart.sample_ids.map((sample, index) => (
+                <option value={sample} key={`${sample}-${index}`}>
+                  {sample.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        <svg
+          ref={svgRef}
+          role="img"
+          aria-label={plotLabel(chart.type, zh)}
+          viewBox={`0 0 ${width} ${height}`}
+          className="w-full touch-none select-none"
+          onPointerDown={(event) => {
+            if (scatter) {
+              const pos = point(event);
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setBrush({ from: pos, to: pos });
+            }
+          }}
+          onPointerMove={(event) => {
+            const pos = point(event);
+            if (brush) setBrush({ ...brush, to: pos });
+            let closest: {
+              distance: number;
+              index: number;
+              series: number;
+            } | null = null;
+            lineSeries.forEach((series, seriesIndex) => {
+              if (hidden.includes(series.id)) return;
+              series.values.forEach((y, index) => {
+                const x = xs[index];
+                if (x === undefined || x < low || x > high) return;
+                const distance =
+                  Math.abs(sx(x) - pos[0]) + Math.abs(sy(y) - pos[1]);
+                if (!closest || distance < closest.distance)
+                  closest = { distance, index, series: seriesIndex };
+              });
+            });
+            setHover(closest);
+          }}
+          onPointerUp={() => {
+            if (!brush) return;
+            const moved =
+              Math.abs(brush.from[0] - brush.to[0]) +
+                Math.abs(brush.from[1] - brush.to[1]) >
+              5;
+            if (moved)
+              onSelect(
+                (chart.sample_ids ?? []).filter((_, index) => {
+                  const x = sx(xs[index]!),
+                    y = sy(chart.y?.[index] ?? 0);
+                  return (
+                    x >= Math.min(brush.from[0], brush.to[0]) &&
+                    x <= Math.max(brush.from[0], brush.to[0]) &&
+                    y >= Math.min(brush.from[1], brush.to[1]) &&
+                    y <= Math.max(brush.from[1], brush.to[1])
+                  );
+                }),
+              );
+            else if (hover && chart.sample_ids?.[hover.index])
+              onSelect([chart.sample_ids[hover.index]!]);
+            setBrush(null);
+          }}
+          onPointerCancel={() => setBrush(null)}
+          onPointerLeave={() => {
+            if (!brush) setHover(null);
+          }}
+        >
+          <defs>
+            <clipPath id={`clip-${clipId}`}>
+              <rect
+                x={left}
+                y={top}
+                width={right - left}
+                height={bottom - top}
+              />
+            </clipPath>
+          </defs>
+          {[0, 1, 2, 3, 4].map((tick) => (
+            <g key={tick}>
+              <line
+                x1={left}
+                x2={right}
+                y1={top + (tick / 4) * (bottom - top)}
+                y2={top + (tick / 4) * (bottom - top)}
+                stroke="currentColor"
+                opacity=".08"
+              />
+              {chart.type !== "wavelength" && (
+                <text
+                  x={left - 8}
+                  y={top + (tick / 4) * (bottom - top) + 4}
+                  textAnchor="end"
+                  fill="currentColor"
+                  fontSize="11"
+                >
+                  {fmt(yMax - (tick / 4) * ySpan)}
+                </text>
+              )}
+              <text
+                x={left + (tick / 4) * (right - left)}
+                y={bottom + 22}
+                textAnchor="middle"
+                fill="currentColor"
+                fontSize="11"
+              >
+                {fmt(low + (tick / 4) * (high - low))}
+              </text>
+            </g>
+          ))}
+          <line
+            x1={left}
+            x2={right}
+            y1={bottom}
+            y2={bottom}
+            stroke="currentColor"
+            opacity=".3"
+          />
+          <text
+            x={(left + right) / 2}
+            y={height - 8}
+            textAnchor="middle"
+            fill="currentColor"
+            fontSize="12"
+          >
             {plotLabel(
               chart.x_label === "wavelength"
                 ? "wavelength_axis"
                 : chart.x_label,
               zh,
             )}
-            : {fmt(xs[hover.index])} {chart.x_unit} ·{" "}
-            {axisLabel(chart.y_label, zh)}:{" "}
-            {fmt(lineSeries[hover.series]?.values[hover.index])} {chart.y_unit}
-            {hoverId ? ` · ${zh ? "样本标识" : "Sample ID"} ${hoverId}` : ""}
-          </span>
-        ) : (
-          <span>
-            {zh
-              ? "悬停读取数值；拖动框选显示点；下方可缩放和重置。"
-              : "Hover for values; drag to select displayed points; zoom or reset below."}
-          </span>
-        )}
-      </div>
-      <svg
-        ref={svgRef}
-        role="img"
-        aria-label={plotLabel(chart.type, zh)}
-        viewBox={`0 0 ${width} ${height}`}
-        className="w-full touch-none select-none"
-        onPointerDown={(event) => {
-          if (scatter) {
-            const pos = point(event);
-            event.currentTarget.setPointerCapture(event.pointerId);
-            setBrush({ from: pos, to: pos });
-          }
-        }}
-        onPointerMove={(event) => {
-          const pos = point(event);
-          if (brush) setBrush({ ...brush, to: pos });
-          let closest: {
-            distance: number;
-            index: number;
-            series: number;
-          } | null = null;
-          lineSeries.forEach((series, seriesIndex) => {
-            if (hidden.includes(series.id)) return;
-            series.values.forEach((y, index) => {
-              const x = xs[index];
-              if (x === undefined || x < low || x > high) return;
-              const distance =
-                Math.abs(sx(x) - pos[0]) + Math.abs(sy(y) - pos[1]);
-              if (!closest || distance < closest.distance)
-                closest = { distance, index, series: seriesIndex };
-            });
-          });
-          setHover(closest);
-        }}
-        onPointerUp={() => {
-          if (!brush) return;
-          const moved =
-            Math.abs(brush.from[0] - brush.to[0]) +
-              Math.abs(brush.from[1] - brush.to[1]) >
-            5;
-          if (moved)
-            onSelect(
-              (chart.sample_ids ?? []).filter((_, index) => {
-                const x = sx(xs[index]!),
-                  y = sy(chart.y?.[index] ?? 0);
-                return (
-                  x >= Math.min(brush.from[0], brush.to[0]) &&
-                  x <= Math.max(brush.from[0], brush.to[0]) &&
-                  y >= Math.min(brush.from[1], brush.to[1]) &&
-                  y <= Math.max(brush.from[1], brush.to[1])
-                );
-              }),
-            );
-          else if (hover && chart.sample_ids?.[hover.index])
-            onSelect([chart.sample_ids[hover.index]!]);
-          setBrush(null);
-        }}
-        onPointerCancel={() => setBrush(null)}
-        onPointerLeave={() => {
-          if (!brush) setHover(null);
-        }}
-      >
-        <defs>
-          <clipPath id={`clip-${chart.chart_id}`}>
-            <rect x={left} y={top} width={right - left} height={bottom - top} />
-          </clipPath>
-        </defs>
-        {[0, 1, 2, 3, 4].map((tick) => (
-          <g key={tick}>
-            <line
-              x1={left}
-              x2={right}
-              y1={top + (tick / 4) * (bottom - top)}
-              y2={top + (tick / 4) * (bottom - top)}
-              stroke="currentColor"
-              opacity=".08"
-            />
-            {chart.type !== "wavelength" && (
-              <text
-                x={left - 8}
-                y={top + (tick / 4) * (bottom - top) + 4}
-                textAnchor="end"
-                fill="currentColor"
-                fontSize="11"
-              >
-                {fmt(yMax - (tick / 4) * ySpan)}
-              </text>
-            )}
+            {chart.x_unit ? ` (${chart.x_unit})` : ""}
+          </text>
+          {chart.type !== "wavelength" && (
             <text
-              x={left + (tick / 4) * (right - left)}
-              y={bottom + 22}
+              transform={`translate(14 ${(top + bottom) / 2}) rotate(-90)`}
               textAnchor="middle"
               fill="currentColor"
-              fontSize="11"
+              fontSize="12"
             >
-              {fmt(low + (tick / 4) * (high - low))}
+              {axisLabel(chart.y_label, zh)}
+              {chart.y_unit ? ` (${chart.y_unit})` : ""}
             </text>
-          </g>
-        ))}
-        <line
-          x1={left}
-          x2={right}
-          y1={bottom}
-          y2={bottom}
-          stroke="currentColor"
-          opacity=".3"
-        />
-        <text
-          x={(left + right) / 2}
-          y={height - 8}
-          textAnchor="middle"
-          fill="currentColor"
-          fontSize="12"
-        >
-          {plotLabel(
-            chart.x_label === "wavelength" ? "wavelength_axis" : chart.x_label,
-            zh,
           )}
-          {chart.x_unit ? ` (${chart.x_unit})` : ""}
-        </text>
-        {chart.type !== "wavelength" && (
-          <text
-            transform={`translate(14 ${(top + bottom) / 2}) rotate(-90)`}
-            textAnchor="middle"
-            fill="currentColor"
-            fontSize="12"
-          >
-            {axisLabel(chart.y_label, zh)}
-            {chart.y_unit ? ` (${chart.y_unit})` : ""}
-          </text>
-        )}
-        <g clipPath={`url(#clip-${chart.chart_id})`}>
-          {chart.type === "prediction" && (
-            <line
-              x1={sx(low)}
-              x2={sx(high)}
-              y1={sy(low)}
-              y2={sy(high)}
-              stroke={chartColors.raw}
-              strokeDasharray="5 5"
-            />
-          )}
-          {chart.type === "residual" && (
-            <line
-              x1={left}
-              x2={right}
-              y1={sy(0)}
-              y2={sy(0)}
-              stroke={chartColors.raw}
-              strokeDasharray="5 5"
-            />
-          )}
-          {chart.ranges?.map((range, index) => (
-            <g key={index}>
-              <rect
-                x={Math.min(sx(range.start), sx(range.end))}
-                y={top + 65}
-                width={Math.max(3, Math.abs(sx(range.end) - sx(range.start)))}
-                height={80}
-                fill={chartColors.retained}
-                opacity=".6"
-              >
-                <title>
-                  {range.start}–{range.end} · {range.count}
-                </title>
-              </rect>
-            </g>
-          ))}
-          {lineSeries.map((series, seriesIndex) =>
-            hidden.includes(series.id) ? null : scatter ? (
-              series.values.map((y, index) => (
-                <circle
-                  key={index}
-                  cx={sx(xs[index]!)}
-                  cy={sy(y)}
-                  r={
-                    selected.includes(chart.sample_ids?.[index] ?? "") ? 6 : 3.5
-                  }
-                  fill={
-                    selected.includes(chart.sample_ids?.[index] ?? "")
-                      ? chartColors.diagnostic
-                      : seriesColor(seriesIndex)
-                  }
-                  opacity=".8"
-                  tabIndex={0}
-                  role="button"
-                  aria-label={`${chart.sample_ids?.[index]}: ${fmt(xs[index])}, ${fmt(y)}`}
-                  onFocus={() => setHover({ index, series: seriesIndex })}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      onSelect([chart.sample_ids?.[index] ?? ""]);
-                    }
-                  }}
-                />
-              ))
-            ) : chart.type === "distribution" ? (
-              series.values.map((y, index) => (
-                <rect
-                  key={index}
-                  x={
-                    sx(xs[index]!) - (right - left) / Math.max(1, xs.length) / 2
-                  }
-                  y={sy(y)}
-                  width={Math.max(
-                    2,
-                    (right - left) / Math.max(1, xs.length) - 3,
-                  )}
-                  height={bottom - sy(y)}
-                  fill={seriesColor(seriesIndex)}
-                  opacity=".7"
-                />
-              ))
-            ) : (
-              <polyline
-                key={series.id}
-                fill="none"
-                stroke={seriesColor(seriesIndex)}
-                strokeWidth="1.7"
-                opacity=".8"
-                points={curvePaths[seriesIndex]}
+          <g clipPath={`url(#clip-${clipId})`}>
+            {chart.type === "prediction" && (
+              <line
+                x1={sx(low)}
+                x2={sx(high)}
+                y1={sy(low)}
+                y2={sy(high)}
+                stroke={chartColors.raw}
+                strokeDasharray="5 5"
               />
-            ),
-          )}
-          {brush && (
-            <rect
-              x={Math.min(brush.from[0], brush.to[0])}
-              y={Math.min(brush.from[1], brush.to[1])}
-              width={Math.abs(brush.from[0] - brush.to[0])}
-              height={Math.abs(brush.from[1] - brush.to[1])}
-              fill={chartColors.processed}
-              opacity=".15"
-              stroke={chartColors.processed}
-            />
-          )}
-        </g>
-      </svg>
-      {chart.series && (
-        <div className="mb-3 flex flex-wrap gap-1.5">
-          {chart.series.map((series, index) => (
-            <button
-              key={series.id}
-              type="button"
-              title={series.id}
-              aria-pressed={!hidden.includes(series.id)}
-              className={cn(
-                "rounded border px-2 py-1 text-xs",
-                hidden.includes(series.id) && "opacity-40",
-              )}
-              onClick={() =>
-                setHidden((previous) =>
-                  previous.includes(series.id)
-                    ? previous.filter((id) => id !== series.id)
-                    : [...previous, series.id],
-                )
+            )}
+            {chart.type === "residual" && (
+              <line
+                x1={left}
+                x2={right}
+                y1={sy(0)}
+                y2={sy(0)}
+                stroke={chartColors.raw}
+                strokeDasharray="5 5"
+              />
+            )}
+            {chart.ranges?.map((range, index) => (
+              <g key={index}>
+                <rect
+                  x={Math.min(sx(range.start), sx(range.end))}
+                  y={top + 65}
+                  width={Math.max(3, Math.abs(sx(range.end) - sx(range.start)))}
+                  height={80}
+                  fill={chartColors.retained}
+                  opacity=".6"
+                >
+                  <title>
+                    {range.start}–{range.end} · {range.count}
+                  </title>
+                </rect>
+              </g>
+            ))}
+            {lineSeries.map((series, seriesIndex) =>
+              hidden.includes(series.id) ? null : scatter ? (
+                series.values.map((y, index) => (
+                  <circle
+                    key={index}
+                    cx={sx(xs[index]!)}
+                    cy={sy(y)}
+                    r={
+                      selected.includes(chart.sample_ids?.[index] ?? "")
+                        ? 6
+                        : 3.5
+                    }
+                    fill={
+                      selected.includes(chart.sample_ids?.[index] ?? "")
+                        ? chartColors.diagnostic
+                        : seriesColor(seriesIndex)
+                    }
+                    opacity=".8"
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`${chart.sample_ids?.[index]}: ${fmt(xs[index])}, ${fmt(y)}`}
+                    onFocus={() => setHover({ index, series: seriesIndex })}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onSelect([chart.sample_ids?.[index] ?? ""]);
+                      }
+                    }}
+                  />
+                ))
+              ) : chart.type === "distribution" ? (
+                series.values.map((y, index) => (
+                  <rect
+                    key={index}
+                    x={
+                      sx(xs[index]!) -
+                      (right - left) / Math.max(1, xs.length) / 2
+                    }
+                    y={sy(y)}
+                    width={Math.max(
+                      2,
+                      (right - left) / Math.max(1, xs.length) - 3,
+                    )}
+                    height={bottom - sy(y)}
+                    fill={seriesColor(seriesIndex)}
+                    opacity=".7"
+                  />
+                ))
+              ) : (
+                <polyline
+                  key={series.id}
+                  fill="none"
+                  stroke={seriesColor(seriesIndex)}
+                  strokeWidth="1.7"
+                  opacity=".8"
+                  points={curvePaths[seriesIndex]}
+                />
+              ),
+            )}
+            {brush && (
+              <rect
+                x={Math.min(brush.from[0], brush.to[0])}
+                y={Math.min(brush.from[1], brush.to[1])}
+                width={Math.abs(brush.from[0] - brush.to[0])}
+                height={Math.abs(brush.from[1] - brush.to[1])}
+                fill={chartColors.processed}
+                opacity=".15"
+                stroke={chartColors.processed}
+              />
+            )}
+          </g>
+        </svg>
+        {chart.series && (
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {chart.series.map((series, index) => (
+              <button
+                key={series.id}
+                type="button"
+                title={series.id}
+                aria-pressed={!hidden.includes(series.id)}
+                className={cn(
+                  "rounded border px-2 py-1 text-xs",
+                  hidden.includes(series.id) && "opacity-40",
+                )}
+                onClick={() =>
+                  setHidden((previous) =>
+                    previous.includes(series.id)
+                      ? previous.filter((id) => id !== series.id)
+                      : [...previous, series.id],
+                  )
+                }
+              >
+                <span style={{ color: seriesColor(index) }}>● </span>
+                {chart.type === "spectra"
+                  ? zh
+                    ? `样本 ${index + 1}`
+                    : `Sample ${index + 1}`
+                  : plotLabel(series.id, zh)}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-3 border-t pt-3 text-xs">
+          <label className="flex items-center gap-2">
+            {zh ? "区间起点" : "Range start"}
+            <input
+              aria-label={zh ? "区间起点" : "Range start"}
+              type="range"
+              min="0"
+              max="99"
+              value={zoom[0] * 100}
+              onChange={(event) =>
+                onZoom([
+                  Math.min(Number(event.target.value) / 100, zoom[1] - 0.01),
+                  zoom[1],
+                ])
               }
-            >
-              <span style={{ color: seriesColor(index) }}>● </span>
-              {chart.type === "spectra"
-                ? zh
-                  ? `样本 ${index + 1}`
-                  : `Sample ${index + 1}`
-                : plotLabel(series.id, zh)}
-            </button>
-          ))}
+              className="w-24"
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            {zh ? "区间终点" : "Range end"}
+            <input
+              aria-label={zh ? "区间终点" : "Range end"}
+              type="range"
+              min="1"
+              max="100"
+              value={zoom[1] * 100}
+              onChange={(event) =>
+                onZoom([
+                  zoom[0],
+                  Math.max(Number(event.target.value) / 100, zoom[0] + 0.01),
+                ])
+              }
+              className="w-24"
+            />
+          </label>
+          <button
+            type="button"
+            className="rounded border px-2 py-1"
+            onClick={() => {
+              onZoom([0, 1]);
+              onSelect([]);
+              setHidden([]);
+            }}
+          >
+            {zh ? "重置图表" : "Reset chart"}
+          </button>
         </div>
-      )}
-      <div className="flex flex-wrap items-center gap-3 border-t pt-3 text-xs">
-        <label className="flex items-center gap-2">
-          {zh ? "区间起点" : "Range start"}
-          <input
-            aria-label={zh ? "区间起点" : "Range start"}
-            type="range"
-            min="0"
-            max="99"
-            value={zoom[0] * 100}
-            onChange={(event) =>
-              onZoom([
-                Math.min(Number(event.target.value) / 100, zoom[1] - 0.01),
-                zoom[1],
-              ])
-            }
-            className="w-24"
-          />
-        </label>
-        <label className="flex items-center gap-2">
-          {zh ? "区间终点" : "Range end"}
-          <input
-            aria-label={zh ? "区间终点" : "Range end"}
-            type="range"
-            min="1"
-            max="100"
-            value={zoom[1] * 100}
-            onChange={(event) =>
-              onZoom([
-                zoom[0],
-                Math.max(Number(event.target.value) / 100, zoom[0] + 0.01),
-              ])
-            }
-            className="w-24"
-          />
-        </label>
-        <button
-          type="button"
-          className="rounded border px-2 py-1"
-          onClick={() => {
-            onZoom([0, 1]);
-            onSelect([]);
-            setHidden([]);
-          }}
-        >
-          {zh ? "重置图表" : "Reset chart"}
-        </button>
-      </div>
-      {scatter && (
-        <p className="mt-3 text-sm" aria-live="polite">
-          {zh ? "当前显示的所选点" : "Selected displayed points"}:{" "}
-          {summary.count}
-          {summary.mean !== null
-            ? ` · ${zh ? "纵轴均值" : "Mean y"}: ${fmt(summary.mean)} ${chart.y_unit ?? ""}`
-            : ""}
-        </p>
-      )}
-      <p className="text-muted-foreground mt-2 text-xs">
-        {chart.sampling.includes("histogram")
-          ? zh
-            ? "直方图统计来自全量样本。"
-            : "Histogram counts use all samples."
-          : chart.type === "wavelength"
+        {scatter && (
+          <p className="mt-3 text-sm" aria-live="polite">
+            {zh ? "当前显示的所选点" : "Selected displayed points"}:{" "}
+            {summary.count}
+            {summary.mean !== null
+              ? ` · ${zh ? "纵轴均值" : "Mean y"}: ${fmt(summary.mean)} ${chart.y_unit ?? ""}`
+              : ""}
+          </p>
+        )}
+        <p className="text-muted-foreground mt-2 text-xs">
+          {chart.sampling.includes("histogram")
             ? zh
-              ? "区间记录精确保留的变量；缩放不会改变实际选择。"
-              : "Intervals describe the exact retained variables; zoom does not change the selection."
-            : chart.n_returned < chart.n_total ||
-                (chart.axis_returned ?? 0) < (chart.axis_total ?? 0)
+              ? "直方图统计来自全量样本。"
+              : "Histogram counts use all samples."
+            : chart.type === "wavelength"
               ? zh
-                ? "已抽样显示，框选仅统计显示点；全量指标另列。"
-                : "Sampled display; selection summarizes displayed points. Full-population metrics are separate."
-              : zh
-                ? "本图覆盖所标范围的全部记录。"
-                : "All records in the labeled scope are shown."}
-      </p>
-      <details className="mt-3 text-xs">
-        <summary className="cursor-pointer">
-          {zh ? "数据表与抽样说明" : "Data table and sampling"}
-        </summary>
-        <p className="mt-2 break-all">{chart.sampling}</p>
-        <div className="mt-2 max-h-48 overflow-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr>
-                <th>{zh ? "标识" : "ID"}</th>
-                <th>{axisLabel(chart.x_label, zh)}</th>
-                <th>{axisLabel(chart.y_label, zh)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {xs.slice(0, 2000).map((x, index) => (
-                <tr key={index} className="border-b">
-                  <td className="py-1">
-                    {chart.sample_ids?.[index]?.slice(0, 8) ?? index + 1}
-                  </td>
-                  <td>{fmt(x)}</td>
-                  <td>{fmt(lineSeries[0]?.values[index])}</td>
+                ? "区间记录精确保留的变量；缩放不会改变实际选择。"
+                : "Intervals describe the exact retained variables; zoom does not change the selection."
+              : chart.n_returned < chart.n_total ||
+                  (chart.axis_returned ?? 0) < (chart.axis_total ?? 0)
+                ? zh
+                  ? "已抽样显示，框选仅统计显示点；全量指标另列。"
+                  : "Sampled display; selection summarizes displayed points. Full-population metrics are separate."
+                : zh
+                  ? "本图覆盖所标范围的全部记录。"
+                  : "All records in the labeled scope are shown."}
+        </p>
+        <details className="mt-3 text-xs">
+          <summary className="cursor-pointer">
+            {zh ? "数据表与抽样说明" : "Data table and sampling"}
+          </summary>
+          <p className="mt-2 break-all">{chart.sampling}</p>
+          <div className="mt-2 max-h-48 overflow-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr>
+                  <th>{zh ? "标识" : "ID"}</th>
+                  <th>{axisLabel(chart.x_label, zh)}</th>
+                  <th>{axisLabel(chart.y_label, zh)}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {chart.ranges?.map((range, index) => (
-            <p key={index}>
-              {range.start}–{range.end}: {range.count}
-            </p>
-          ))}
-        </div>
-      </details>
-    </section>
+              </thead>
+              <tbody>
+                {xs.slice(0, 2000).map((x, index) => (
+                  <tr key={index} className="border-b">
+                    <td className="py-1">
+                      {chart.sample_ids?.[index]?.slice(0, 8) ?? index + 1}
+                    </td>
+                    <td>{fmt(x)}</td>
+                    <td>{fmt(lineSeries[0]?.values[index])}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {chart.ranges?.map((range, index) => (
+              <p key={index}>
+                {range.start}–{range.end}: {range.count}
+              </p>
+            ))}
+          </div>
+        </details>
+      </section>
+      {!expanded && (
+        <Dialog open={enlarged} onOpenChange={setEnlarged}>
+          <DialogContent
+            aria-describedby={undefined}
+            className="max-h-[92dvh] overflow-y-auto sm:max-w-[min(1100px,94vw)]"
+          >
+            <DialogHeader>
+              <DialogTitle>
+                {plotLabel(chart.type, zh)} · {plotLabel(chart.scope, zh)}
+              </DialogTitle>
+            </DialogHeader>
+            {enlarged && (
+              <ProcessChartView
+                chart={chart}
+                zh={zh}
+                zoom={zoom}
+                onZoom={onZoom}
+                selected={selected}
+                onSelect={onSelect}
+                expanded
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }

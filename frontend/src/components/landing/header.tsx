@@ -1,4 +1,3 @@
-import { GitBranchIcon } from "lucide-react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
@@ -20,7 +19,7 @@ export async function Header({ className, homeURL, locale }: HeaderProps) {
   return (
     <header
       className={cn(
-        "container-md fixed top-0 right-0 left-0 z-20 mx-auto flex h-16 items-center justify-between backdrop-blur-xs",
+        "bg-background/95 fixed top-0 right-0 left-0 z-20 mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-6 backdrop-blur-sm",
         className,
       )}
     >
@@ -30,10 +29,10 @@ export async function Header({ className, homeURL, locale }: HeaderProps) {
           target={isExternalHome ? "_blank" : "_self"}
           rel={isExternalHome ? "noopener noreferrer" : undefined}
         >
-          <h1 className="font-serif text-xl">{BRAND.name}</h1>
+          <h1 className="text-xl font-semibold">{BRAND.name}</h1>
         </a>
       </div>
-      <nav className="mr-8 ml-auto flex items-center gap-8 text-sm font-medium">
+      <nav className="ml-auto flex items-center gap-4 text-sm font-medium">
         <Link
           href={`/${lang}/docs`}
           className="text-secondary-foreground hover:text-foreground transition-colors"
@@ -47,30 +46,11 @@ export async function Header({ className, homeURL, locale }: HeaderProps) {
           {t.home.blog}
         </Link>
       </nav>
-      <div className="relative">
-        <div
-          className="pointer-events-none absolute inset-0 z-0 h-full w-full rounded-full opacity-30 blur-2xl"
-          style={{
-            background: "linear-gradient(90deg, #ff80b5 0%, #9089fc 100%)",
-            filter: "blur(16px)",
-          }}
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          asChild
-          className="group relative z-10"
-        >
-          <a
-            href={BRAND.repositoryUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <GitBranchIcon className="size-4" />
-            ChemAgent 项目
-          </a>
-        </Button>
-      </div>
+      <Button asChild size="sm">
+        <Link href="/workspace">
+          {resolvedLocale === "zh-CN" ? "进入工作台" : "Open workspace"}
+        </Link>
+      </Button>
       <hr className="from-border/0 via-border/70 to-border/0 absolute top-16 right-0 left-0 z-10 m-0 h-px w-full border-none bg-linear-to-r" />
     </header>
   );

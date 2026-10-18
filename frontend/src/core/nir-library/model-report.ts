@@ -1,3 +1,5 @@
+import { methodLabel } from "@/core/nir/presentation";
+
 import type {
   ModelChart,
   ModelMetric,
@@ -189,4 +191,12 @@ const SIMPLE_METHODS: Record<string, [string, string]> = {
 
 export function simpleStep(method: string, zh: boolean): string | null {
   return SIMPLE_METHODS[method]?.[zh ? 0 : 1] ?? null;
+}
+
+/** Display only recorded metadata; never infer the scientific target from an ID. */
+export function modelDisplayName(model: NIRModelVersion, zh: boolean): string {
+  const target = model.report_summary?.target?.trim();
+  return target
+    ? [target, methodLabel(model.method, zh)].filter(Boolean).join(" · ")
+    : model.model_id;
 }

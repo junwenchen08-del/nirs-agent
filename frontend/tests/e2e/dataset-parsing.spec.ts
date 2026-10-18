@@ -139,7 +139,7 @@ test("MAT groups are selectable, previewed, saved and pinned when attached", asy
 }) => {
   const state = await setup(page);
   await page.goto("/workspace/nir/datasets");
-  await page.getByRole("button", { name: "解析设置", exact: true }).click();
+  await page.getByRole("button", { name: "确认数据结构", exact: true }).click();
   const pane = page.getByTestId("dataset-parsing-settings");
   await expect(
     pane.getByRole("button", { name: "保存解析设置", exact: true }),
@@ -179,7 +179,9 @@ test("MAT groups are selectable, previewed, saved and pinned when attached", asy
     .getByRole("dialog")
     .getByRole("button", { name: "Close", exact: true })
     .click();
-  await page.getByRole("button", { name: "挂载到对话", exact: true }).click();
+  await page
+    .getByRole("button", { name: "在新对话中使用", exact: true })
+    .click();
   await expect(page.getByTestId("mounted-dataset")).toContainText(
     "Melamine_Dataset.mat",
   );
@@ -191,7 +193,7 @@ test("CSV columns use Chinese controls and retain selection on failure", async (
 }) => {
   const state = await setup(page, "table");
   await page.goto("/workspace/nir/datasets");
-  await page.getByRole("button", { name: "解析设置", exact: true }).click();
+  await page.getByRole("button", { name: "确认数据结构", exact: true }).click();
   const pane = page.getByTestId("dataset-parsing-settings");
   await pane.getByLabel("光谱起始列", { exact: true }).fill("3");
   await pane.getByLabel("光谱结束列", { exact: true }).fill("5");

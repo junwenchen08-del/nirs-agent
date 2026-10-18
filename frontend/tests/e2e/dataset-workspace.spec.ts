@@ -164,7 +164,7 @@ test("card and details open a Chinese sample table with linked spectra", async (
   await setup(page);
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("/workspace/nir/datasets");
-  await page.getByRole("button", { name: "查看详情", exact: true }).click();
+  await page.getByRole("button", { name: "打开工作台", exact: true }).click();
   await expect(page).toHaveURL(/datasets\/ds_corn$/);
   await expect(page.getByRole("table", { name: "样本信息" })).toBeVisible();
   await expect(
@@ -196,7 +196,7 @@ test("individual roles and spectral range save and survive reload and attachment
   await page.getByRole("spinbutton", { name: "波段起始值" }).fill("1100");
   await page.getByRole("spinbutton", { name: "波段结束值" }).fill("1400");
   await expect(
-    page.getByRole("button", { name: "挂载到对话", exact: true }),
+    page.getByRole("button", { name: "在新对话中使用", exact: true }),
   ).toBeDisabled();
   await page.getByRole("button", { name: "保存修改", exact: true }).click();
   await expect(
@@ -218,7 +218,9 @@ test("individual roles and spectral range save and survive reload and attachment
   await expect(
     page.getByRole("spinbutton", { name: "波段起始值" }),
   ).toHaveValue("1100");
-  await page.getByRole("button", { name: "挂载到对话", exact: true }).click();
+  await page
+    .getByRole("button", { name: "在新对话中使用", exact: true })
+    .click();
   await expect(page.getByTestId("mounted-dataset")).toContainText("玉米水分");
   expect(state.attaches[0]!.profile_id).toBe("dsp_1");
 });
@@ -253,6 +255,7 @@ test("dragging a plot selects a range and invalid ranges cannot be saved", async
   await page.goto("/workspace/nir/datasets/ds_corn");
   const plot = page.getByRole("img", { name: "数据集光谱概览" });
   await expect(plot).toBeVisible();
+  await plot.scrollIntoViewIfNeeded();
   const box = (await plot.boundingBox())!;
   await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
   await page.mouse.down();
@@ -329,4 +332,31 @@ test("mobile table scrolling is contained and charts fit the viewport", async ({
       () => document.documentElement.scrollWidth <= innerWidth + 1,
     ),
   ).toBe(true);
+});
+
+test("workspace tabs retain sample drafts and block parsing changes until the draft is saved", async ({
+  page,
+}) => {
+  const state = await setup(page);
+  await page.goto("/workspace/nir/datasets/ds_corn");
+  await page
+    .getByRole("combobox", { name: "样本用途 1", exact: true })
+    .selectOption("2");
+  await page.getByRole("spinbutton", { name: "波段起始值" }).fill("1100");
+  await page.getByRole("tab", { name: "数据概览", exact: true }).click();
+  await expect(page.getByText("有未保存修改", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "解析设置", exact: true }).click();
+  await expect(
+    page.getByText("请先保存样本用途与波段修改，再更改解析设置。", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "样本与光谱", exact: true }).click();
+  await expect(
+    page.getByRole("combobox", { name: "样本用途 1", exact: true }),
+  ).toHaveValue("2");
+  await expect(
+    page.getByRole("spinbutton", { name: "波段起始值" }),
+  ).toHaveValue("1100");
+  expect(state.saves).toHaveLength(0);
 });

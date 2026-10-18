@@ -26,6 +26,11 @@ const FIRST_PAGE_LAST = `Conversation ${String(PAGE_SIZE).padStart(3, "0")}`;
 const SECOND_PAGE_FIRST = `Conversation ${String(PAGE_SIZE + 1).padStart(3, "0")}`;
 
 test.describe("Thread list infinite scroll (issue #3482)", () => {
+  test.beforeEach(async ({ context, baseURL }) => {
+    await context.addCookies([
+      { name: "locale", value: "en-US", url: baseURL! },
+    ]);
+  });
   test("chats list page loads more threads when scrolling to the bottom", async ({
     page,
   }) => {
@@ -51,27 +56,27 @@ test.describe("Thread list infinite scroll (issue #3482)", () => {
     });
   });
 
-  test("sidebar recent chats loads more threads when scrolling to the bottom", async ({
+  test("sidebar keeps eight recent chats and the full list still pages older history", async ({
     page,
   }) => {
     mockLangGraphAPI(page, { threads: THREADS });
-
     await page.goto("/workspace/chats/new");
-
-    // The 50th thread (end of first page) appears in the sidebar.
-    await expect(page.getByText(FIRST_PAGE_LAST).first()).toBeVisible({
-      timeout: 15_000,
-    });
-    // The 51st has not been fetched yet.
-    await expect(page.getByText(SECOND_PAGE_FIRST)).toHaveCount(0);
-
-    // Scroll the sidebar sentinel into view to trigger the next page.
-    const sentinel = page.getByTestId("recent-chat-list-sentinel");
-    await sentinel.scrollIntoViewIfNeeded();
-
-    await expect(page.getByText(SECOND_PAGE_FIRST).first()).toBeVisible({
-      timeout: 15_000,
-    });
+    const sidebar = page.locator('[data-sidebar="sidebar"]');
+    await expect(
+      sidebar.getByText("Conversation 008", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      sidebar.getByText("Conversation 009", { exact: true }),
+    ).toHaveCount(0);
+    await sidebar
+      .getByRole("link", { name: "Chats", exact: true })
+      .last()
+      .click();
+    await expect(page.locator("main").getByText(FIRST_PAGE_LAST)).toBeVisible();
+    await page.getByTestId("chats-page-sentinel").scrollIntoViewIfNeeded();
+    await expect(
+      page.locator("main").getByText(SECOND_PAGE_FIRST),
+    ).toBeVisible();
   });
 
   test("chats list page does NOT auto-paginate while a search filter is active", async ({

@@ -6,7 +6,6 @@ import {
   GraduationCapIcon,
   LightbulbIcon,
   PaperclipIcon,
-  PlusIcon,
   SparklesIcon,
   RocketIcon,
   TargetIcon,
@@ -22,7 +21,6 @@ import {
   useState,
   type ComponentProps,
   type KeyboardEvent,
-  type RefObject,
 } from "react";
 import { toast } from "sonner";
 
@@ -45,7 +43,6 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
-import { ConfettiButton } from "@/components/ui/confetti-button";
 import {
   Dialog,
   DialogContent,
@@ -57,7 +54,6 @@ import {
 import {
   DropdownMenuGroup,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { fetch } from "@/core/api/fetcher";
 import { getBackendBaseURL } from "@/core/config";
@@ -106,12 +102,6 @@ import {
   ModelSelectorTrigger,
 } from "../ai-elements/model-selector";
 import { Suggestion, Suggestions } from "../ai-elements/suggestion";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
 
 import {
   abortGoalRequest,
@@ -1956,7 +1946,18 @@ export function InputBox({
         searchParams.get("mode") !== "skill" &&
         !showSkillSuggestions && (
           <div className="flex items-center justify-center pt-2">
-            <SuggestionList textareaRef={textareaRef} />
+            <AnalysisShortcuts
+              datasetEnabled={enableDatasetCommand}
+              modelEnabled={enableModelCommand}
+              disabled={
+                Boolean(disabled) ||
+                datasetMounting ||
+                modelMounting ||
+                status === "streaming"
+              }
+              onDataset={() => setDatasetDialogOpen(true)}
+              onModel={() => setModelPickerOpen(true)}
+            />
           </div>
         )}
 
@@ -2017,71 +2018,60 @@ export function InputBox({
   );
 }
 
-function SuggestionList({
-  textareaRef,
+function AnalysisShortcuts({
+  datasetEnabled,
+  modelEnabled,
+  disabled,
+  onDataset,
+  onModel,
 }: {
-  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  datasetEnabled: boolean;
+  modelEnabled: boolean;
+  disabled: boolean;
+  onDataset: () => void;
+  onModel: () => void;
 }) {
-  const { t } = useI18n();
-  const { textInput } = usePromptInputController();
-  const handleSuggestionClick = useCallback(
-    (prompt: string | undefined) => {
-      if (!prompt) return;
-      textInput.setInput(prompt);
-      requestAnimationFrame(() => {
-        const textarea = textareaRef.current;
-        const placeholder = findSuggestionTemplatePlaceholder(prompt);
-        if (textarea && placeholder) {
-          textarea.focus();
-          textarea.setSelectionRange(placeholder.start, placeholder.end);
-        }
-      });
-    },
-    [textareaRef, textInput],
-  );
+  const { locale } = useI18n();
+  const attachments = usePromptInputAttachments();
+  const zh = locale === "zh-CN";
   return (
-    <Suggestions className="min-h-16 w-full max-w-full justify-center px-4 sm:w-fit sm:px-0">
-      <ConfettiButton
-        className="text-muted-foreground cursor-pointer rounded-full px-4 text-xs font-normal"
+    <div
+      className="flex flex-wrap justify-center gap-2"
+      aria-label={zh ? "开始分析" : "Start analysis"}
+    >
+      <Button
+        type="button"
         variant="outline"
         size="sm"
-        onClick={() => handleSuggestionClick(t.inputBox.surpriseMePrompt)}
+        disabled={disabled}
+        onClick={() => attachments.openFileDialog()}
       >
-        <SparklesIcon className="size-4" /> {t.inputBox.surpriseMe}
-      </ConfettiButton>
-      {t.inputBox.suggestions.map((suggestion) => (
-        <Suggestion
-          key={suggestion.suggestion}
-          icon={suggestion.icon}
-          suggestion={suggestion.suggestion}
-          onClick={() => handleSuggestionClick(suggestion.prompt)}
-        />
-      ))}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Suggestion icon={PlusIcon} suggestion={t.common.create} />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuGroup>
-            {t.inputBox.suggestionsCreate.map((suggestion, index) =>
-              "type" in suggestion && suggestion.type === "separator" ? (
-                <DropdownMenuSeparator key={index} />
-              ) : (
-                !("type" in suggestion) && (
-                  <DropdownMenuItem
-                    key={suggestion.suggestion}
-                    onClick={() => handleSuggestionClick(suggestion.prompt)}
-                  >
-                    {suggestion.icon && <suggestion.icon className="size-4" />}
-                    {suggestion.suggestion}
-                  </DropdownMenuItem>
-                )
-              ),
-            )}
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </Suggestions>
+        <PaperclipIcon className="size-4" />
+        {zh ? "上传数据" : "Upload data"}
+      </Button>
+      {datasetEnabled && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={onDataset}
+        >
+          {zh ? "选择数据集" : "Choose a dataset"}
+        </Button>
+      )}
+      {modelEnabled && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={onModel}
+        >
+          {zh ? "使用已有模型" : "Use a saved model"}
+        </Button>
+      )}
+    </div>
   );
 }
 

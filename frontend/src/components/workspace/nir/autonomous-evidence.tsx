@@ -22,7 +22,9 @@ export function Metrics({ value }: { value: unknown }) {
   const zh = locale === "zh-CN";
   const rows = metricRows(value);
   return rows.length ? (
-    <div className="grid gap-3 md:grid-cols-2">
+    <div
+      className={rows.length > 1 ? "grid gap-3 md:grid-cols-2" : "grid gap-3"}
+    >
       {rows.map((row) => (
         <div key={row.label} className="rounded border p-3 text-sm">
           <strong>
@@ -40,8 +42,15 @@ export function Metrics({ value }: { value: unknown }) {
             {String(factValue("scope", row.values.scope, zh))} ·{" "}
             {zh ? "样本数" : "n"}={fmt(row.values.n)}
           </span>
-          <div className="mt-2 flex gap-4">
-            {["RMSE", "R2", "RPD"].map((key) => (
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+            {[
+              "RMSE",
+              "R2",
+              "RPD",
+              ...["MAE", "bias"].filter(
+                (key) => typeof row.values[key] === "number",
+              ),
+            ].map((key) => (
               <span key={key}>
                 {key === "R2" ? "R²" : key}:{" "}
                 {key in row.values ? fmt(row.values[key]) : "—"}
@@ -85,6 +94,7 @@ export function EvidenceChart({
   ids,
   sampling = "persisted_evidence",
   nTotal,
+  linked,
 }: {
   x: number[];
   y: number[];
@@ -94,6 +104,12 @@ export function EvidenceChart({
   ids?: string[];
   sampling?: string;
   nTotal?: number;
+  linked?: {
+    zoom: [number, number];
+    onZoom: (range: [number, number]) => void;
+    selected: string[];
+    onSelect: (ids: string[]) => void;
+  };
 }) {
   const [zoom, setZoom] = useState<[number, number]>([0, 1]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -137,10 +153,10 @@ export function EvidenceChart({
     <ProcessChartView
       chart={chart}
       zh={zh}
-      zoom={zoom}
-      onZoom={setZoom}
-      selected={selected}
-      onSelect={setSelected}
+      zoom={linked?.zoom ?? zoom}
+      onZoom={linked?.onZoom ?? setZoom}
+      selected={linked?.selected ?? selected}
+      onSelect={linked?.onSelect ?? setSelected}
     />
   );
 }

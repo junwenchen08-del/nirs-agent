@@ -8,24 +8,20 @@ import {
   autonomousIntakeStatus,
   autonomousLifecycleFacts,
   autonomousTestStatusLabel,
-  experimentMarkers,
   isAutonomousTerminal,
-  parseFinalChart,
   parseRejectionPage,
   parseSummary,
   record,
   stopExplanation,
   text,
-  validationSeries,
-  type AutonomousSummary,
 } from "@/core/nir/autonomous";
 import { formatProcessNumber as fmt } from "@/core/nir/process-display";
 import { useProcessResource } from "@/core/nir/process-hooks";
 
-import { EvidenceChart, Metrics } from "./autonomous-evidence";
+import { Metrics } from "./autonomous-evidence";
+import { FinalCharts, Trends } from "./autonomous-final-views";
 import { AutonomousRoundExplorer } from "./autonomous-round-explorer";
 import { CalSpectraComparison } from "./cal-spectra";
-import { plotLabel } from "./process-chart";
 import { ProcessFacts } from "./process-facts";
 
 const stageLabels: Record<string, [string, string]> = {
@@ -81,146 +77,6 @@ const deliveryLabels: Record<string, [string, string]> = {
     "Delivery cancelled; evidence preserved",
   ],
 };
-
-function Trends({ summary, zh }: { summary: AutonomousSummary; zh: boolean }) {
-  const [metric, setMetric] = useState<"RMSE" | "R2">("RMSE");
-  const series = validationSeries(summary, metric);
-  return (
-    <section className="space-y-3 rounded-xl border p-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-medium">
-          {zh ? "实际实验的 Val 性能" : "Executed experiments: Val performance"}
-        </h3>
-        <select
-          aria-label={zh ? "验证趋势指标" : "Validation trend metric"}
-          value={metric}
-          onChange={(event) => setMetric(event.target.value as "RMSE" | "R2")}
-          className="bg-background rounded border p-1"
-        >
-          <option>RMSE</option>
-          <option>R2</option>
-        </select>
-      </div>
-      <p className="text-muted-foreground text-xs">
-        {zh
-          ? "仅包含同一封存会话中执行成功的实验；最低 Val RMSE 是信息标记，保留实验由 LLM 决定。"
-          : "Only successful same-session experiments. The best Val RMSE marker is informational; LLM chooses retention."}
-      </p>
-      {series.length ? (
-        <EvidenceChart
-          key={metric}
-          x={series.map((item) => item.round_index)}
-          y={series.map((item) => item.value)}
-          type="trend"
-          scope={
-            zh ? `验证集（Val）· ${plotLabel(metric, zh)}` : `Val ${metric}`
-          }
-          zh={zh}
-        />
-      ) : (
-        <p className="text-muted-foreground text-sm">
-          {zh
-            ? "暂无可比较的实际验证结果。"
-            : "No comparable executed validation evidence yet."}
-        </p>
-      )}
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr>
-              <th>{zh ? "轮次" : "Round"}</th>
-              <th>{zh ? "实际模型" : "Actual model"}</th>
-              <th>
-                {zh ? `验证集 · ${plotLabel(metric, zh)}` : `Val ${metric}`}
-              </th>
-              <th>{zh ? "标记" : "Markers"}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {series.map((item) => (
-              <tr key={item.experiment_id} className="border-t">
-                <td className="py-2">{item.round_index}</td>
-                <td>{item.method.toUpperCase()}</td>
-                <td>{fmt(item.value)}</td>
-                <td>
-                  {experimentMarkers(summary, item.experiment_id, zh).join(
-                    " · ",
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function FinalCharts({
-  threadId,
-  summary,
-  zh,
-}: {
-  threadId: string;
-  summary: AutonomousSummary;
-  zh: boolean;
-}) {
-  const query = useProcessResource<unknown>(
-    threadId,
-    summary.stage === "finalized" && summary.chart_scopes.includes("final_test")
-      ? `autonomous/${summary.session_id}/charts/final_test`
-      : null,
-  );
-  if (query.isError)
-    return (
-      <p role="alert">
-        {zh
-          ? "最终 Test 图表证据读取失败；重新打开图表可重试读取。"
-          : "Final Test plot read failed; reopen charts to retry the read."}
-      </p>
-    );
-  if (query.isPending && summary.chart_scopes.includes("final_test"))
-    return (
-      <p>
-        {zh
-          ? "正在读取最终 Test 图表证据…"
-          : "Reading final Test plot evidence…"}
-      </p>
-    );
-  const value = parseFinalChart(query.data, summary.stage);
-  if (!value)
-    return (
-      <p className="text-muted-foreground text-sm">
-        {zh
-          ? "最终 Test 图表尚未记录；封存期间不可读取。旧运行不补算图表。"
-          : "Final Test plots not recorded. Sealed Test cannot be read; old runs are not recomputed."}
-      </p>
-    );
-  return (
-    <div className="grid gap-3 xl:grid-cols-2">
-      <EvidenceChart
-        x={value.observed}
-        y={value.predicted}
-        type="prediction"
-        scope="final_test"
-        zh={zh}
-        ids={value.sample_ids}
-        sampling={value.sampling}
-        nTotal={value.n_total}
-      />
-      <EvidenceChart
-        x={value.observed}
-        y={value.residual}
-        type="residual"
-        scope="final_test"
-        zh={zh}
-        ids={value.sample_ids}
-        sampling={value.sampling}
-        nTotal={value.n_total}
-      />
-    </div>
-  );
-}
 
 function Rejections({
   threadId,
@@ -295,10 +151,12 @@ export function AutonomousProcess({
   threadId,
   sessionId,
   workflow,
+  compact = false,
 }: {
   threadId: string;
   sessionId?: string;
   workflow?: unknown;
+  compact?: boolean;
 }) {
   const { locale } = useI18n(),
     zh = locale === "zh-CN";
@@ -350,70 +208,145 @@ export function AutonomousProcess({
       </div>
     );
   }
-  const limits = record(summary.budget.limits);
   const deliveryStage = text(record(summary.automatic_delivery).status);
+  if (compact) {
+    const recent = summary.trends.slice(-4).reverse();
+    const latest = recent[0];
+    return (
+      <div
+        className="space-y-5 overflow-y-auto p-4"
+        data-testid="modeling-progress-summary"
+      >
+        <p role="status" className="font-medium">
+          {deliveryLabels[deliveryStage]?.[zh ? 0 : 1] ??
+            stageLabels[summary.stage]?.[zh ? 0 : 1] ??
+            summary.stage}
+        </p>
+        {latest && (
+          <>
+            <p className="text-sm">
+              {zh
+                ? `最近完成：第 ${latest.round_index ?? "—"} 轮`
+                : `Latest completed: round ${latest.round_index ?? "—"}`}{" "}
+              · {latest.method.toUpperCase()}
+            </p>
+            <Metrics
+              value={{
+                metrics: { val: record(latest.metrics).val },
+                stage: "searching",
+              }}
+            />
+          </>
+        )}
+        <h3 className="text-sm font-medium">
+          {zh ? "最近轮次" : "Recent rounds"}
+        </h3>
+        <div className="space-y-2">
+          {recent.map((row) => (
+            <a
+              key={row.decision_id}
+              href={`/workspace/nir/process/${encodeURIComponent(threadId)}?nir_session=${encodeURIComponent(summary.session_id)}&nir_decision=${encodeURIComponent(row.decision_id)}`}
+              className="hover:bg-accent flex flex-wrap justify-between gap-2 rounded-lg border p-3 text-sm"
+            >
+              <span>
+                {zh
+                  ? `第 ${row.round_index ?? "—"} 轮`
+                  : `Round ${row.round_index ?? "—"}`}{" "}
+                · {row.method.toUpperCase()}
+              </span>
+              <span>Val RMSE {fmt(record(record(row.metrics).val).RMSE)}</span>
+            </a>
+          ))}
+        </div>
+        {record(record(workflow).user_question).status === "waiting" &&
+          record(workflow).search_session_id === summary.session_id && (
+            <div role="status" className="bg-accent rounded-lg p-3 text-sm">
+              <strong>{zh ? "等待你的回复" : "Waiting for your reply"}</strong>
+              <p className="mt-2 whitespace-pre-wrap">
+                {text(record(record(workflow).user_question).question, 4000)}
+              </p>
+            </div>
+          )}
+        <p className="text-muted-foreground text-xs">
+          {stopExplanation(summary, zh)}
+        </p>
+        <p className="text-muted-foreground text-xs">
+          {zh
+            ? "完整过程保留方法、参数、各范围图表和 LLM 下一步建议。"
+            : "The full process includes methods, parameters, scoped plots and original LLM advice."}
+        </p>
+      </div>
+    );
+  }
+  const limits = record(summary.budget.limits);
   return (
     <div
-      className="min-h-0 w-full flex-1 space-y-4 overflow-y-auto p-4"
+      className="mx-auto min-h-0 w-full max-w-[1600px] flex-1 space-y-4 overflow-y-auto p-4 lg:p-6"
       data-testid="autonomous-process"
     >
       <section className="rounded-xl border p-4">
         <h2 className="text-lg font-semibold">
-          {zh ? "LLM 自主建模" : "LLM autonomous modeling"}
+          {zh ? "建模全过程" : "LLM autonomous modeling"}
         </h2>
         <p className="mt-1 text-sm" role="status">
           {deliveryLabels[deliveryStage]?.[zh ? 0 : 1] ??
             stageLabels[summary.stage]?.[zh ? 0 : 1] ??
             summary.stage}
         </p>
-        <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          {[
-            [
-              zh ? "Cal/Val 搜索" : "Cal/Val search",
-              `${fmt(summary.budget.experiments_used)}/${fmt(limits.max_experiments)}`,
-            ],
-            [
-              zh ? "模型拟合" : "Model fits",
-              `${fmt(summary.budget.fits_used)}/${fmt(limits.max_fits)}`,
-            ],
-            [
-              zh ? "高层决策" : "Decisions",
-              `${fmt(summary.budget.actions_used)}/${fmt(limits.max_decisions)}`,
-            ],
-            ["Test", autonomousTestStatusLabel(summary, zh)],
-            [
-              zh ? "模型调用" : "Model calls",
-              fmt(
-                Number(record(record(summary.budget.llm).search).calls ?? 0) +
-                  Number(
-                    record(record(summary.budget.llm).finalization).calls ?? 0,
-                  ),
-              ),
-            ],
-            [
-              zh ? "冻结" : "Freeze",
-              summary.freeze
-                ? zh
-                  ? "已冻结"
-                  : "Frozen"
-                : zh
-                  ? "尚未冻结"
-                  : "Pending",
-            ],
-            [
-              zh ? "交付" : "Delivery",
-              summary.export_status === "succeeded"
-                ? zh
-                  ? "已发布"
-                  : "Published"
-                : summary.export_status || "—",
-            ],
-          ].map(([label, value]) => (
-            <span key={label} className="rounded border px-2 py-1">
-              {label}: {value}
-            </span>
-          ))}
-        </div>
+        <details className="mt-3 text-xs">
+          <summary className="text-muted-foreground cursor-pointer">
+            {zh ? "资源用量与执行状态" : "Usage and execution status"}
+          </summary>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            {[
+              [
+                zh ? "Cal/Val 搜索" : "Cal/Val search",
+                `${fmt(summary.budget.experiments_used)}/${fmt(limits.max_experiments)}`,
+              ],
+              [
+                zh ? "模型拟合" : "Model fits",
+                `${fmt(summary.budget.fits_used)}/${fmt(limits.max_fits)}`,
+              ],
+              [
+                zh ? "高层决策" : "Decisions",
+                `${fmt(summary.budget.actions_used)}/${fmt(limits.max_decisions)}`,
+              ],
+              ["Test", autonomousTestStatusLabel(summary, zh)],
+              [
+                zh ? "模型调用" : "Model calls",
+                fmt(
+                  Number(record(record(summary.budget.llm).search).calls ?? 0) +
+                    Number(
+                      record(record(summary.budget.llm).finalization).calls ??
+                        0,
+                    ),
+                ),
+              ],
+              [
+                zh ? "冻结" : "Freeze",
+                summary.freeze
+                  ? zh
+                    ? "已冻结"
+                    : "Frozen"
+                  : zh
+                    ? "尚未冻结"
+                    : "Pending",
+              ],
+              [
+                zh ? "交付" : "Delivery",
+                summary.export_status === "succeeded"
+                  ? zh
+                    ? "已发布"
+                    : "Published"
+                  : summary.export_status || "—",
+              ],
+            ].map(([label, value]) => (
+              <span key={label} className="rounded border px-2 py-1">
+                {label}: {value}
+              </span>
+            ))}
+          </div>
+        </details>
         <p className="mt-3 text-sm">{stopExplanation(summary, zh)}</p>
         {(summary.stop_source || summary.terminal_failure_source) && (
           <details className="mt-2 text-xs">

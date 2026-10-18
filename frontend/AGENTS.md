@@ -19,13 +19,13 @@ storage/protocol keys intact. Browser anchors: chemagent-branding.spec.ts and
 docs-localized-links.spec.ts; public-content guard: core/branding.test.ts.
 
 The autonomous process now uses autonomous-round-explorer/detail/graph.tsx and
-round-diagnostics.tsx. Default navigation is a round timeline; the lazy graph
+round-diagnostics.tsx. Default navigation is the full lifecycle canvas with equal-height panes and Overview/Parameters/Diagnostics/LLM advice tabs; the timeline remains available. The lazy relation graph
 draws only recorded feedback and retention links, and fits the selected round
 with its recorded neighbours instead of the whole history so a long chain stays
 readable (the canvas controls still show every node). The infinite history query
 uses existing owner/thread-scoped process keys and 20-record pages. Manual
 selection stays pinned during updates, including terminal summary revisions;
-URL session/decision/layout references restore only within the matching session.
+URL session/decision/lifecycle-node/layout/detail-tab references restore only within the matching session.
 Round charts bind session, decision, experiment and comparison identity, share
 sample selection/zoom, and allow only Cal/Cal CV/Val. Missing old points stay
 missing. Actual configuration is distinct from accepted plans. Next decisions
@@ -447,3 +447,17 @@ be edited. Data overview retains legacy parsing and usage history. Composer
 attachment pins the latest saved Profile in its idempotency key and uses actual
 attachment size, while run creation still requires manual submission. Existing
 Dataset/Model commands stay available. Browser anchor: dataset-workspace.spec.ts.
+
+
+The v1.4 UI implementation uses core/nir/process-lifecycle.ts to project only
+recorded lifecycle facts; finalization never implies intake receipts, approval or
+registration. Input/parse gaps remain explicit. ProcessChartView enlarges with
+unique SVG clip IDs and linked selection. Chat shows a compact progress summary;
+the full route preserves the complete explorer. DatasetDetailsPanel is shared by
+the library and workspace; workspace metadata panels remain mounted across tab
+changes to retain parsing drafts, while dirty sample/range edits block parsing
+saves. Model detail tabs keep scoped results and pinned previews. New-chat business
+shortcuts call the existing attachment pickers without submitting a run. See
+docs/chemagent-ui-implementation.md, process-lifecycle.test.ts, and the process,
+dataset/model and shortcut browser regressions. Product dependencies and backend
+contracts are unchanged.

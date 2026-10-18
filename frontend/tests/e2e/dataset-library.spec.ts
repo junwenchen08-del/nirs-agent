@@ -141,7 +141,9 @@ test("local upload appears in the library and can be mounted into a new chat", a
     .getByTestId("nir-dataset-card")
     .filter({ hasText: "本地玉米水分" });
   await expect(card).toBeVisible();
-  await card.getByRole("button", { name: "挂载到对话", exact: true }).click();
+  await card
+    .getByRole("button", { name: "在新对话中使用", exact: true })
+    .click();
   await expect(page.getByTestId("mounted-dataset")).toContainText(
     "本地玉米水分",
   );
@@ -156,7 +158,7 @@ test("Chinese dataset summary, classification filters and charts replace storage
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.goto("/workspace/nir/datasets");
   await expect(page.getByTestId("nir-dataset-card")).toHaveCount(3);
-  await expect(page.getByTestId("dataset-summary")).toContainText("数据集数量");
+  await expect(page.getByTestId("dataset-summary")).toContainText("个数据集");
   for (const label of ["个人空间", "长期模型", "长期数据集"])
     await expect(page.getByText(label, { exact: true })).toHaveCount(0);
   await expect(
@@ -170,7 +172,8 @@ test("Chinese dataset summary, classification filters and charts replace storage
     });
   await page.getByRole("tab", { name: /^分类识别/ }).click();
   await expect(page.getByTestId("nir-dataset-card")).toHaveCount(1);
-  await page.getByRole("button", { name: "数据概览", exact: true }).click();
+  await page.getByRole("button", { name: /更多操作/ }).click();
+  await page.getByRole("menuitem", { name: "数据概览与解析版本" }).click();
   const detail = page.getByRole("dialog", { name: "小麦品种", exact: true });
   await expect(
     detail.getByRole("img", { name: "平均光谱与变化范围图" }),
@@ -197,7 +200,7 @@ test("attach creates a new chat with a file and starts no run before manual subm
   await page
     .getByTestId("nir-dataset-card")
     .filter({ hasText: "玉米水分" })
-    .getByRole("button", { name: "挂载到对话", exact: true })
+    .getByRole("button", { name: "在新对话中使用", exact: true })
     .click();
   await expect(page).toHaveURL(/\/workspace\/chats\/new/);
   await expect(page.getByTestId("mounted-dataset")).toContainText("玉米水分");
@@ -238,7 +241,8 @@ test("rename still saves and mobile overview charts fit", async ({ page }) => {
   const card = page
     .getByTestId("nir-dataset-card")
     .filter({ hasText: "玉米水分" });
-  await card.getByRole("button", { name: "重命名", exact: true }).click();
+  await card.getByRole("button", { name: /更多操作/ }).click();
+  await page.getByRole("menuitem", { name: "重命名", exact: true }).click();
   const rename = page.getByRole("dialog", { name: "重命名", exact: true });
   await rename.getByRole("textbox").fill("玉米含水量");
   await rename.getByRole("button", { name: "保存", exact: true }).click();
@@ -246,7 +250,8 @@ test("rename still saves and mobile overview charts fit", async ({ page }) => {
     .getByTestId("nir-dataset-card")
     .filter({ hasText: "玉米含水量" });
   await expect(renamed).toBeVisible();
-  await renamed.getByRole("button", { name: "数据概览", exact: true }).click();
+  await renamed.getByRole("button", { name: /更多操作/ }).click();
+  await page.getByRole("menuitem", { name: "数据概览与解析版本" }).click();
   const detail = page.getByRole("dialog", { name: "玉米含水量", exact: true });
   await expect(
     detail.getByRole("img", { name: "平均光谱与变化范围图" }),
@@ -275,10 +280,11 @@ test("preview failure keeps the dataset usable and can refresh", async ({
   await page
     .getByTestId("nir-dataset-card")
     .filter({ hasText: "玉米水分" })
-    .getByRole("button", { name: "数据概览", exact: true })
+    .getByRole("button", { name: /更多操作/ })
     .click();
+  await page.getByRole("menuitem", { name: "数据概览与解析版本" }).click();
   const detail = page.getByRole("dialog", { name: "玉米水分", exact: true });
-  await expect(detail).toContainText("暂时无法读取数据预览");
+  await expect(detail).toContainText("数据预览读取失败");
   failed = false;
   await detail.getByRole("button", { name: "刷新", exact: true }).click();
   await expect(
@@ -297,10 +303,11 @@ test("preview identity mismatch is not displayed", async ({ page }) => {
   await page
     .getByTestId("nir-dataset-card")
     .filter({ hasText: "玉米水分" })
-    .getByRole("button", { name: "数据概览", exact: true })
+    .getByRole("button", { name: /更多操作/ })
     .click();
+  await page.getByRole("menuitem", { name: "数据概览与解析版本" }).click();
   const detail = page.getByRole("dialog", { name: "玉米水分", exact: true });
-  await expect(detail).toContainText("暂时无法读取数据预览");
+  await expect(detail).toContainText("数据预览读取失败");
   await expect(detail.getByRole("img")).toHaveCount(0);
 });
 

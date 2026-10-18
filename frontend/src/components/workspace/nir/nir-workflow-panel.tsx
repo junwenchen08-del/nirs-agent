@@ -60,13 +60,11 @@ export function NIRWorkflowPanel({
           />
         </button>
       </SheetTrigger>
-      <SheetContent className="w-[min(1040px,92vw)] max-w-none gap-0 sm:max-w-[1040px]">
+      <SheetContent className="w-[min(480px,100vw)] max-w-none gap-0 sm:max-w-[480px]">
         <SheetHeader className="border-b pr-12">
           <SheetTitle className="flex items-center gap-2">
             <FlaskConicalIcon className="size-5" />
-            {locale === "zh-CN"
-              ? "ChemAgent 建模过程解释面板"
-              : "ChemAgent modeling process"}
+            {locale === "zh-CN" ? "建模进展" : "ChemAgent modeling process"}
           </SheetTitle>
           <SheetDescription>{t.nirWorkflow.description}</SheetDescription>
           {threadId &&
@@ -88,6 +86,7 @@ export function NIRWorkflowPanel({
             threadId={threadId}
             sessionId={text(record(workflow).search_session_id) || undefined}
             workflow={workflow}
+            compact
           />
         ) : (
           <NIRProcessContent

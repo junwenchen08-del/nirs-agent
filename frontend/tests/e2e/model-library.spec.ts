@@ -204,18 +204,29 @@ test("Chinese model cards open data, methods and scientific charts, then mount i
         "-cards.png",
       ),
     });
-  await page.getByRole("link", { name: model.model_id, exact: true }).click();
+  await page
+    .getByRole("link", { name: "水分 · 偏最小二乘回归（PLS）", exact: true })
+    .click();
   await expect(
-    page.getByRole("heading", { name: model.model_id, exact: true }),
+    page.getByRole("heading", {
+      name: "水分 · 偏最小二乘回归（PLS）",
+      exact: true,
+    }),
   ).toBeVisible();
-  await expect(page.getByTestId("model-prediction-figure")).toHaveCount(2);
+  await expect(page.getByTestId("model-prediction-figure")).toHaveCount(1);
+  await page.getByLabel("评价范围").selectOption("validation");
+  await expect(page.getByTestId("model-prediction-figure")).toHaveCount(1);
+  await page.getByRole("tab", { name: "处理方法", exact: true }).click();
   await expect(page.getByTestId("model-spectra-figure")).toHaveCount(2);
+  await page.getByRole("tab", { name: "训练数据", exact: true }).click();
   await expect(page.getByTestId("dataset-preview")).toBeVisible();
+  await page.getByRole("tab", { name: "处理方法", exact: true }).click();
   await expect(page.getByText("统一每条光谱的数值尺度（SNV）")).toBeVisible();
   expect(state.profiles).toEqual([model.source_profile_id]);
   expect(state.usage).toBe(0);
   if (process.env.MODEL_LIBRARY_QA_SCREENSHOT) {
     await page.screenshot({ path: process.env.MODEL_LIBRARY_QA_SCREENSHOT });
+    await page.getByRole("tab", { name: "预测效果", exact: true }).click();
     await page
       .getByTestId("model-prediction-figure")
       .first()
@@ -226,6 +237,7 @@ test("Chinese model cards open data, methods and scientific charts, then mount i
         "-predictions.png",
       ),
     });
+    await page.getByRole("tab", { name: "处理方法", exact: true }).click();
     await page
       .getByTestId("model-spectra-figure")
       .first()
@@ -237,7 +249,7 @@ test("Chinese model cards open data, methods and scientific charts, then mount i
       ),
     });
   }
-  await page.getByRole("link", { name: "挂载到新对话", exact: true }).click();
+  await page.getByRole("link", { name: "在新对话中使用", exact: true }).click();
   await expect(page.getByTestId("mounted-model")).toContainText(model.model_id);
   expect(state.attachments).toBe(1);
   expect(state.runs).toBe(0);
@@ -270,10 +282,11 @@ test("unavailable model report and dataset preview retry independently", async (
     }),
   );
   await page.getByRole("button", { name: "重新加载", exact: true }).click();
+  await page.getByRole("tab", { name: "训练数据", exact: true }).click();
   await expect(
     page.getByRole("alert").filter({ hasText: "数据特征暂时无法读取" }),
   ).toBeVisible();
-  await expect(page.getByTestId("model-prediction-figure")).toHaveCount(2);
+  await expect(page.getByTestId("model-prediction-figure")).toHaveCount(1);
   await page.route("**/api/nir/datasets/ds_corn/preview?*", (route) =>
     route.fulfill({
       json: { ...previewOf(dataset), profile_id: model.source_profile_id },
@@ -301,6 +314,7 @@ test("missing old charts stay absent, and mounting failure can retry without sen
     page.getByText("当时未保存逐样本的预测结果", { exact: false }),
   ).toBeVisible();
   await expect(page.getByTestId("model-prediction-figure")).toHaveCount(0);
+  await page.getByRole("tab", { name: "训练数据", exact: true }).click();
   await expect(
     page.getByText("这个模型未记录可核实的数据集关联。", { exact: false }),
   ).toBeVisible();
@@ -311,7 +325,7 @@ test("missing old charts stay absent, and mounting failure can retry without sen
   await page.route(`**${modelUrl}/versions/v2/attach`, (route) =>
     fail ? route.fulfill({ status: 503, json: {} }) : route.fallback(),
   );
-  await page.getByRole("link", { name: "挂载到新对话", exact: true }).click();
+  await page.getByRole("link", { name: "在新对话中使用", exact: true }).click();
   await expect(
     page.getByRole("alert").filter({ hasText: "模型未能挂载" }),
   ).toBeVisible();

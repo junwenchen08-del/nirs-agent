@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SectionTabs } from "@/components/workspace/section-tabs";
 import { useI18n } from "@/core/i18n/hooks";
 import { chartColors, seriesColor } from "@/core/nir/chart-theme";
 import {
@@ -16,11 +17,13 @@ import {
   getDatasetWorkspaceSpectra,
   saveDatasetWorkspace,
   useNirLibraryEnabled,
+  type NIRDataset,
   type DatasetWorkspace,
   type DatasetWorkspaceRows,
   type DatasetWorkspaceSpectra,
 } from "@/core/nir-library";
 
+import { DatasetDetailsPanel } from "./dataset-details-panel";
 import { FeatureDisabled } from "./dataset-library";
 
 const selectClass =
@@ -56,6 +59,18 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
   const { enabled, isLoading: featureLoading } = useNirLibraryEnabled();
   const [workspace, setWorkspace] = useState<DatasetWorkspace | null>(null);
   const [name, setName] = useState("");
+  const [dataset, setDataset] = useState<NIRDataset | null>(null);
+  const [section, setSection] = useState<"samples" | "overview" | "parsing">(
+    "samples",
+  );
+  const [metadataOpened, setMetadataOpened] = useState(false);
+  const [metadataSection, setMetadataSection] = useState<
+    "overview" | "parsing"
+  >("overview");
+  useEffect(() => {
+    setSection("samples");
+    setMetadataOpened(false);
+  }, [datasetId]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -105,11 +120,18 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
     setReady(false);
     setError(null);
     setWorkspace(null);
+    setDataset(null);
     setRows(null);
     setOverview(null);
     setSelectedSpectra(null);
     Promise.all([
-      getDataset(datasetId, controller.signal),
+      getDataset(datasetId, controller.signal).then((data) => {
+        if (!controller.signal.aborted && data.id === datasetId) {
+          setDataset(data);
+          setName(data.name);
+        }
+        return data;
+      }),
       getDatasetWorkspace(datasetId, controller.signal),
     ])
       .then(([dataset, data]) => {
@@ -120,6 +142,7 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
         )
           throw new Error("数据校验失败，请重新载入。");
         setName(dataset.name);
+        setDataset(dataset);
         setWorkspace(data);
         setUsages(data.usages.slice());
         setBand([String(data.range[0]), String(data.range[1])]);
@@ -312,6 +335,15 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
                 "Assign sample roles and select wavelengths. Values are read-only.",
               )}
             </p>
+            {workspace && (
+              <p className="text-primary mt-1 text-xs" role="status">
+                {dirty
+                  ? text("有未保存修改", "Unsaved changes")
+                  : workspace.saved
+                    ? `${text("已保存", "Saved")} · ${text("版本", "Version")} ${workspace.version}`
+                    : text("尚未保存设置", "Settings not saved")}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -329,6 +361,7 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
             disabled={
               !workspace || !validRange || saving || (!dirty && workspace.saved)
             }
+            variant={dirty || !workspace?.saved ? "default" : "outline"}
             onClick={() => void save()}
           >
             <SaveIcon />
@@ -337,7 +370,10 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
               : text("保存修改", "Save changes")}
           </Button>
           <Button
-            variant="outline"
+            variant={!dirty && workspace?.saved ? "default" : "outline"}
+            title={
+              dirty ? text("请先保存修改", "Save changes first") : undefined
+            }
             disabled={!workspace?.saved || dirty || saving}
             onClick={() =>
               router.push(
@@ -346,380 +382,436 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
             }
           >
             <LinkIcon />
-            {text("挂载到对话", "Attach to chat")}
+            {text("在新对话中使用", "Use in a new chat")}
           </Button>
         </div>
       </div>
-      {error ? (
-        <div role="alert" className="rounded-lg border p-5 text-sm">
-          {error}
-        </div>
-      ) : !ready || !workspace ? (
-        <p>{text("正在读取数据…", "Loading data…")}</p>
-      ) : (
-        <>
-          <div className="bg-card flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border px-4 py-3 text-sm">
-            <strong>
-              {text("共", "Total")} {workspace.sample_count}{" "}
-              {text("个样本", "samples")}
-            </strong>
-            {labels.map((label, i) => (
-              <span key={label} style={{ color: seriesColor(i) }}>
-                {label} {counts[i]}
-              </span>
-            ))}
-            <span className="ml-auto">
-              {dirty
-                ? text("有未保存修改", "Unsaved changes")
-                : workspace.saved
-                  ? `${text("已保存", "Saved")} · ${text("版本", "Version")} ${workspace.version}`
-                  : text("尚未保存设置", "Settings not saved")}
-            </span>
+      <SectionTabs
+        id="dataset-sections"
+        label={text("数据集工作台内容", "Dataset workspace sections")}
+        value={section}
+        onChange={(value) => {
+          setSection(value);
+          if (value !== "samples") {
+            setMetadataOpened(true);
+            setMetadataSection(value);
+          }
+        }}
+        items={[
+          { key: "samples", label: text("样本与光谱", "Samples and spectra") },
+          { key: "overview", label: text("数据概览", "Overview") },
+          { key: "parsing", label: text("解析设置", "Parsing settings") },
+        ]}
+      />
+      {dataset && metadataOpened && (
+        <section
+          hidden={section === "samples"}
+          id={`dataset-sections-panel-${metadataSection}`}
+          role="tabpanel"
+          aria-labelledby={`dataset-sections-${metadataSection}`}
+          tabIndex={0}
+        >
+          <DatasetDetailsPanel
+            key={dataset.id}
+            dataset={dataset}
+            section={metadataSection}
+            disabled={dirty || saving}
+            onSaved={() => setReload((v) => v + 1)}
+          />
+        </section>
+      )}
+      <div
+        hidden={section !== "samples"}
+        id="dataset-sections-panel-samples"
+        role="tabpanel"
+        aria-labelledby="dataset-sections-samples"
+        tabIndex={0}
+      >
+        {error ? (
+          <div role="alert" className="rounded-lg border p-5 text-sm">
+            {error}
           </div>
-          <div className="bg-card flex flex-wrap items-center gap-3 rounded-lg border p-3">
-            <span className="text-sm font-medium">
-              {text("保留光谱范围", "Retained spectral range")}
-            </span>
-            <label className="flex items-center gap-2 text-sm">
-              {text("起始", "Start")}
-              <Input
-                className="w-28"
-                type="number"
-                step="any"
-                aria-label={text("波段起始值", "Range start")}
-                disabled={saving}
-                value={band[0]}
-                onChange={(e) => setBand([e.target.value, band[1]])}
-              />
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              {text("结束", "End")}
-              <Input
-                className="w-28"
-                type="number"
-                step="any"
-                aria-label={text("波段结束值", "Range end")}
-                disabled={saving}
-                value={band[1]}
-                onChange={(e) => setBand([band[0], e.target.value])}
-              />
-            </label>
-            <Button
-              variant="outline"
-              disabled={saving}
-              onClick={() =>
-                setBand([
-                  String(Math.min(...workspace.axis)),
-                  String(Math.max(...workspace.axis)),
-                ])
-              }
-            >
-              {text("全部波段", "Full range")}
-            </Button>
-            <span className="text-muted-foreground text-sm">
-              {text("保留", "Keeping")} {selectedFeatures} /{" "}
-              {workspace.feature_count}{" "}
-              {text(
-                "个光谱变量；也可在图上拖动选择",
-                "variables; drag on either plot to select",
-              )}
-            </span>
-            {!validRange && (
-              <p role="alert" className="text-destructive text-sm">
-                {text(
-                  "请输入文件坐标内的有效范围，至少保留一个变量。",
-                  "Select a valid range containing at least one variable.",
-                )}
-              </p>
-            )}
-          </div>
-          <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,1fr)]">
-            <section
-              className="bg-card min-w-0 overflow-hidden rounded-lg border"
-              aria-label={text("样本表格", "Samples table")}
-            >
-              <div className="flex flex-wrap items-center gap-2 border-b p-3">
-                <Input
-                  className="w-40"
-                  placeholder={text("搜索样本名称", "Search samples")}
-                  aria-label={text("搜索样本名称", "Search samples")}
-                  value={query}
-                  disabled={saving}
-                  onChange={(e) => {
-                    setQuery(e.target.value);
-                    setOffset(0);
-                  }}
-                />
-                <span className="text-sm">
-                  {text("选中", "Selected")} {selection.length}
+        ) : !ready || !workspace ? (
+          <p>{text("正在读取数据…", "Loading data…")}</p>
+        ) : (
+          <>
+            <div className="bg-card flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border px-4 py-3 text-sm">
+              <strong>
+                {text("共", "Total")} {workspace.sample_count}{" "}
+                {text("个样本", "samples")}
+              </strong>
+              {labels.map((label, i) => (
+                <span key={label} style={{ color: seriesColor(i) }}>
+                  {label} {counts[i]}
                 </span>
-                <select
-                  className={selectClass}
-                  aria-label={text("批量样本用途", "Bulk sample role")}
-                  disabled={saving}
-                  value={batchUsage}
-                  onChange={(e) => setBatchUsage(Number(e.target.value))}
-                >
-                  {labels.map((label, i) => (
-                    <option key={label} value={i}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!selection.length || saving}
-                  onClick={() => changeUsage(selection, batchUsage)}
-                >
-                  {text("应用到选中样本", "Apply to selection")}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={saving}
-                  onClick={() =>
-                    setSelection(
-                      Array.from(
-                        { length: workspace.sample_count },
-                        (_, i) => i,
-                      ),
-                    )
-                  }
-                >
-                  {text("选择全部样本", "Select all samples")}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setSelection([])}
-                >
-                  {text("清除选择", "Clear selection")}
-                </Button>
-              </div>
-              <div
-                className="max-h-[520px] min-h-60 overflow-auto"
-                data-testid="sample-table-scroll"
+              ))}
+              <span className="ml-auto">
+                {text("光谱变量", "Spectral variables")}{" "}
+                {workspace.feature_count}
+              </span>
+            </div>
+            <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,1fr)]">
+              <section
+                className="bg-card min-w-0 overflow-hidden rounded-lg border"
+                aria-label={text("样本表格", "Samples table")}
               >
-                {rowError ? (
-                  <p role="alert" className="p-4 text-sm">
-                    {rowError}
-                  </p>
-                ) : !rows ? (
-                  <p className="p-4 text-sm">
-                    {text("正在读取样本…", "Loading samples…")}
-                  </p>
-                ) : (
-                  <table
-                    className="w-full border-collapse text-sm whitespace-nowrap"
-                    aria-label={text("样本信息", "Sample information")}
+                <div className="flex flex-wrap items-center gap-2 border-b p-3">
+                  <Input
+                    className="w-40"
+                    placeholder={text("搜索样本名称", "Search samples")}
+                    aria-label={text("搜索样本名称", "Search samples")}
+                    value={query}
+                    disabled={saving}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      setOffset(0);
+                    }}
+                  />
+                  <span className="text-sm">
+                    {text("选中", "Selected")} {selection.length}
+                  </span>
+                  <div
+                    hidden={!selection.length}
+                    className="flex flex-wrap gap-2"
                   >
-                    <thead className="bg-muted sticky top-0 z-10">
-                      <tr>
-                        <th className="border-r border-b px-3 py-2">
-                          <input
-                            type="checkbox"
-                            aria-label={text(
-                              "选择本页样本",
-                              "Select this page",
-                            )}
-                            checked={
-                              rows.rows.length > 0 &&
-                              rows.rows.every((r) =>
-                                selection.includes(r.index),
-                              )
-                            }
-                            onChange={(e) =>
-                              setSelection((current) =>
-                                e.target.checked
-                                  ? [
-                                      ...new Set([
-                                        ...current,
-                                        ...rows.rows.map((r) => r.index),
-                                      ]),
-                                    ]
-                                  : current.filter(
-                                      (i) =>
-                                        !rows.rows.some((r) => r.index === i),
-                                    ),
-                              )
-                            }
-                          />
-                        </th>
-                        {[
-                          text("序号", "No."),
-                          text("样本名称", "Sample"),
-                          text("样本用途", "Role"),
-                          ...workspace.fields,
-                        ].map((label, i) => (
-                          <th
-                            key={`${i}-${label}`}
-                            className="border-r border-b px-3 py-2 text-left font-medium"
-                          >
-                            {label}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.rows.map((row) => (
-                        <tr
-                          key={row.index}
-                          className={
-                            selection.includes(row.index)
-                              ? "bg-blue-500/10"
-                              : "even:bg-muted/30"
-                          }
-                        >
-                          <td className="border-r border-b px-3 py-1.5">
+                    <select
+                      className={selectClass}
+                      aria-label={text("批量样本用途", "Bulk sample role")}
+                      disabled={saving}
+                      value={batchUsage}
+                      onChange={(e) => setBatchUsage(Number(e.target.value))}
+                    >
+                      {labels.map((label, i) => (
+                        <option key={label} value={i}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!selection.length || saving}
+                      onClick={() => changeUsage(selection, batchUsage)}
+                    >
+                      {text("应用到选中样本", "Apply to selection")}
+                    </Button>
+                  </div>
+                  {!selection.length && (
+                    <span className="text-muted-foreground text-xs">
+                      {text(
+                        "选择后可批量设置用途",
+                        "Select samples to assign roles in bulk",
+                      )}
+                    </span>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={saving}
+                    onClick={() =>
+                      setSelection(
+                        Array.from(
+                          { length: workspace.sample_count },
+                          (_, i) => i,
+                        ),
+                      )
+                    }
+                  >
+                    {text("选择全部样本", "Select all samples")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setSelection([])}
+                  >
+                    {text("清除选择", "Clear selection")}
+                  </Button>
+                </div>
+                <div
+                  className="max-h-[520px] min-h-60 overflow-auto"
+                  data-testid="sample-table-scroll"
+                >
+                  {rowError ? (
+                    <p role="alert" className="p-4 text-sm">
+                      {rowError}
+                    </p>
+                  ) : !rows ? (
+                    <p className="p-4 text-sm">
+                      {text("正在读取样本…", "Loading samples…")}
+                    </p>
+                  ) : (
+                    <table
+                      className="w-full border-collapse text-sm whitespace-nowrap"
+                      aria-label={text("样本信息", "Sample information")}
+                    >
+                      <thead className="bg-muted sticky top-0 z-10">
+                        <tr>
+                          <th className="border-r border-b px-3 py-2">
                             <input
                               type="checkbox"
-                              aria-label={`${text("选择样本", "Select sample")} ${row.index + 1}`}
-                              checked={selection.includes(row.index)}
+                              aria-label={text(
+                                "选择本页样本",
+                                "Select this page",
+                              )}
+                              checked={
+                                rows.rows.length > 0 &&
+                                rows.rows.every((r) =>
+                                  selection.includes(r.index),
+                                )
+                              }
                               onChange={(e) =>
                                 setSelection((current) =>
                                   e.target.checked
-                                    ? [...current, row.index]
-                                    : current.filter((i) => i !== row.index),
+                                    ? [
+                                        ...new Set([
+                                          ...current,
+                                          ...rows.rows.map((r) => r.index),
+                                        ]),
+                                      ]
+                                    : current.filter(
+                                        (i) =>
+                                          !rows.rows.some((r) => r.index === i),
+                                      ),
                                 )
                               }
                             />
-                          </td>
-                          <td className="text-muted-foreground border-r border-b px-3 py-1.5">
-                            {row.index + 1}
-                          </td>
-                          <td className="border-r border-b px-3 py-1.5">
-                            <button
-                              className="max-w-60 truncate text-left hover:underline"
-                              title={row.name}
-                              onClick={() => setSelection([row.index])}
+                          </th>
+                          {[
+                            text("序号", "No."),
+                            text("样本名称", "Sample"),
+                            text("样本用途", "Role"),
+                            ...workspace.fields,
+                          ].map((label, i) => (
+                            <th
+                              key={`${i}-${label}`}
+                              className="border-r border-b px-3 py-2 text-left font-medium"
                             >
-                              {row.name}
-                            </button>
-                          </td>
-                          <td className="border-r border-b px-3 py-1.5">
-                            <select
-                              className={selectClass}
-                              style={{
-                                color: seriesColor(usages[row.index] ?? 0),
-                              }}
-                              aria-label={`${text("样本用途", "Sample role")} ${row.index + 1}`}
-                              value={usages[row.index] ?? 0}
-                              disabled={saving}
-                              onChange={(e) =>
-                                changeUsage([row.index], Number(e.target.value))
-                              }
-                            >
-                              {labels.map((label, i) => (
-                                <option key={label} value={i}>
-                                  {label}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          {row.values.map((value, i) => (
-                            <td
-                              key={i}
-                              className="border-r border-b px-3 py-1.5"
-                              title={String(value ?? "")}
-                            >
-                              {value ?? "—"}
-                            </td>
+                              {label}
+                            </th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-              <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-xs">
-                <span>
-                  {rows
-                    ? `${Math.min(offset + 1, rows.total)}–${Math.min(offset + 50, rows.total)} / ${rows.total}`
-                    : "…"}
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={offset === 0 || saving}
-                    onClick={() => setOffset((v) => Math.max(0, v - 50))}
-                  >
-                    {text("上一页", "Previous")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!rows || offset + 50 >= rows.total || saving}
-                    onClick={() => setOffset((v) => v + 50)}
-                  >
-                    {text("下一页", "Next")}
-                  </Button>
+                      </thead>
+                      <tbody>
+                        {rows.rows.map((row) => (
+                          <tr
+                            key={row.index}
+                            className={
+                              selection.includes(row.index)
+                                ? "bg-blue-500/10"
+                                : "even:bg-muted/30"
+                            }
+                          >
+                            <td className="border-r border-b px-3 py-1.5">
+                              <input
+                                type="checkbox"
+                                aria-label={`${text("选择样本", "Select sample")} ${row.index + 1}`}
+                                checked={selection.includes(row.index)}
+                                onChange={(e) =>
+                                  setSelection((current) =>
+                                    e.target.checked
+                                      ? [...current, row.index]
+                                      : current.filter((i) => i !== row.index),
+                                  )
+                                }
+                              />
+                            </td>
+                            <td className="text-muted-foreground border-r border-b px-3 py-1.5">
+                              {row.index + 1}
+                            </td>
+                            <td className="border-r border-b px-3 py-1.5">
+                              <button
+                                className="max-w-60 truncate text-left hover:underline"
+                                title={row.name}
+                                onClick={() => setSelection([row.index])}
+                              >
+                                {row.name}
+                              </button>
+                            </td>
+                            <td className="border-r border-b px-3 py-1.5">
+                              <select
+                                className={selectClass}
+                                style={{
+                                  color: seriesColor(usages[row.index] ?? 0),
+                                }}
+                                aria-label={`${text("样本用途", "Sample role")} ${row.index + 1}`}
+                                value={usages[row.index] ?? 0}
+                                disabled={saving}
+                                onChange={(e) =>
+                                  changeUsage(
+                                    [row.index],
+                                    Number(e.target.value),
+                                  )
+                                }
+                              >
+                                {labels.map((label, i) => (
+                                  <option key={label} value={i}>
+                                    {label}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            {row.values.map((value, i) => (
+                              <td
+                                key={i}
+                                className="border-r border-b px-3 py-1.5"
+                                title={String(value ?? "")}
+                              >
+                                {value ?? "—"}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
-              </div>
-            </section>
-            <aside className="min-w-0 space-y-3">
-              <SpectrumPlot
-                title={text("选中样本的光谱", "Selected spectra")}
-                spectra={selectedSpectra}
-                usages={usages}
-                range={range}
-                axisKind={workspace.axis_kind}
-                disabled={saving}
-                onRange={(v) => setBand(v.map(String) as [string, string])}
-                empty={
-                  selection.length
-                    ? text("正在读取选中光谱…", "Loading selected spectra…")
-                    : text(
-                        "点击样本名称或勾选样本查看光谱",
-                        "Select samples to view spectra",
-                      )
-                }
-              />
-              {selection.length > 24 && (
-                <p className="text-muted-foreground text-xs">
-                  {text(
-                    "用途调整作用于全部选中样本；图中最多展示前 24 条光谱。",
-                    "Role changes apply to the whole selection; the plot displays up to 24 spectra.",
+                <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-xs">
+                  <span>
+                    {rows
+                      ? `${Math.min(offset + 1, rows.total)}–${Math.min(offset + 50, rows.total)} / ${rows.total}`
+                      : "…"}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={offset === 0 || saving}
+                      onClick={() => setOffset((v) => Math.max(0, v - 50))}
+                    >
+                      {text("上一页", "Previous")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!rows || offset + 50 >= rows.total || saving}
+                      onClick={() => setOffset((v) => v + 50)}
+                    >
+                      {text("下一页", "Next")}
+                    </Button>
+                  </div>
+                </div>
+              </section>
+              <aside className="min-w-0 space-y-3">
+                <div className="bg-card flex flex-wrap items-center gap-3 rounded-lg border p-3">
+                  <span className="text-sm font-medium">
+                    {text("保留光谱范围", "Retained spectral range")}
+                  </span>
+                  <label className="flex items-center gap-2 text-sm">
+                    {text("起始", "Start")}
+                    <Input
+                      className="w-28"
+                      type="number"
+                      step="any"
+                      aria-label={text("波段起始值", "Range start")}
+                      disabled={saving}
+                      value={band[0]}
+                      onChange={(e) => setBand([e.target.value, band[1]])}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    {text("结束", "End")}
+                    <Input
+                      className="w-28"
+                      type="number"
+                      step="any"
+                      aria-label={text("波段结束值", "Range end")}
+                      disabled={saving}
+                      value={band[1]}
+                      onChange={(e) => setBand([band[0], e.target.value])}
+                    />
+                  </label>
+                  <Button
+                    variant="outline"
+                    disabled={saving}
+                    onClick={() =>
+                      setBand([
+                        String(Math.min(...workspace.axis)),
+                        String(Math.max(...workspace.axis)),
+                      ])
+                    }
+                  >
+                    {text("全部波段", "Full range")}
+                  </Button>
+                  <span className="text-muted-foreground text-sm">
+                    {text("保留", "Keeping")} {selectedFeatures} /{" "}
+                    {workspace.feature_count}{" "}
+                    {text(
+                      "个光谱变量；也可在图上拖动选择",
+                      "variables; drag on either plot to select",
+                    )}
+                  </span>
+                  {!validRange && (
+                    <p role="alert" className="text-destructive text-sm">
+                      {text(
+                        "请输入文件坐标内的有效范围，至少保留一个变量。",
+                        "Select a valid range containing at least one variable.",
+                      )}
+                    </p>
                   )}
-                </p>
+                </div>
+
+                <SpectrumPlot
+                  title={text("选中样本的光谱", "Selected spectra")}
+                  spectra={selectedSpectra}
+                  usages={usages}
+                  range={range}
+                  axisKind={workspace.axis_kind}
+                  disabled={saving}
+                  onRange={(v) => setBand(v.map(String) as [string, string])}
+                  empty={
+                    selection.length
+                      ? text("正在读取选中光谱…", "Loading selected spectra…")
+                      : text(
+                          "点击样本名称或勾选样本查看光谱",
+                          "Select samples to view spectra",
+                        )
+                  }
+                />
+                {selection.length > 24 && (
+                  <p className="text-muted-foreground text-xs">
+                    {text(
+                      "用途调整作用于全部选中样本；图中最多展示前 24 条光谱。",
+                      "Role changes apply to the whole selection; the plot displays up to 24 spectra.",
+                    )}
+                  </p>
+                )}
+                <SpectrumPlot
+                  title={text("数据集光谱概览", "Dataset spectra overview")}
+                  spectra={overview}
+                  usages={usages}
+                  range={range}
+                  axisKind={workspace.axis_kind}
+                  disabled={saving}
+                  onRange={(v) => setBand(v.map(String) as [string, string])}
+                  empty={text("正在读取光谱…", "Loading spectra…")}
+                />
+                {overview && (
+                  <p className="text-muted-foreground text-xs">
+                    {text("共", "Total")} {overview.total}{" "}
+                    {text("个样本，均匀抽取展示", "samples; displaying")}{" "}
+                    {overview.curves.length}{" "}
+                    {text(
+                      "条光谱。每条曲线最多展示 512 个点，保存时保留所选范围内的全部原始数值。",
+                      "evenly sampled spectra, up to 512 points per curve. Saving retains all original values in the selected range.",
+                    )}
+                  </p>
+                )}
+                {plotError && (
+                  <p role="alert" className="text-destructive text-sm">
+                    {plotError}
+                  </p>
+                )}
+              </aside>
+            </div>
+            <p className="text-muted-foreground text-xs">
+              {text(
+                "训练集用于学习模型；验证集用于选择方法和参数；测试集用于最终检验；不参与的样本保留在文件中，但不用于建模。用途与样本类别分别记录。保存后的设置只作用于后续挂载，已有对话中的副本保留。",
+                "Training fits the model; validation selects methods and parameters; test evaluates the final model. Excluded samples remain in the file. Saved settings apply to future attachments; existing chat copies are retained.",
               )}
-              <SpectrumPlot
-                title={text("数据集光谱概览", "Dataset spectra overview")}
-                spectra={overview}
-                usages={usages}
-                range={range}
-                axisKind={workspace.axis_kind}
-                disabled={saving}
-                onRange={(v) => setBand(v.map(String) as [string, string])}
-                empty={text("正在读取光谱…", "Loading spectra…")}
-              />
-              {overview && (
-                <p className="text-muted-foreground text-xs">
-                  {text("共", "Total")} {overview.total}{" "}
-                  {text("个样本，均匀抽取展示", "samples; displaying")}{" "}
-                  {overview.curves.length}{" "}
-                  {text(
-                    "条光谱。每条曲线最多展示 512 个点，保存时保留所选范围内的全部原始数值。",
-                    "evenly sampled spectra, up to 512 points per curve. Saving retains all original values in the selected range.",
-                  )}
-                </p>
-              )}
-              {plotError && (
-                <p role="alert" className="text-destructive text-sm">
-                  {plotError}
-                </p>
-              )}
-            </aside>
-          </div>
-          <p className="text-muted-foreground text-xs">
-            {text(
-              "训练集用于学习模型；验证集用于选择方法和参数；测试集用于最终检验；不参与的样本保留在文件中，但不用于建模。用途与样本类别分别记录。保存后的设置只作用于后续挂载，已有对话中的副本保留。",
-              "Training fits the model; validation selects methods and parameters; test evaluates the final model. Excluded samples remain in the file. Saved settings apply to future attachments; existing chat copies are retained.",
-            )}
-          </p>
-        </>
-      )}
+            </p>
+          </>
+        )}
+      </div>
     </div>
   );
 }

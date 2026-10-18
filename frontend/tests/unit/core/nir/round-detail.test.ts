@@ -28,6 +28,8 @@ function render(id: string, response: unknown) {
       decision: parseDecision({ decision_id: id })!,
       zh: true,
       onSelect: rs.fn(),
+      tab: "reason",
+      onTabChange: rs.fn(),
     }),
   );
 }

@@ -205,7 +205,7 @@ export function MethodLibrary() {
                 : text("方法库暂无卡片。", "No method cards available.")}
             </div>
           )}
-          <div className="grid min-w-0 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          <div className="resource-grid min-w-0">
             {visibleCards.map((card) => (
               <button
                 type="button"
@@ -232,7 +232,7 @@ export function MethodLibrary() {
                   )}
                 </div>
                 <h3 className="font-medium break-words">{card.title}</h3>
-                <p className="text-muted-foreground line-clamp-3 text-sm">
+                <p className="text-muted-foreground line-clamp-2 text-sm">
                   {card.summary_zh ||
                     text("暂无说明", "No description recorded")}
                 </p>

@@ -11,7 +11,6 @@ import {
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -27,6 +26,7 @@ import {
 import {
   cardMetrics,
   modelChatPath,
+  modelDisplayName,
   modelReportPath,
   scopeLabel,
 } from "@/core/nir-library/model-report";
@@ -177,7 +177,7 @@ export function ModelLibrary() {
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="resource-grid">
           {filtered.map((model) => {
             const metrics = cardMetrics(model);
             const metric =
@@ -191,23 +191,23 @@ export function ModelLibrary() {
               <Card
                 key={model.id}
                 data-testid="nir-model-card"
-                className="group relative gap-4 transition-shadow hover:shadow-md"
+                className="group hover:border-primary/40 relative gap-3 transition-colors"
               >
                 <CardHeader className="gap-3 pb-0">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="bg-primary/5 rounded-lg p-2.5">
-                      <BoxesIcon className="text-primary size-5" />
-                    </div>
-                    <Badge variant="secondary">{text("可使用", "Ready")}</Badge>
-                  </div>
                   <CardTitle className="min-w-0 text-base">
                     <Link
                       href={modelReportPath(model)}
-                      className="break-words after:absolute after:inset-0 focus-visible:outline-2 focus-visible:outline-offset-4"
+                      className="line-clamp-2 break-words hover:underline"
                     >
-                      {model.model_id}
+                      {modelDisplayName(model, zh)}
                     </Link>
                   </CardTitle>
+                  <p
+                    className="text-muted-foreground truncate text-xs"
+                    title={`${model.model_id} · ${model.version}`}
+                  >
+                    {model.model_id} · {model.version}
+                  </p>
                   <p className="text-muted-foreground text-sm">
                     {methodLabel(model.method, zh)}
                     {model.report_summary?.target
@@ -223,17 +223,17 @@ export function ModelLibrary() {
                         text(
                           model.source_dataset_id
                             ? "已关联训练数据集"
-                            : "早期记录未关联数据集",
+                            : "训练数据关联未记录",
                           model.source_dataset_id
                             ? "Linked training dataset"
-                            : "No dataset linked in this older record",
+                            : "Training dataset link not recorded",
                         )}
                     </span>
                   </p>
                   <div className="bg-muted/40 rounded-xl p-3">
                     <p className="text-muted-foreground mb-2 text-xs">
                       {metric
-                        ? scopeLabel(metric.scope, zh)
+                        ? `${scopeLabel(metric.scope, zh)}${metric.n !== null ? ` · ${metric.n} ${text("个样本", "samples")}` : ""}`
                         : text("预测效果", "Prediction results")}
                     </p>
                     <div className="grid grid-cols-2 gap-3">
@@ -255,17 +255,11 @@ export function ModelLibrary() {
                       </div>
                     </div>
                   </div>
-                  <p className="text-muted-foreground text-xs">
-                    {text(
-                      "点击卡片查看完整数据、方法和图表",
-                      "Open the card for data, methods and charts",
-                    )}
-                  </p>
                   <div className="relative z-10 mt-auto flex flex-wrap gap-2 border-t pt-4">
-                    <Button size="sm" asChild>
+                    <Button size="sm" variant="outline" asChild>
                       <Link href={modelChatPath(model)}>
                         <LinkIcon className="size-4" />
-                        {text("挂载到对话", "Attach to chat")}
+                        {text("在新对话中使用", "Use in a new chat")}
                       </Link>
                     </Button>
                     <Button size="sm" variant="ghost" asChild>

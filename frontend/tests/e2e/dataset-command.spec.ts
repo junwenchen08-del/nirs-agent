@@ -187,7 +187,7 @@ for (const scenario of ["failure", "clear"] as const) {
     const textarea = page.getByPlaceholder("今天我能为你做些什么？");
     await textarea.fill("/datasets");
     await textarea.press("Enter");
-    const dialog = page.getByRole("dialog", { name: "光谱数据集库" });
+    const dialog = page.getByRole("dialog", { name: "数据集库" });
     await dialog
       .getByRole("button", { name: "挂载到会话", exact: true })
       .click();
@@ -375,7 +375,7 @@ for (const status of ["saved", "reused", "failed"] as const) {
       await expect(textarea).toBeVisible();
       await textarea.fill("/datasets");
       await textarea.press("Enter");
-      const dialog = page.getByRole("dialog", { name: "光谱数据集库" });
+      const dialog = page.getByRole("dialog", { name: "数据集库" });
       await expect(dialog.getByText("光谱.csv", { exact: true })).toBeVisible();
       await expect(
         dialog.getByRole("button", { name: "挂载到会话", exact: true }),
@@ -383,3 +383,47 @@ for (const status of ["saved", "reused", "failed"] as const) {
     }
   });
 }
+
+test("new-chat business shortcuts reuse the pickers without submitting a task", async ({
+  page,
+}) => {
+  await mockLangGraphAPI(page, { locale: "zh-CN" }).ready;
+  await page.route("**/api/nir/datasets", (route) =>
+    route.fulfill({ json: { datasets: [] } }),
+  );
+  await page.route("**/api/nir/models?include_archived=true", (route) =>
+    route.fulfill({ json: { models: [] } }),
+  );
+  const runs: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/runs/stream")) runs.push(request.url());
+  });
+  await page.goto("/workspace/chats/new");
+  await expect(
+    page.getByRole("heading", { name: "开始一次光谱分析", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "选择数据集", exact: true }).click();
+  await expect(
+    page.getByRole("dialog", { name: "数据集库", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Close", exact: true })
+    .click();
+  await page.getByRole("button", { name: "使用已有模型", exact: true }).click();
+  await expect(
+    page.getByRole("dialog", { name: "模型库", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Close", exact: true })
+    .click();
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "上传数据", exact: true }).click();
+  await chooser;
+  expect(runs).toEqual([]);
+  await page.screenshot({
+    path: "../.tmp/ui-redesign/new-chat.png",
+    fullPage: true,
+  });
+});

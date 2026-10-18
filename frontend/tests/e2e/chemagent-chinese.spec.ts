@@ -17,7 +17,7 @@ test("new Chinese users get Chinese pages even with an English browser", async (
     page.getByRole("link", { name: "文档", exact: true }),
   ).toHaveAttribute("href", "/zh/docs");
   await expect(
-    page.getByText("近红外光谱智能分析平台", { exact: true }),
+    page.getByText("近红外分析，从数据到模型", { exact: false }),
   ).toBeVisible();
   const mocks = mockLangGraphAPI(page, { locale: null });
   await mocks.ready;
