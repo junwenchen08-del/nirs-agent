@@ -33,9 +33,8 @@ def test_cancelled_execution_closes_without_test(tmp_path):
 
 
 def test_cancel_before_final_test_is_durable_and_does_not_consume(tmp_path, monkeypatch):
-    from nir_core.io.resources import ResourceLimitError
-
     from deerflow.community.nir import search_tools
+    from nir_core.io.resources import ResourceLimitError
 
     service, result, stop, output, runtime = final_runtime(tmp_path, monkeypatch)
 
@@ -157,7 +156,9 @@ def test_approval_cannot_be_forged_by_llm_and_predict_uses_existing_tool(tmp_pat
     prediction = json.loads(io_tools.nir_predict_tool.func(runtime=runtime, model_path=final["model"], data_path="/mnt/user-data/uploads/new.npz", detect_drift=False))
     assert prediction["status"] == "ok", prediction
     registered = json.loads(registration.nir_register_model_tool.func(runtime=runtime, model_id="phase4-fixture", model_path=final["model"], metrics_path=final["metrics_path"]))
-    assert (registered.get("status") == "registered") == final["metrics"]["quality"]["passed"], registered
+    assert registered.get("status") == "registered", registered
+    if not final["metrics"]["quality"]["passed"]:
+        assert registered["quality_status"] == "below_threshold_user_approved"
 
 
 def test_export_tampering_fails_closed_without_test_replay(tmp_path, monkeypatch):

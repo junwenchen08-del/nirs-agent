@@ -17,10 +17,10 @@ from typing import Annotated
 
 import numpy as np
 from langchain.tools import InjectedToolCallId, tool
-from nir_core.io.resources import ResourceLimitError
 
 from deerflow.runtime.user_context import resolve_runtime_user_id
 from deerflow.tools.types import Runtime
+from nir_core.io.resources import ResourceLimitError
 
 from ._common import (
     _err,
@@ -749,6 +749,12 @@ def nir_predict_tool(
                         "error_type": type(monitoring_error).__name__,
                     }
         event_id = str(uuid.uuid4())
+        output_sha256 = None
+        if payload.get("status") == "ok" and payload.get("output_path"):
+            try:
+                output_sha256 = _sha256_file(_resolve(runtime, payload["output_path"], read_only=True))
+            except Exception as output_error:  # noqa: BLE001
+                return finish({"status": "error", "error": str(output_error)[:1000]}, error=output_error)
         event = {
             "schema_version": 1,
             "event_id": event_id,
@@ -769,6 +775,7 @@ def nir_predict_tool(
                 "already_preprocessed": input_preprocessed,
             },
             "output_path": payload.get("output_path") or output_path,
+            "output_sha256": output_sha256,
             "prediction_summary": _prediction_summary_for_audit(payload),
             "drift": _drift_summary_for_audit(payload, requested=detect_drift),
             "drift_monitoring": payload.get("drift_monitoring"),
@@ -783,6 +790,9 @@ def nir_predict_tool(
             "event_id": event_id,
             "event_hash": persisted["event_hash"],
             "path": _PREDICTION_AUDIT_PATH,
+            "model_sha256": model_sha256,
+            "input_sha256": data_sha256,
+            "output_sha256": output_sha256,
         }
         return _ok(payload)
 

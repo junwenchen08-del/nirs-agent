@@ -32,6 +32,7 @@ import {
 } from "@/core/nir-library/model-report";
 
 import { FeatureDisabled } from "./dataset-library";
+import { ModelQualityNotice } from "./model-quality-notice";
 
 export function ModelLibrary() {
   const { t, locale } = useI18n();
@@ -216,6 +217,7 @@ export function ModelLibrary() {
                   </p>
                 </CardHeader>
                 <CardContent className="flex flex-1 flex-col gap-4 text-sm">
+                  <ModelQualityNotice status={model.quality_status} zh={zh} />
                   <p className="text-muted-foreground flex items-start gap-2">
                     <DatabaseIcon className="mt-0.5 size-4 shrink-0" />
                     <span className="line-clamp-2">

@@ -9,8 +9,11 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from test_nir_delivery_agent import make_delivery_lead
+from test_nir_provider_message_pairs import assert_provider_pairs
 from test_nir_unified_agent import UnifiedFakeLLM
 
+from deerflow.agents.middlewares.dangling_tool_call_middleware import DanglingToolCallMiddleware
+from deerflow.agents.middlewares.nir_workflow_middleware import NIRWorkflowMiddleware
 from deerflow.community.nir import search_tools
 from deerflow.community.nir.process import runtime_store
 from deerflow.community.nir.response_grounding import _attempt_evidence_records, render_grounded_nir_response
@@ -31,6 +34,7 @@ class MalformedDecisionLLM(UnifiedFakeLLM):
     _malformed_count = 0
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        assert_provider_pairs(messages)
         results = [m for m in messages if isinstance(m, ToolMessage)]
         if results and results[-1].name in {"nir_workflow", "nir_prepare_search"}:
             assert json.loads(results[-1].content).get("status") != "error", results[-1].content
@@ -84,7 +88,7 @@ def test_actual_lead_malformed_json_repairs_or_closes_durably(tmp_path, monkeypa
 
     monkeypatch.setattr(np, "load", spy)
     model = MalformedDecisionLLM(never_correct=never_correct)
-    graph = make_delivery_lead(monkeypatch, model)
+    graph = make_delivery_lead(monkeypatch, model, middlewares=[DanglingToolCallMiddleware(), NIRWorkflowMiddleware()])
     from deerflow.community.nir.web_entry import bind_web_request, stored_workflow
 
     body = SimpleNamespace(assistant_id="lead_agent", context={}, input={"messages": [HumanMessage(content="请自主建模并交付")]})

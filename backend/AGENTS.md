@@ -1,5 +1,15 @@
 # AGENTS.md
 
+Autonomous provider projection removes invalid-only assistant calls together
+with their batch-local recovery ToolMessages. DanglingToolCallMiddleware runs
+earlier and may have inserted those failures; pruning only the call produces a
+strict-provider HTTP 400. Keep valid/mixed call batches, reused IDs in other
+batches, parser reminders and original checkpoints/receipts unchanged. Apply the
+projection even before the first decision context. Provider/tool failure,
+invalid-decision closure, repeated calls and actual budget exhaustion have
+distinct Chinese outcomes. Anchors: test_nir_provider_message_pairs.py and the
+sync/async full repair-chain tests in test_nir_malformed_decision_recovery.py.
+
 New sealed regression ingestion records exact ordered Cal/Val/Test row indices
 once in the private session; `dataset_partitions.py` verifies the original owned
 library source and exact input Profile before storing a `profile_status=split`
@@ -934,7 +944,10 @@ from deerflow.config import get_app_config
   duplicate spectra across partitions and duplicate spectra with conflicting
   targets are blocking. `_bind_model_metrics` adds the metrics and
   training-data hashes to the model manifest; registration must reject any
-  missing/failed scientific or quality gate and any model/metrics mismatch.
+  missing/failed scientific validation, missing quality assessment and any
+  model/metrics mismatch. A measured quality failure may be explicitly accepted
+  by the latest genuine user save reply. Preserve the failed assessment and
+  bind that acceptance to the exact workflow attempt and artifact hashes.
   During an active
   NIR workflow, `NIRWorkflowMiddleware` hard-denies script writes (`.py`,
   notebooks, R/Julia/MATLAB files) and shell-based Python execution so a loader
@@ -1395,8 +1408,19 @@ recorded by an approved workflow and the source thread's `registry.json` after
 `nir_register_model` has completed. Promotion re-runs the scientific and
 validation gates, verifies model SHA/size/HMAC, metrics SHA, training-data
 binding, and provenance HMAC before and after a no-symlink staged copy, then
-atomically publishes the bundle and commits a ready SQL record. Production
-signing policy requires both model and provenance signatures. Owner admission
+atomically publishes the bundle and commits a ready SQL record. Below-threshold
+registration requires the hash-bound acceptance issued by the approval tool;
+it exposes `quality_status=below_threshold_user_approved` without rewriting
+quality or metrics. Completed approved but unregistered deliveries can retry
+approval on a fresh genuine save reply, never by retraining or reopening Test.
+Scientific and validation checks cannot be overridden. Direct
+`nir_register_model` retries from a completed unregistered delivery bind
+the exact saved model/metrics paths and validate the same fresh genuine consent
+as `nir_workflow(approve)`, then record approval before normal authorization.
+The handler and owner-scoped autosave hook see the same approved runtime state;
+the resulting registration and library outcomes persist normally. No reply or
+approval is invented. Failed registration is explicit in grounded Chinese replies.
+Production signing policy requires both model and provenance signatures. Owner admission
 serialization covers quotas, the total new-write threshold, disk floor, and
 per-model version cap; retries are idempotent and never overwrite a version.
 Lineage stores source Dataset/Profile when available and always keeps source

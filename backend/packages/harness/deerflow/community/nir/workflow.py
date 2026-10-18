@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.types import Command
 
@@ -119,6 +119,7 @@ _AGENT_VIEW_FIELDS = (
     "metrics_path",
     "audit_evidence",
     "attempt_evidence",
+    "prediction_evidence",
     "attempts",
     "reflection",
     "retry_plan",
@@ -768,6 +769,7 @@ def start_workflow(
         "metrics_path": None,
         "audit_evidence": None,
         "attempt_evidence": None,
+        "prediction_evidence": None,
         "attempts": [],
         "reflection": None,
         "reflections": [],
@@ -1256,7 +1258,7 @@ def transition_workflow(
         )
 
     if action == "approve":
-        if state["stage"] != "review" or state["approval_status"] != "pending":
+        if not (state["stage"] == "review" and state["approval_status"] == "pending") and not registration_can_be_retried(state):
             raise NIRWorkflowError("approve requires a pending review")
         return _with_update(
             state,
@@ -1324,6 +1326,20 @@ def registration_is_approved(state: dict | None) -> bool:
     return bool(state and state.get("approval_status") == "approved" and state.get("stage") in {"approved", "registered"} and isinstance(state.get("attempt_evidence"), dict))
 
 
+def registration_can_be_retried(state: dict | None) -> bool:
+    """A fresh user approval may retry only a completed, unregistered model."""
+    return bool(
+        state
+        and state.get("stage") == "completed"
+        and state.get("task_type") in {"calibration", "analysis", "classification", "multi_modeling"}
+        and state.get("approval_status") == "approved"
+        and not state.get("registered_model")
+        and isinstance(state.get("attempt_evidence"), dict)
+        and state["attempt_evidence"].get("model_path")
+        and state["attempt_evidence"].get("metrics_path")
+    )
+
+
 def _latest_user_explicitly_approved(runtime: Runtime) -> bool:
     messages = (runtime.state or {}).get("messages") or []
     message = latest_user_message(messages)
@@ -1334,6 +1350,33 @@ def _latest_user_explicitly_approved(runtime: Runtime) -> bool:
     if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APPROVAL_DENIAL_PATTERNS):
         return False
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APPROVAL_PATTERNS)
+
+
+def require_user_approval(runtime: Runtime, workflow: dict) -> None:
+    """Validate consent identically for explicit approval and direct save retry."""
+    if not _latest_user_explicitly_approved(runtime):
+        raise NIRWorkflowError("approve requires explicit authorization in the latest user message")
+    if not registration_can_be_retried(workflow):
+        return
+    messages = (runtime.state or {}).get("messages") or []
+    reply = latest_user_message(messages)
+    prior = next((event for event in reversed(workflow.get("history") or []) if event.get("action") == "approve"), {})
+    same_reply = reply.id and prior.get("user_message_id") == reply.id
+    after_reply = messages[next(index for index, message in enumerate(messages) if message is reply) + 1 :]
+    finished = any(isinstance(message, AIMessage) and not message.tool_calls for message in after_reply)
+    completed = any(isinstance(message, ToolMessage) and message.name == "nir_workflow" and '"stage": "completed"' in str(message.content) for message in after_reply)
+    if same_reply or finished or completed:
+        raise NIRWorkflowError("重新保存需要你再次回复“同意保存到模型库”。")
+
+
+def approve_registration_retry(runtime: Runtime, workflow: dict) -> dict:
+    """Record real consent for the same finalized model without another LLM step."""
+    if not registration_can_be_retried(workflow):
+        raise NIRWorkflowError("No completed unregistered model is available")
+    require_user_approval(runtime, workflow)
+    approved = transition_workflow(workflow, action="approve", notes="最新真实用户明确同意，重试保存同一份已完成模型。")
+    approved["history"][-1]["user_message_id"] = latest_user_message(runtime.state["messages"]).id
+    return approved
 
 
 def _runtime_identifier(runtime: Runtime, key: str) -> str | None:
@@ -1396,6 +1439,11 @@ def nir_workflow_tool(
     middleware automatically records successful modeling attempts, knowledge
     retrieval, and model registration. A passed model enters ``review`` and
     cannot be registered until the user is recorded with ``approve``.
+
+    A finalized model below the measured quality threshold may still be saved
+    with explicit user approval, retaining its failed assessment. A completed,
+    previously approved but unregistered workflow can retry ``approve`` after
+    a fresh genuine save reply, using the same artifact without retraining.
 
     For autonomous delivery, start with task_type=calibration or analysis,
     validation_goal=internal_holdout, search_protocol=sealed_holdout,
@@ -1526,8 +1574,8 @@ def nir_workflow_tool(
         else:
             if current is None:
                 raise NIRWorkflowError("No active NIR workflow; call action='start' first")
-            if normalized_action == "approve" and not _latest_user_explicitly_approved(runtime):
-                raise NIRWorkflowError("approve requires explicit authorization in the latest user message")
+            if normalized_action == "approve":
+                require_user_approval(runtime, current)
             updated = transition_workflow(
                 current,
                 action=normalized_action,
@@ -1555,6 +1603,8 @@ def nir_workflow_tool(
                 expected_improvement=expected_improvement,
                 notes=notes,
             )
+            if normalized_action == "approve":
+                updated["history"][-1]["user_message_id"] = latest_user_message((runtime.state or {}).get("messages") or []).id
         if updated is not current:
             updated = attach_workflow_runtime(
                 updated,

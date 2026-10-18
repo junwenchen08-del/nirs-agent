@@ -171,6 +171,7 @@ export interface NIRModelVersion {
   metrics_sha256: string;
   training_data_sha256: string;
   metrics_summary: Record<string, unknown>;
+  quality_status?: "below_threshold_user_approved" | null;
   report_summary?: Pick<
     NIRModelReport,
     "target" | "unit" | "sample_count" | "feature_count" | "metrics"

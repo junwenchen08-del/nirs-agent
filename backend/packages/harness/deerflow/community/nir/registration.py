@@ -13,8 +13,8 @@ from deerflow.tools.types import Runtime
 from ._common import _err, _ok, _resolve, _sha256_file
 
 
-def _registration_gate(metrics: dict) -> tuple[bool, str]:
-    """Require persisted scientific, quality, lineage, and replay evidence."""
+def _registration_gate(metrics: dict, *, allow_below_threshold: bool = False) -> tuple[bool, str]:
+    """Keep scientific evidence mandatory; measured quality needs user acceptance."""
 
     data_hash = str(metrics.get("training_data_hash", "")).lower()
     if len(data_hash) != 64 or any(character not in "0123456789abcdef" for character in data_hash):
@@ -40,10 +40,15 @@ def _registration_gate(metrics: dict) -> tuple[bool, str]:
     if not isinstance(reproducibility.get("random_state"), int):
         return False, "reproducibility random_state is missing"
 
+    if metrics.get("test_status") == "sealed":
+        return False, "final test evidence is required for registration"
+    quality_reason = "model quality gate did not pass"
     if isinstance(metrics.get("overall"), dict):
+        quality_evaluated = isinstance(metrics["overall"].get("passed"), bool)
         quality_passed = metrics["overall"].get("passed") is True
     else:
         quality = metrics.get("quality")
+        quality_evaluated = isinstance(quality, dict) and isinstance(quality.get("passed"), bool)
         quality_passed = isinstance(quality, dict) and quality.get("passed") is True
         if isinstance(quality, dict) and quality.get("evaluation_scope") == "validation":
             from nir_core.utils.metrics import evaluate_quality
@@ -53,10 +58,26 @@ def _registration_gate(metrics: dict) -> tuple[bool, str]:
             except ValueError:
                 return False, "final test evidence is required for registration"
             if final_quality.get("passed") is not True:
-                return False, "final test quality gate did not pass"
+                quality_passed = False
+                quality_evaluated = quality_evaluated and isinstance(final_quality.get("passed"), bool)
+                quality_reason = "final test quality gate did not pass"
     if not quality_passed:
-        return False, "model quality gate did not pass"
+        if allow_below_threshold and quality_evaluated:
+            return True, "scientific checks passed; below-threshold quality requires explicit user approval"
+        return False, quality_reason
     return True, "all registration gates passed"
+
+
+def _quality_approval_record(evidence: dict, workflow: dict) -> dict:
+    """Bind explicit quality acceptance to one approved, immutable model bundle."""
+    return {
+        "schema_version": 1,
+        "kind": "user_accepted_below_threshold",
+        "approval_status": "approved",
+        "workflow_project_id": workflow.get("project_id"),
+        "workflow_attempt": workflow.get("attempt"),
+        **{key: evidence.get(key) for key in ("model_sha256", "metrics_sha256", "training_data_sha256")},
+    }
 
 
 def _validation_goal_gate(metrics: dict, workflow: dict) -> tuple[bool, str]:
@@ -113,6 +134,10 @@ def nir_register_model_tool(
     metrics.json files. The coordinator collects all results, picks the best,
     and calls this tool once to register it.
 
+    Measured quality below threshold may be saved after the latest genuine
+    user explicitly agrees. The original assessment remains failed; scientific,
+    validation and exact-artifact checks still apply.
+
     Args:
         model_id: Logical model identifier (e.g. ``"corn_protein_pls"``).
         model_path: Virtual path to the serialized model (.pkl).
@@ -123,7 +148,7 @@ def nir_register_model_tool(
     Returns:
         JSON with the assigned version tag and registry summary.
     """
-    from .workflow import registration_is_approved
+    from .workflow import _latest_user_explicitly_approved, registration_is_approved
 
     workflow_state = (runtime.state or {}).get("nir_workflow")
     if not registration_is_approved(workflow_state):
@@ -151,7 +176,11 @@ def nir_register_model_tool(
             metrics = _json.load(f)
         approved, gate_reason = _registration_gate(metrics)
         if not approved:
-            return _err(f"Model registration rejected by mandatory scientific gate: {gate_reason}.")
+            scientific_ok, _ = _registration_gate(metrics, allow_below_threshold=True)
+            if not scientific_ok:
+                return _err(f"Model registration rejected by mandatory scientific gate: {gate_reason}.")
+            if not _latest_user_explicitly_approved(runtime):
+                return _err("模型未达到质量门槛；需要你明确回复“同意保存到模型库”后才能保存。")
         validation_approved, validation_reason = _validation_goal_gate(metrics, workflow_state)
         if not validation_approved:
             return _err(f"Model registration rejected by validation protocol gate: {validation_reason}.")
@@ -193,6 +222,7 @@ def nir_register_model_tool(
 
         # Register.
         registry = ModelRegistry(registry_path=real_registry)
+        acceptance = _quality_approval_record(evidence, workflow_state) if not approved else None
         version = registry.register(
             model_id=model_id,
             method=metrics.get("method", "unknown"),
@@ -201,6 +231,7 @@ def nir_register_model_tool(
             data_hash=str(metrics.get("training_data_hash", "unknown")),
             model_path=model_path,
             artifact_hash=artifact_hash,
+            **({"registration_approval": acceptance} if acceptance is not None else {}),
         )
 
         # Return a summary (no matrix data).
@@ -216,6 +247,7 @@ def nir_register_model_tool(
                 "component_names": metrics.get("component_names"),
                 "registry_path": registry_path,
                 "scientific_gate": "passed",
+                "quality_status": "passed" if approved else "below_threshold_user_approved",
                 "reproducibility_protocol": metrics["reproducibility"].get("protocol"),
             }
         )

@@ -118,7 +118,10 @@ const modelUrl = `/api/nir/models/${encodeURIComponent(model.model_id)}`;
 const reportUrl = `${modelUrl}/versions/v2/report`;
 const detailUrl = `/workspace/nir/models/${encodeURIComponent(model.model_id)}/v2`;
 
-async function setup(page: Page) {
+async function setup(
+  page: Page,
+  qualityStatus?: "below_threshold_user_approved",
+) {
   await page.context().addCookies([
     {
       name: "locale",
@@ -136,7 +139,7 @@ async function setup(page: Page) {
     route.fulfill({
       json: {
         models: [
-          model,
+          { ...model, quality_status: qualityStatus },
           { ...model, id: "old", model_id: "已归档模型", status: "archived" },
         ],
       },
@@ -149,7 +152,9 @@ async function setup(page: Page) {
     route.fulfill({ json: model }),
   );
   await page.route(`**${reportUrl}`, (route) =>
-    route.fulfill({ json: detail }),
+    route.fulfill({
+      json: { ...detail, model: { ...model, quality_status: qualityStatus } },
+    }),
   );
   await page.route("**/api/nir/datasets/ds_corn/preview?*", (route) => {
     state.profiles.push(
@@ -182,6 +187,28 @@ async function setup(page: Page) {
   });
   return state;
 }
+
+test("user-approved below-threshold models remain visible and usable with truthful notice", async ({
+  page,
+}) => {
+  const state = await setup(page, "below_threshold_user_approved");
+  await page.goto("/workspace/nir/models");
+  await expect(page.getByTestId("model-quality-notice")).toContainText(
+    "未达质量门槛，已由用户确认保存",
+  );
+  await expect(
+    page.getByRole("link", { name: "在新对话中使用", exact: true }),
+  ).toBeVisible();
+  await page.goto(detailUrl);
+  await expect(page.getByTestId("model-quality-notice")).toContainText(
+    "评价指标保持原样",
+  );
+  await expect(
+    page.getByRole("link", { name: "在新对话中使用", exact: true }),
+  ).toBeVisible();
+  expect(state.runs).toBe(0);
+  expect(state.attachments).toBe(0);
+});
 
 test("Chinese model cards open data, methods and scientific charts, then mount in a new chat", async ({
   page,

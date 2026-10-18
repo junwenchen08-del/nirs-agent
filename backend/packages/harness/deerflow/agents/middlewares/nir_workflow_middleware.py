@@ -20,6 +20,7 @@ from langgraph.types import Command
 from deerflow.agents.thread_state import NIRWorkflowState
 from deerflow.community.nir.decision_facts import model_result_facts
 from deerflow.community.nir.model_autosave import failed_model_save, save_registered_model
+from deerflow.community.nir.prediction_evidence import prediction_result_evidence
 from deerflow.community.nir.process import bind_execution, finish_execution, reset_execution, start_execution
 from deerflow.community.nir.response_grounding import (
     render_grounded_nir_response,
@@ -798,6 +799,10 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
                 if workflow.get("stage") in {"review", "approved", "registered"}:
                     workflow_read = tool_name == "nir_workflow" and args.get("action") in {"status", "approve", "reject", "complete"}
                     allowed |= {"nir_register_model"}
+                from deerflow.community.nir.workflow import registration_can_be_retried
+
+                if registration_can_be_retried(workflow):
+                    workflow_read = tool_name == "nir_workflow" and args.get("action") in {"status", "approve"}
         if tool_name not in allowed and not workflow_read:
             return _denied_message(request, code="nir_sealed_search_tool_denied", error="The sealed regression protocol permits only governed search/finalization and data-free catalog tools.", workflow=workflow)
     if dataset_binding_denial := _deny_invalid_dataset_start_binding(request):
@@ -924,6 +929,27 @@ def _success_payload(result: ToolMessage | Command) -> dict[str, Any] | None:
     if not isinstance(payload, dict) or payload.get("status") == "error":
         return None
     return payload
+
+
+def _bind_registration_retry(request: ToolCallRequest) -> ToolCallRequest:
+    """A direct save call may consume real fresh consent for the exact artifact."""
+    if request.tool_call.get("name") != "nir_register_model":
+        return request
+    from deerflow.community.nir.workflow import approve_registration_retry, registration_can_be_retried
+
+    state = _state_from_request(request)
+    workflow = state.get("nir_workflow")
+    if not registration_can_be_retried(workflow):
+        return request
+    args = request.tool_call.get("args") or {}
+    if any(args.get(key) != workflow["attempt_evidence"].get(key) for key in ("model_path", "metrics_path")):
+        return request
+    try:
+        approved = approve_registration_retry(request.runtime, workflow)
+    except NIRWorkflowError:
+        return request
+    updated = {**state, "nir_workflow": approved}
+    return replace(request, state=updated, runtime=replace(request.runtime, state=updated))
 
 
 def _bind_reflection_request(request: ToolCallRequest) -> ToolCallRequest:
@@ -1147,7 +1173,11 @@ def _next_workflow(
             action="registered",
             notes=f"Registered model {payload.get('model_id', '')}".strip(),
         )
-        registered["registered_model"] = {"model_id": payload.get("model_id"), "version": payload.get("version")}
+        registered["registered_model"] = {
+            "model_id": payload.get("model_id"),
+            "version": payload.get("version"),
+            **({"quality_status": "below_threshold_user_approved"} if payload.get("quality_status") == "below_threshold_user_approved" else {}),
+        }
         return registered
     if tool_name == "nir_model_promote" and payload.get("library_status") == "ready":
         return {**workflow, "model_library": {"status": "saved", "model_id": payload.get("model_id"), "version": payload.get("version")}}
@@ -1196,6 +1226,17 @@ def _record_observation(request: ToolCallRequest, result: ToolMessage | Command)
         except (TypeError, ValueError):
             pass
     status = "error" if message is not None and (message.status == "error" or payload.get("status") == "error") else "success"
+    if tool_name == "nir_predict" and current.get("task_type") == "prediction":
+        workflow = {
+            **workflow,
+            "prediction_evidence": prediction_result_evidence(
+                current,
+                request.tool_call.get("args") or {},
+                payload,
+                call_id=request.tool_call.get("id"),
+                failed=status == "error",
+            ),
+        }
     if payload.get("code") == _RETRY_PLAN_MISMATCH_EXHAUSTED_CODE:
         details = payload.get("details")
         plan_id = details.get("plan_id") if isinstance(details, Mapping) else None
@@ -1475,6 +1516,18 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
             names = {"nir_finalize_search"}
         elif stage in {"review", "registered", "completed", "blocked"}:
             names = {"nir_workflow"}
+            if stage == "completed":
+                from deerflow.community.nir.workflow import registration_can_be_retried, require_user_approval
+
+                if registration_can_be_retried(workflow):
+                    from types import SimpleNamespace
+
+                    try:
+                        require_user_approval(SimpleNamespace(state={**request.state, "messages": request.messages}), workflow)
+                    except NIRWorkflowError:
+                        pass
+                    else:
+                        names.add("nir_register_model")
         elif stage == "approved":
             names = {"nir_workflow", "nir_register_model"}
         elif workflow.get("active_decision_id"):
@@ -1501,6 +1554,10 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
                     schema = {"type": "object", "properties": properties, "required": ["action"], "additionalProperties": False}
                 else:
                     actions = ["status", "approve", "reject"] if stage == "review" else ["status", "complete"] if stage in {"approved", "registered"} else ["status"]
+                    from deerflow.community.nir.workflow import registration_can_be_retried
+
+                    if registration_can_be_retried(workflow):
+                        actions = ["status", "approve"]
                     schema = {"type": "object", "properties": {"action": {"type": "string", "enum": actions}, "notes": {"type": "string"}}, "required": ["action"], "additionalProperties": False}
             elif name == "nir_workflow" and not workflow.get("autonomous_delivery"):
                 allowed = {
@@ -1563,6 +1620,9 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
 
         view = {key: workflow.get(key) for key in ("stage", "search_session_id", "decision_context_id", "active_decision_id", "retained_experiment_id", "stop_source", "user_question")}
         view["required_workflow_action"] = required_nir_workflow_action(workflow)
+        from deerflow.community.nir.workflow import registration_can_be_retried
+
+        view["registration_retry_available"] = registration_can_be_retried(workflow)
         instruction = (
             "\n<current_sealed_workflow>" + json.dumps(view) + "</current_sealed_workflow>\n"
             "This is the current authoritative process state. Do not repeat preparation after a session is bound. "
@@ -1572,6 +1632,11 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
             "For internal holdout results, explain: 本次测试使用从这份数据中单独留出的样本，尚未用另外采集的数据验证。 "
             "Keep protocol names, hashes, internal stages, evidence/quality gates, freezing, raw tool names and experiment ledgers in the report; show technical details only when the user asks. "
             "Say saved to the model library only after the trusted model_library outcome confirms saved; approval and registration alone do not confirm library storage."
+            " Measured quality thresholds do not prevent library storage when the latest genuine user reply explicitly agrees to save. "
+            "After that consent, approve and register the exact finalized artifact, preserving failed quality assessments and reporting 未达质量门槛，已由用户确认保存. "
+            "Scientific validity, artifact integrity, ownership and validation protocol checks remain mandatory. "
+            "If registration_retry_available is true, a fresh explicit save reply permits nir_workflow(action='approve') and retrying registration of the existing artifact; never retrain or reopen Test to save it."
+            " You may instead call nir_register_model directly with the exact current evidence paths: the runtime records that same fresh genuine approval before registration."
             " Ask the user only when their input is necessary, using ask_clarification. Once you ask a question or offer a choice, wait for their reply; never ask and execute a choice in the same turn. "
             "A new reply does not approve registration or select a model automatically. If the reply does not answer the pending question, clarify again rather than choose for the user."
         )
@@ -1797,7 +1862,9 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
     def _compact_decision_messages(request):
         if not (request.state.get("nir_workflow") or {}).get("autonomous_rounds"):
             return request
-        messages = request.messages
+        from deerflow.community.nir.decision_provider import malformed_call_message_view
+
+        messages = malformed_call_message_view(request.messages)
         # Prune only complete governed call/response pairs preceding the newest
         # successful context. The checkpoint, immutable decisions and receipts
         # remain untouched. Never manufacture a history summary.
@@ -1814,7 +1881,7 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
             wf.get("stage") in {"awaiting_final_confirmation", "frozen", "review", "approved", "registered", "completed"} or wf.get("stage") == "budget_exhausted" and not wf.get("decision_context_id")
         )
         if not context_indexes and not closing:
-            return request
+            return request.override(messages=messages) if messages is not request.messages else request
         boundary = len(messages) if closing else context_indexes[-1]
         newest_call = None if closing else messages[boundary].tool_call_id
         governed = {"nir_prepare_search", "nir_decision_context", "nir_submit_decision", "nir_execute_decision", "nir_decision_history"}
@@ -1837,21 +1904,6 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
                 discarded.add(index)
                 removable.update(call["id"] for call in message.tool_calls)
         retained = [message for index, message in enumerate(messages) if index not in discarded and not (isinstance(message, ToolMessage) and message.tool_call_id in removable)]
-        # Malformed arguments are not an executed experiment or a valid tool
-        # call. Keep the original checkpoint/receipt, but do not repeatedly send
-        # that large invalid JSON back to the provider as a tool call.
-        retained = [
-            message.model_copy(
-                update={
-                    "content": "Previous tool response contained invalid JSON and was not executed.",
-                    "invalid_tool_calls": [],
-                    "additional_kwargs": {key: value for key, value in message.additional_kwargs.items() if key != "tool_calls"},
-                }
-            )
-            if isinstance(message, AIMessage) and message.invalid_tool_calls and not message.tool_calls
-            else message
-            for message in retained
-        ]
         return request.override(messages=retained)
 
     @staticmethod
@@ -1875,6 +1927,7 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
+        request = _bind_registration_retry(request)
         denied = _authorize(request)
         if denied is not None:
             return _record_observation(request, denied)
@@ -1907,6 +1960,7 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        request = _bind_registration_retry(request)
         denied = _authorize(request)
         if denied is not None:
             return _record_observation(request, denied)

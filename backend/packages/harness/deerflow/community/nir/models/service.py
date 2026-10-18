@@ -28,7 +28,7 @@ from deerflow.community.nir._common import _read_regular_bytes, _verify_trusted_
 from deerflow.community.nir.datasets.service import _owner_admission_lock, _size_of_regular_files
 from deerflow.community.nir.models.report import build_report, complete_dimensions
 from deerflow.community.nir.models.source import recorded_source, verified_library_source, verify_historical_source
-from deerflow.community.nir.registration import _registration_gate, _validation_goal_gate
+from deerflow.community.nir.registration import _quality_approval_record, _registration_gate, _validation_goal_gate
 from deerflow.config.nir_library_config import NIRLibraryConfig
 from deerflow.config.paths import Paths
 from deerflow.persistence.nir_library.model import (
@@ -75,6 +75,7 @@ def _public(row: NIRModelVersionRow, *, reused_existing: bool = False) -> dict:
         "metrics_sha256": row.metrics_sha256,
         "training_data_sha256": row.training_data_sha256,
         "metrics_summary": metadata.get("metrics_summary", {}),
+        "quality_status": metadata.get("quality_status"),
         "report_summary": {key: metadata["report"].get(key) for key in ("target", "unit", "sample_count", "feature_count", "metrics")} if isinstance(metadata.get("report"), dict) else None,
         "source_dataset_id": row.source_dataset_id,
         "source_profile_id": row.source_profile_id,
@@ -492,7 +493,8 @@ class ModelService:
             raise ModelError("registration_required", "Thread registry does not match the approved model package")
         metrics = verified["metrics"]
         assert isinstance(metrics, dict)
-        scientific_ok, _scientific_reason = _registration_gate(metrics)
+        quality_accepted = record.get("registration_approval") == _quality_approval_record(dict(evidence), dict(workflow))
+        scientific_ok, _scientific_reason = _registration_gate(metrics, allow_below_threshold=quality_accepted)
         validation_ok, _validation_reason = _validation_goal_gate(metrics, dict(workflow))
         if not scientific_ok or not validation_ok:
             raise ModelError("scientific_gate_failed", "Registered model no longer satisfies its scientific and validation gates")
@@ -524,6 +526,7 @@ class ModelService:
             "method": metrics.get("method"),
             "preprocessing": preprocessing,
             "metrics_summary": _metrics_summary(metrics),
+            **({"quality_status": "below_threshold_user_approved", "registration_approval": record["registration_approval"]} if quality_accepted else {}),
             "source": {
                 "thread_id": source_thread_id,
                 "run_id": clean_run_id,

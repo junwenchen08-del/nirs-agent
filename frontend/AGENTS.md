@@ -1,5 +1,10 @@
 # AGENTS.md
 
+Model cards and details render `ModelQualityNotice` only for the server's
+`quality_status=below_threshold_user_approved`. Keep recorded metrics unchanged
+and mounting available. Do not infer acceptance from metric values or fabricate
+the flag for historical models. Browser regression: `model-library.spec.ts`.
+
 Dataset overview lists immutable split Profiles separately from parsing versions.
 `?profile=<id>` pins all workspace summary/row/spectra/preview reads and disables
 role/range/parsing edits; historical model links pin their exact Profile as well.

@@ -95,6 +95,7 @@ class NIRWorkflowState(TypedDict):
     metrics_path: NotRequired[str | None]
     audit_evidence: NotRequired[dict | None]
     attempt_evidence: NotRequired[dict | None]
+    prediction_evidence: NotRequired[dict | None]
     registered_model: NotRequired[dict | None]
     model_library: NotRequired[dict | None]
     user_question: NotRequired[dict | None]

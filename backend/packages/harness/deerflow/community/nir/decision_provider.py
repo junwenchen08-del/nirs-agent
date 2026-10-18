@@ -6,8 +6,41 @@ import html
 import json
 import re
 
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
+
+
+def malformed_call_message_view(messages):
+    """Omit invalid-only calls and their recovery results in the provider copy.
+
+    DanglingToolCallMiddleware may already have inserted error ToolMessages for
+    unparseable calls. Removing only the assistant's calls leaves orphan results
+    that strict providers reject. Scope removal to that assistant's batch so a
+    reused transport ID in a different valid batch keeps its actual result.
+    The checkpoint, parser correction and durable model receipts are untouched.
+    """
+    projected = []
+    invalid_ids = set()
+    changed = False
+    for message in messages:
+        if isinstance(message, AIMessage):
+            invalid_ids = set()
+            if message.invalid_tool_calls and not message.tool_calls:
+                calls = [*message.invalid_tool_calls, *(message.additional_kwargs.get("tool_calls") or [])]
+                invalid_ids = {call["id"] for call in calls if isinstance(call, dict) and call.get("id")}
+                message = message.model_copy(
+                    update={
+                        "content": "Previous tool response contained invalid JSON and was not executed.",
+                        "invalid_tool_calls": [],
+                        "additional_kwargs": {key: value for key, value in message.additional_kwargs.items() if key != "tool_calls"},
+                    }
+                )
+                changed = True
+        elif isinstance(message, ToolMessage) and message.tool_call_id in invalid_ids:
+            changed = True
+            continue
+        projected.append(message)
+    return projected if changed else messages
 
 
 def runtime_provider_cost(runtime):

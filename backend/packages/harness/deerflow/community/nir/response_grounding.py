@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .prediction_evidence import prediction_succeeded
 from .user_wait import waiting_for_user
 
 _MANDATORY_WORKFLOW_ACTIONS = {
@@ -496,8 +497,21 @@ def validate_nir_response(
     summary = evidence.get("metrics_summary")
     summary = summary if isinstance(summary, Mapping) else {}
     attempt_records = _attempt_evidence_records(workflow)
+    if workflow.get("task_type") == "prediction":
+        # Training scores never measure the newly uploaded prediction batch.
+        evidence, summary, attempt_records = {}, {}, []
     allowed_metrics = _allowed_metric_values(attempt_records)
     violations: list[str] = []
+    if workflow.get("task_type") == "prediction":
+        prediction = workflow.get("prediction_evidence") or {}
+        if prediction_succeeded(workflow):
+            if re.search(r"没有可展示的建模结果|请先上传或选择数据，再开始建模", response_text):
+                violations.append("prediction_outcome_missing")
+            for match in re.finditer(r"/mnt/user-data/[^\s)\]<>\"']+\.csv", response_text):
+                if match.group() != prediction.get("output_path"):
+                    violations.append("artifact_path_mismatch:prediction")
+        elif prediction and _has_positive_marker(response_text, re.compile(r"预测已完成|预测完成|成功预测|已完成.{0,8}预测")):
+            violations.append("prediction_success_without_evidence")
     if workflow.get("search_protocol") == "sealed_holdout" and summary.get("test_status") == "sealed" and _has_positive_marker(response_text, _SEALED_TEST_PERFORMANCE_RE):
         violations.append("validation_scope_overclaim:sealed_test")
     required_action = required_nir_workflow_action(workflow)
@@ -670,6 +684,9 @@ def render_grounded_nir_response(
 ) -> str:
     """Explain the current outcome in ordinary language using trusted facts."""
 
+    if workflow.get("task_type") == "prediction":
+        return _render_prediction_response(workflow, include_downloads=include_downloads)
+
     if workflow.get("search_protocol") == "sealed_holdout" and workflow.get("decision_strategy") == "llm_autonomous" and workflow.get("stage") in {"execution", "decision_review", "budget_exhausted", "initial_result", "blocked"}:
         records = _attempt_evidence_records(workflow)
         lines = ["建模尚未完成，暂时无法提供完整结果。"]
@@ -681,7 +698,14 @@ def render_grounded_nir_response(
             lines.append("请在数据集页面补齐设置，保存后重新开始建模。")
         elif workflow.get("runtime_termination"):
             source = workflow["runtime_termination"].get("source")
-            lines.append("操作重复多次仍未完成，本次任务已停止。已有结果已保留。" if source == "loop_detection" else "本次任务达到运行限制，已停止。已有结果已保留。")
+            reason = {
+                "loop_detection": "操作重复多次仍未完成，本次任务已停止。",
+                "token_budget": "本次任务达到运行限制，已停止。",
+                "budget": "本次任务达到运行限制，已停止。",
+                "tool_failure": "模型服务调用失败，本次任务已停止。",
+                "decision_invalid": "决策内容未能正确解析，本次任务已停止。",
+            }.get(source, "建模过程中发生执行异常，本次任务已停止。")
+            lines.append(reason + "已有结果已保留。")
         elif workflow.get("continuation_failure"):
             lines.append("建模过程中未能完成下一步操作，本次任务已停止。可以稍后重新发起建模。")
         else:
@@ -734,10 +758,14 @@ def render_grounded_nir_response(
     library = workflow.get("model_library") or {}
     if library.get("status") in {"saved", "reused"}:
         status = "模型已保存到模型库。你可以打开模型卡片查看详情，并挂载到新对话中使用。"
+        if (workflow.get("registered_model") or {}).get("quality_status") == "below_threshold_user_approved":
+            status += "未达质量门槛，已由你确认保存，评价指标保持原样。"
     elif workflow.get("registered_model") and library.get("status") == "failed":
         status = "模型已完成登记，但保存到模型库未成功。可稍后重试保存，无需重新训练。"
     elif workflow.get("registered_model"):
         status = "模型已完成登记。"
+    elif any(item.get("name") == "nir_register_model" and item.get("status") == "error" for item in (workflow.get("tool_observations") or [])[-1:]):
+        status = "本次保存未成功，模型尚未写入模型库。可重试保存现有模型，无需重新训练。"
     elif workflow.get("stage") == "blocked":
         status = "本次建模已停止，已记录的结果如下。"
     else:
@@ -759,9 +787,41 @@ def render_grounded_nir_response(
     usable_count = audit_evidence.get("usable_wavelength_count")
     if isinstance(constant_count, int) and isinstance(usable_count, int):
         lines.append(f"- 光谱列：恒定波长列 {constant_count} 个；可用波长 {usable_count} 个（范围说明不代表已删除恒定列）")
-    if workflow.get("stage") == "review" and workflow.get("approval_status") == "pending" and summary.get("passed") is True:
-        lines.extend(["", "如需保存到模型库，回复“同意保存到模型库”即可。"])
+    if workflow.get("stage") == "review" and workflow.get("approval_status") == "pending":
+        lines.extend(["", "如需保存到模型库，回复“同意保存到模型库”即可。" if summary.get("passed") is True else "模型尚未达到质量门槛。如仍需保留此模型，回复“同意保存到模型库”，会按未达标状态保存。"])
     downloads = [f"[{label}]({evidence[key]})" for label, key in (("模型文件", "model_path"), ("结果数据", "metrics_path")) if evidence.get(key)]
     if downloads and include_downloads:
         lines.extend(["", " · ".join(downloads)])
     return "\n".join(lines)
+
+
+def _render_prediction_response(workflow: Mapping[str, Any], *, include_downloads: bool) -> str:
+    evidence = workflow.get("prediction_evidence") or {}
+    if not prediction_succeeded(workflow):
+        if evidence.get("status") == "error":
+            return "本次预测未成功，暂时没有可确认的预测结果。请查看预测步骤中的错误，检查新数据与模型的变量数量和预处理要求后重试预测。"
+        return "尚未确认新数据的预测结果。请先检查新数据，再使用所选模型执行预测；挂载模型后仍需执行预测。"
+    lines = [f"已使用所选模型完成 {evidence['n_samples']} 个样本的预测。"]
+    unit = str(workflow.get("unit") or "")
+    low, high, mean = (_display_number(evidence.get(key)) for key in ("prediction_min", "prediction_max", "prediction_mean"))
+    if low is not None and high is not None:
+        lines.append(f"预测值范围：{low}～{high}{unit}" + (f"，平均值：{mean}{unit}。" if mean is not None else "。"))
+    if evidence.get("task_kind") == "classification":
+        review = evidence.get("needs_review_count")
+        if isinstance(review, int):
+            lines.append(f"其中 {review} 个样本需复核，逐样本类别和置信度见结果文件。")
+    for item in evidence.get("predictions_summary") or []:
+        low, high, mean = (_display_number(item.get(key)) for key in ("min", "max", "mean"))
+        if low is not None and high is not None and mean is not None:
+            lines.append(f"{item.get('name', '目标')}：范围 {low}～{high}，平均值 {mean}。")
+    preprocessing = evidence.get("preprocessing") or {}
+    if preprocessing.get("applied") is True and preprocessing.get("description"):
+        lines.append(f"已复用模型保存的预处理：{preprocessing['description']}。")
+    drift = evidence.get("drift") or {}
+    if drift.get("available") and isinstance(drift.get("flagged_count"), int) and drift["flagged_count"] > 0:
+        lines.append(f"光谱分布检查提示 {drift['flagged_count']} 个样本偏离训练参考分布，建议优先复核这些样本；这不代表已经测得预测误差。")
+    if (workflow.get("audit_evidence") or {}).get("has_reference") is False:
+        lines.append("新数据没有参考值，因此无法计算这批样本的预测准确性；原模型的测试指标不代表本次预测效果。")
+    if include_downloads and evidence.get("output_path"):
+        lines.append(f"[下载预测结果 CSV]({evidence['output_path']})")
+    return "\n\n".join(lines)

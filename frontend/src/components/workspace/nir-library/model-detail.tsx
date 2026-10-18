@@ -34,6 +34,7 @@ import {
 import { FeatureDisabled } from "./dataset-library";
 import { PartitionCounts } from "./dataset-partitions";
 import { DatasetPreview } from "./dataset-preview";
+import { ModelQualityNotice } from "./model-quality-notice";
 import { PredictionFigure, SpectraFigure } from "./model-report-charts";
 
 export function ModelDetail({
@@ -259,6 +260,7 @@ export function ModelDetail({
               </Button>
             )}
           </header>
+          <ModelQualityNotice status={detail.model.quality_status} zh={zh} />
           <SectionTabs
             id="model-sections"
             label={text("模型详情目录", "Model report sections")}
