@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+
 from nir_core.io.loaders import load_mat
 from nir_core.io.schema import infer_csv_mapping, parse_number, profile_csv
 
@@ -64,7 +65,27 @@ def build_preview(path: Path, profile: dict | None = None) -> dict:
     fields: list[str] = []
     targets: list[tuple[str, np.ndarray, bool]] = []
     try:
-        if path.suffix.lower() == ".mat":
+        if mapping.get("partition"):
+            from .workspace import read_workbook
+
+            book = read_workbook(path, profile)
+            settings = mapping["workspace"]
+            active = np.flatnonzero(np.isin(book.usages, [1, 2, 3]))
+            selected = (book.coordinates >= settings["range"][0]) & (book.coordinates <= settings["range"][1])
+            X = book.X[active][:, selected]
+            axis = book.axis[selected] if book.axis is not None else None
+            sample_count, feature_count = X.shape
+            rows = np.linspace(0, sample_count - 1, min(sample_count, MAX_SAMPLES), dtype=int)
+            fields = book.fields
+            for i, name in enumerate(book.fields):
+                targets.append(
+                    (
+                        name,
+                        np.asarray([book.values[index][i] for index in active[rows]]),
+                        task == "classification",
+                    )
+                )
+        elif path.suffix.lower() == ".mat":
             hdf5 = _check_mat_size(path)
             allowed = {key: mapping[key] for key in ("x_var", "y_var", "wv_var", "subset", "transpose") if key in mapping}
             if mapping.get("library_parse", {}).get("format") == "mat":

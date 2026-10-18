@@ -85,6 +85,7 @@ def export_delivery(runtime, search, final, output_root):
             "schema_version": 1,
             "session_id": sid,
             "task": {key: value for key, value in session["task_snapshot"].items() if key != "_workflow_snapshot"},
+            "dataset_partition": session.get("library_partition"),
             "retained_experiment_id": frozen["experiment_id"],
             "stop_decision_id": session["stop_decision_id"],
             "stop_source": session["stop_source"],

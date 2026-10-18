@@ -268,9 +268,18 @@ async def list_profiles(dataset_id: str, request: Request, service: DatasetServi
 
 @router.get("/{dataset_id}/workspace")
 @require_permission("threads", "read")
-async def get_workspace(dataset_id: str, request: Request, service: DatasetService = Depends(get_dataset_service)) -> dict:
+async def get_workspace(
+    dataset_id: str,
+    request: Request,
+    profile_id: str | None = Query(default=None, max_length=64),
+    service: DatasetService = Depends(get_dataset_service),
+) -> dict:
     try:
-        return await service.get_workspace(_owner(request), dataset_id)
+        return await service.get_workspace(
+            _owner(request),
+            dataset_id,
+            **({"profile_id": profile_id} if profile_id else {}),
+        )
     except DatasetError as exc:
         _raise_dataset_error(exc)
 
@@ -278,23 +287,49 @@ async def get_workspace(dataset_id: str, request: Request, service: DatasetServi
 @router.get("/{dataset_id}/workspace/rows")
 @require_permission("threads", "read")
 async def get_workspace_rows(
-    dataset_id: str, request: Request, offset: int = Query(default=0, ge=0, le=5000), limit: int = Query(default=50, ge=1, le=100), query: str = Query(default="", max_length=200), service: DatasetService = Depends(get_dataset_service)
+    dataset_id: str,
+    request: Request,
+    offset: int = Query(default=0, ge=0, le=5000),
+    limit: int = Query(default=50, ge=1, le=100),
+    query: str = Query(default="", max_length=200),
+    profile_id: str | None = Query(default=None, max_length=64),
+    service: DatasetService = Depends(get_dataset_service),
 ) -> dict:
     try:
-        return await service.get_workspace(_owner(request), dataset_id, view="rows", offset=offset, limit=limit, query=query)
+        return await service.get_workspace(
+            _owner(request),
+            dataset_id,
+            view="rows",
+            offset=offset,
+            limit=limit,
+            query=query,
+            **({"profile_id": profile_id} if profile_id else {}),
+        )
     except DatasetError as exc:
         _raise_dataset_error(exc)
 
 
 @router.get("/{dataset_id}/workspace/spectra")
 @require_permission("threads", "read")
-async def get_workspace_spectra(dataset_id: str, request: Request, indices: str | None = Query(default=None, max_length=200), service: DatasetService = Depends(get_dataset_service)) -> dict:
+async def get_workspace_spectra(
+    dataset_id: str,
+    request: Request,
+    indices: str | None = Query(default=None, max_length=200),
+    profile_id: str | None = Query(default=None, max_length=64),
+    service: DatasetService = Depends(get_dataset_service),
+) -> dict:
     try:
         chosen = None if indices is None else ([int(value) for value in indices.split(",")] if indices else [])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="样本编号无效。") from exc
     try:
-        return await service.get_workspace(_owner(request), dataset_id, view="spectra", indices=chosen)
+        return await service.get_workspace(
+            _owner(request),
+            dataset_id,
+            view="spectra",
+            indices=chosen,
+            **({"profile_id": profile_id} if profile_id else {}),
+        )
     except DatasetError as exc:
         _raise_dataset_error(exc)
 

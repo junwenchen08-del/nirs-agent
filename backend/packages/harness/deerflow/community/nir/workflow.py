@@ -114,6 +114,7 @@ _AGENT_VIEW_FIELDS = (
     "dataset_profile_id",
     "dataset_sha256",
     "dataset_attachment_id",
+    "dataset_partition",
     "model_path",
     "metrics_path",
     "audit_evidence",

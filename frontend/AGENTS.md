@@ -1,5 +1,15 @@
 # AGENTS.md
 
+Dataset overview lists immutable split Profiles separately from parsing versions.
+`?profile=<id>` pins all workspace summary/row/spectra/preview reads and disables
+role/range/parsing edits; historical model links pin their exact Profile as well.
+`dataset-partitions.ts` owns encoded dataset and chat links. New-chat
+`datasetProfile=<id>` must mount that explicit owned version and reject a missing
+or mismatched response instead of falling back to the current parsing Profile.
+Split metadata/counts must match the response Profile identity. Plain dataset
+mounts still use the current confirmed parsing/workspace version. Browser anchor:
+`dataset-partitions.spec.ts`. No view starts a run or reconstructs missing splits.
+
 Chinese is the product default on the server and first browser visit, including
 English browsers. Restore explicit saved language choices; do not infer a new
 preference from navigator.language. Setup/auth feedback and docs/blog navigation

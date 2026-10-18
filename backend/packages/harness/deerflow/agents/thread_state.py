@@ -90,6 +90,7 @@ class NIRWorkflowState(TypedDict):
     dataset_profile_id: NotRequired[str | None]
     dataset_sha256: NotRequired[str | None]
     dataset_attachment_id: NotRequired[str | None]
+    dataset_partition: NotRequired[dict | None]
     model_path: NotRequired[str | None]
     metrics_path: NotRequired[str | None]
     audit_evidence: NotRequired[dict | None]

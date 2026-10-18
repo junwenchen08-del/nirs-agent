@@ -19,6 +19,7 @@ import {
 } from "@/core/nir-library";
 
 import { DatasetParsingSettings } from "./dataset-parsing-settings";
+import { DatasetPartitions } from "./dataset-partitions";
 import { DatasetPreview } from "./dataset-preview";
 
 export function DatasetDetailsPanel({
@@ -27,12 +28,14 @@ export function DatasetDetailsPanel({
   disabled = false,
   onSaved,
   expandParsing = false,
+  profileId = null,
 }: {
   dataset: NIRDataset;
   section?: "all" | "overview" | "parsing";
   disabled?: boolean;
   onSaved?: () => void;
   expandParsing?: boolean;
+  profileId?: string | null;
 }) {
   const { t, locale } = useI18n();
   const copy = t.nirLibrary;
@@ -81,12 +84,13 @@ export function DatasetDetailsPanel({
       .catch(() => {
         if (!controller.signal.aborted) setDetailError(true);
       });
-    void getDatasetPreview(selected.id, controller.signal)
+    void getDatasetPreview(selected.id, controller.signal, profileId)
       .then((data) => {
         if (!controller.signal.aborted) {
           if (
             data.dataset_id !== selected.id ||
-            data.source_sha256 !== selected.sha256
+            data.source_sha256 !== selected.sha256 ||
+            (profileId && data.profile_id !== profileId)
           )
             throw new Error("Dataset preview identity mismatch");
           setPreviews({ [selected.id]: data });
@@ -113,7 +117,7 @@ export function DatasetDetailsPanel({
     return () => controller.abort();
     // Locale does not change the resource identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected.id, selected.sha256, revision]);
+  }, [selected.id, selected.sha256, revision, profileId]);
   async function action(work: () => Promise<unknown>, _close = false) {
     if (disabled) return;
     setWorking(true);
@@ -156,8 +160,15 @@ export function DatasetDetailsPanel({
           </div>
         )}
       </div>
+      {section !== "parsing" && detail && (
+        <DatasetPartitions
+          datasetId={selected.id}
+          profiles={detail.profiles}
+          zh={locale.startsWith("zh")}
+        />
+      )}
       <details
-        hidden={section === "overview"}
+        hidden={section === "overview" || !!profileId}
         className="space-y-3 rounded-lg border p-4"
         open={section === "parsing" || parsingExpanded}
         onToggle={(event) => setParsingExpanded(event.currentTarget.open)}
@@ -197,46 +208,50 @@ export function DatasetDetailsPanel({
           ) : detail.profiles.length === 0 ? (
             <p className="text-muted-foreground text-sm">{copy.noProfiles}</p>
           ) : (
-            detail.profiles.map((item) => (
-              <div key={item.id} className="rounded-lg border p-3 text-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-mono text-xs">
-                    v{item.profile_version} · {item.id}
-                  </span>
-                  <Badge variant="outline">
-                    {copy.statuses[item.profile_status] ?? item.profile_status}
-                  </Badge>
+            detail.profiles
+              .filter((item) => item.profile_status !== "split")
+              .map((item) => (
+                <div key={item.id} className="rounded-lg border p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono text-xs">
+                      v{item.profile_version} · {item.id}
+                    </span>
+                    <Badge variant="outline">
+                      {copy.statuses[item.profile_status] ??
+                        item.profile_status}
+                    </Badge>
+                  </div>
+                  <p className="text-muted-foreground mt-1">
+                    {item.task_type === "classification"
+                      ? groupLabels.classification
+                      : item.task_type === "calibration"
+                        ? groupLabels.regression
+                        : text("查看光谱", "Inspect spectra")}{" "}
+                    ·{" "}
+                    {item.schema_status === "needs_user_mapping"
+                      ? text("需要确认列对应关系", "Column mapping needed")
+                      : text("已有解析设置", "Parsing settings available")}
+                  </p>
+                  {item.profile_status === "draft" &&
+                    item.schema_status !== "needs_user_mapping" && (
+                      <Button
+                        className="mt-2"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() =>
+                          action(
+                            () =>
+                              confirmDatasetProfile(item.dataset_id, item.id),
+                            false,
+                          )
+                        }
+                      >
+                        {copy.confirmProfile}
+                      </Button>
+                    )}
                 </div>
-                <p className="text-muted-foreground mt-1">
-                  {item.task_type === "classification"
-                    ? groupLabels.classification
-                    : item.task_type === "calibration"
-                      ? groupLabels.regression
-                      : text("查看光谱", "Inspect spectra")}{" "}
-                  ·{" "}
-                  {item.schema_status === "needs_user_mapping"
-                    ? text("需要确认列对应关系", "Column mapping needed")
-                    : text("已有解析设置", "Parsing settings available")}
-                </p>
-                {item.profile_status === "draft" &&
-                  item.schema_status !== "needs_user_mapping" && (
-                    <Button
-                      className="mt-2"
-                      size="sm"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() =>
-                        action(
-                          () => confirmDatasetProfile(item.dataset_id, item.id),
-                          false,
-                        )
-                      }
-                    >
-                      {copy.confirmProfile}
-                    </Button>
-                  )}
-              </div>
-            ))
+              ))
           )}
           <div className="space-y-2 rounded-lg border p-3">
             <h4 className="text-sm font-medium">{copy.createProfile}</h4>

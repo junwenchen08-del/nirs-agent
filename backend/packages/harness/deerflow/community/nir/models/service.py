@@ -316,6 +316,43 @@ class ModelService:
             source = await asyncio.to_thread(recorded_source, metrics, self.paths, owner, thread)
             if source is None:
                 return None
+            receipt = source["session"].get("library_partition")
+            if receipt:
+                from deerflow.community.nir.dataset_partitions import partition_summary
+
+                if receipt != (metrics.get("autonomous_decision_audit") or {}).get("dataset_partition"):
+                    return None
+                dataset = await session.scalar(
+                    select(NIRDatasetRow).where(
+                        NIRDatasetRow.id == receipt["dataset_id"],
+                        NIRDatasetRow.owner_user_id == owner,
+                        NIRDatasetRow.status.in_({"ready", "archived"}),
+                    )
+                )
+                profile = await session.scalar(
+                    select(NIRDatasetProfileRow).where(
+                        NIRDatasetProfileRow.id == receipt["profile_id"],
+                        NIRDatasetProfileRow.dataset_id == receipt["dataset_id"],
+                        NIRDatasetProfileRow.owner_user_id == owner,
+                        NIRDatasetProfileRow.profile_status == "split",
+                    )
+                )
+                if (
+                    dataset is None
+                    or profile is None
+                    or profile.mapping_sha256 != receipt["mapping_sha256"]
+                    or profile.mapping_json.get("partition", {}).get("data_sha256") != source["session"].get("source_digest")
+                    or not await asyncio.to_thread(verified_library_source, self.paths, owner, dataset)
+                ):
+                    return None
+                return {
+                    "id": dataset.id,
+                    "name": dataset.name,
+                    "source_sha256": dataset.sha256,
+                    "profile_id": profile.id,
+                    "partition": partition_summary(profile),
+                    "partition_mapping_sha256": profile.mapping_sha256,
+                }
             dataset = await session.scalar(select(NIRDatasetRow).where(NIRDatasetRow.owner_user_id == owner, NIRDatasetRow.sha256 == source["sha256"], NIRDatasetRow.status.in_({"ready", "archived"})))
             profile_id = None
             if dataset is None:
@@ -465,11 +502,17 @@ class ModelService:
             raise ModelError("lineage_mismatch", "Workflow attempt lineage is missing")
         preprocessing = {"steps": metrics.get("preprocessing_steps", [])}
         lineage_workflow = dict(workflow)
-        if not workflow.get("dataset_id") and not workflow.get("dataset_profile_id"):
+        recovered = None
+        if (metrics.get("autonomous_decision_audit") or {}).get("dataset_partition") or not workflow.get("dataset_id") and not workflow.get("dataset_profile_id"):
             async with self.session_factory() as session:
                 recovered = await self._recover_dataset(session, owner, source_thread_id, metrics)
             if recovered:
                 lineage_workflow.update(dataset_id=recovered["id"], dataset_profile_id=recovered["profile_id"])
+            elif (metrics.get("autonomous_decision_audit") or {}).get("dataset_partition"):
+                raise ModelError(
+                    "lineage_mismatch",
+                    "模型的固定划分关联无法核实，未保存其他数据版本。",
+                )
         metadata = {
             "schema_version": 1,
             "model_id": model_id,
@@ -488,6 +531,7 @@ class ModelService:
                 "workflow_project_id": workflow.get("project_id"),
                 "dataset_id": lineage_workflow.get("dataset_id"),
                 "profile_id": lineage_workflow.get("dataset_profile_id"),
+                **({"partition_mapping_sha256": recovered["partition_mapping_sha256"]} if recovered and recovered.get("partition") else {}),
                 "tool_call_id": evidence.get("tool_call_id"),
             },
         }
@@ -666,6 +710,32 @@ class ModelService:
                 )
                 if dataset_row:
                     dataset = {"id": dataset_row.id, "name": dataset_row.name, "source_sha256": dataset_row.sha256, "profile_id": row.source_profile_id}
+                    if row.source_profile_id:
+                        profile = await session.scalar(
+                            select(NIRDatasetProfileRow).where(
+                                NIRDatasetProfileRow.id == row.source_profile_id,
+                                NIRDatasetProfileRow.dataset_id == dataset_row.id,
+                                NIRDatasetProfileRow.owner_user_id == owner,
+                            )
+                        )
+                        if profile and profile.profile_status == "split":
+                            from deerflow.community.nir.dataset_partitions import (
+                                partition_summary,
+                            )
+
+                            expected_hash = metadata.get("source", {}).get("partition_mapping_sha256")
+                            if expected_hash and expected_hash != profile.mapping_sha256:
+                                raise ModelError(
+                                    "lineage_mismatch",
+                                    "模型关联的固定划分版本校验失败。",
+                                )
+                            try:
+                                dataset["partition"] = partition_summary(profile)
+                            except ValueError as exc:
+                                raise ModelError(
+                                    "lineage_mismatch",
+                                    "模型关联的固定划分版本校验失败。",
+                                ) from exc
             elif row.source_dataset_id is None:
                 dataset = await self._recover_dataset(session, owner, row.source_thread_id, verified["metrics"])
             model = _public(row)

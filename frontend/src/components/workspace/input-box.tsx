@@ -726,6 +726,7 @@ export function InputBox({
   );
 
   const datasetFromLibrary = searchParams.get("dataset");
+  const datasetProfileFromLibrary = searchParams.get("datasetProfile");
   useEffect(() => {
     if (
       !datasetFromLibrary ||
@@ -751,6 +752,7 @@ export function InputBox({
           dataset.id,
           threadId,
           controller.signal,
+          datasetProfileFromLibrary ?? undefined,
         );
         const selection: MountedDataset = {
           threadId,
@@ -769,6 +771,7 @@ export function InputBox({
         const url = new URL(window.location.href);
         if (url.searchParams.get("dataset") === datasetFromLibrary) {
           url.searchParams.delete("dataset");
+          url.searchParams.delete("datasetProfile");
           window.history.replaceState(
             window.history.state,
             "",
@@ -788,6 +791,7 @@ export function InputBox({
     return () => controller.abort();
   }, [
     datasetFromLibrary,
+    datasetProfileFromLibrary,
     threadId,
     isWelcomeMode,
     enableDatasetCommand,

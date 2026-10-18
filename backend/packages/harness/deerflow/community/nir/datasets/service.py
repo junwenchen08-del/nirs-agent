@@ -222,6 +222,8 @@ def _public(row: NIRDatasetRow) -> dict:
 
 
 def _public_profile(row: NIRDatasetProfileRow) -> dict:
+    from ..dataset_partitions import partition_summary
+
     created_at = row.created_at
     confirmed_at = row.confirmed_at
     if created_at is not None and created_at.tzinfo is None:
@@ -239,6 +241,7 @@ def _public_profile(row: NIRDatasetProfileRow) -> dict:
         "mapping_sha256": row.mapping_sha256,
         "confirmed_at": confirmed_at.isoformat() if confirmed_at else None,
         "created_at": created_at.isoformat() if created_at else None,
+        "partition": partition_summary(row) if row.profile_status == "split" else None,
     }
 
 
@@ -747,7 +750,7 @@ class DatasetService:
                 .where(
                     NIRDatasetProfileRow.dataset_id == dataset_id,
                     NIRDatasetProfileRow.owner_user_id == owner,
-                    NIRDatasetProfileRow.profile_status.in_({"confirmed", "superseded"} if profile_id else {"confirmed"}),
+                    NIRDatasetProfileRow.profile_status.in_({"confirmed", "superseded", "split"} if profile_id else {"confirmed"}),
                     *([NIRDatasetProfileRow.id == profile_id] if profile_id else []),
                 )
                 .order_by(NIRDatasetProfileRow.profile_version.desc())
@@ -755,6 +758,8 @@ class DatasetService:
             )
             if profile_id and profile is None:
                 raise DatasetError("profile_not_found", "训练时的数据解析版本已不可用。")
+            if profile and _validated_mapping(profile.mapping_json)[1] != profile.mapping_sha256:
+                raise DatasetError("profile_unavailable", "保存版本的校验失败。")
             path = self.paths.user_nir_dataset_dir(owner, row.id) / PurePosixPath(row.storage_relpath).name
             result = await asyncio.to_thread(build_preview, path, _public_profile(profile) if profile else None)
             # A changed or replaced file must never be presented as this dataset.
@@ -871,7 +876,7 @@ class DatasetService:
                 await session.commit()
                 return _public_profile(profile)
 
-    async def _workspace_source(self, session, owner: str, dataset_id: str):
+    async def _workspace_source(self, session, owner: str, dataset_id: str, profile_id: str | None = None):
         from .workspace import WorkspaceError, read_workbook
 
         self._enabled()
@@ -885,10 +890,17 @@ class DatasetService:
         await self._verify_row(session, owner, row)
         profile = await session.scalar(
             select(NIRDatasetProfileRow)
-            .where(NIRDatasetProfileRow.dataset_id == dataset_id, NIRDatasetProfileRow.owner_user_id == owner, NIRDatasetProfileRow.profile_status == "confirmed")
+            .where(
+                NIRDatasetProfileRow.dataset_id == dataset_id,
+                NIRDatasetProfileRow.owner_user_id == owner,
+                NIRDatasetProfileRow.profile_status.in_({"confirmed", "superseded", "split"} if profile_id else {"confirmed"}),
+                *([NIRDatasetProfileRow.id == profile_id] if profile_id else []),
+            )
             .order_by(NIRDatasetProfileRow.profile_version.desc())
             .limit(1)
         )
+        if profile_id and profile is None:
+            raise DatasetError("profile_not_found", "保存的数据版本已不可用。")
         if profile:
             _mapping, digest = _validated_mapping(profile.mapping_json)
             if digest != profile.mapping_sha256:
@@ -905,11 +917,22 @@ class DatasetService:
         await self._verify_row(session, owner, row)
         return row, profile, book
 
-    async def get_workspace(self, owner: str, dataset_id: str, *, view="summary", offset=0, limit=50, query="", indices=None) -> dict:
+    async def get_workspace(
+        self,
+        owner: str,
+        dataset_id: str,
+        *,
+        view="summary",
+        offset=0,
+        limit=50,
+        query="",
+        indices=None,
+        profile_id=None,
+    ) -> dict:
         from .workspace import WorkspaceError, workbook_rows, workbook_spectra, workbook_summary
 
         async with self.session_factory() as session:
-            row, profile, book = await self._workspace_source(session, owner, dataset_id)
+            row, profile, book = await self._workspace_source(session, owner, dataset_id, profile_id=profile_id)
             try:
                 if view == "rows":
                     result = workbook_rows(book, offset, limit, query)
@@ -919,7 +942,16 @@ class DatasetService:
                     result = workbook_summary(book, _public_profile(profile) if profile else None)
             except WorkspaceError as exc:
                 raise DatasetError("invalid_workspace", str(exc)) from exc
-            return {"dataset_id": row.id, "source_sha256": row.sha256, "profile_id": profile.id if profile else None, **result}
+            from ..dataset_partitions import partition_summary
+
+            return {
+                "dataset_id": row.id,
+                "source_sha256": row.sha256,
+                "profile_id": profile.id if profile else None,
+                "read_only": bool(profile_id),
+                "partition": partition_summary(profile) if profile and profile.profile_status == "split" else None,
+                **result,
+            }
 
     async def save_workspace(self, owner: str, dataset_id: str, *, source_sha256: str, profile_id: str | None, usages: list[int], band_range: list[float]) -> dict:
         from .workspace import WorkspaceError, validate_settings, workbook_summary
@@ -1026,6 +1058,8 @@ class DatasetService:
         if schema_status not in _PROFILE_SCHEMA_STATUSES:
             raise DatasetError("invalid_profile", "Unsupported profile schema status")
         clean_mapping, mapping_digest = _validated_mapping(mapping)
+        if {"partition", "model_input"}.intersection(clean_mapping):
+            raise DatasetError("invalid_profile", "建模划分由系统保存，不能通过解析设置创建。")
         root = self.paths.user_nir_datasets_dir(owner)
         async with _owner_admission_lock(root):
             async with self.session_factory() as session:
@@ -1204,7 +1238,7 @@ class DatasetService:
                     )
                     if profile is None:
                         raise DatasetError("profile_not_found", "Profile not found")
-                    if profile.profile_status != "confirmed":
+                    if profile.profile_status not in {"confirmed", "split"}:
                         raise DatasetError("profile_unconfirmed", "Only a confirmed Profile can be attached for reuse")
                     _mapping, profile_digest = _validated_mapping(profile.mapping_json)
                     if profile_digest != profile.mapping_sha256:

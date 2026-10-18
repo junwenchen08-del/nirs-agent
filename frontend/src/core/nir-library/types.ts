@@ -20,6 +20,17 @@ export interface NIRDatasetProfile {
   mapping_sha256: string | null;
   confirmed_at: string | null;
   created_at: string | null;
+  partition?: DatasetPartition | null;
+}
+
+export interface DatasetPartition {
+  profile_id: string;
+  version: number;
+  method: "random" | "fixed";
+  counts: { calibration: number; validation: number; test: number };
+  parent_profile_id: string | null;
+  source_thread_id: string;
+  session_id: string;
 }
 
 export interface NIRDatasetDetail extends NIRDataset {
@@ -81,6 +92,8 @@ export interface DatasetWorkspace {
   usages: number[];
   range: [number, number];
   selected_feature_count: number;
+  read_only?: boolean;
+  partition?: DatasetPartition | null;
 }
 
 export interface DatasetWorkspaceRows {
@@ -220,6 +233,7 @@ export interface NIRModelDetail {
     name: string;
     source_sha256: string;
     profile_id: string | null;
+    partition?: DatasetPartition | null;
   } | null;
 }
 

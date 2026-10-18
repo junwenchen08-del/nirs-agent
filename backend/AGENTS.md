@@ -1,5 +1,18 @@
 # AGENTS.md
 
+New sealed regression ingestion records exact ordered Cal/Val/Test row indices
+once in the private session; `dataset_partitions.py` verifies the original owned
+library source and exact input Profile before storing a `profile_status=split`
+snapshot. It does not supersede the current confirmed parsing/workspace Profile.
+Snapshots reuse existing Profile rows (no ORM migration), include source/parser,
+membership, order, split parameters and frozen CV identity, and are not human
+confirmation or model approval. Explicit pinned workspace reads are read-only;
+explicit split attachment materializes the recorded order without repartitioning.
+`library_partition` is a durable idempotent session receipt, exported in the
+model audit and verified at promotion before selecting the model's source Profile.
+Old sessions without recorded membership are never backfilled or re-run. Tests:
+`test_nir_dataset_partitions.py`; see docs/nir-dataset-partitions.md.
+
 Default Lead prompt identity, Gateway API documentation and IM connection/reply
 copy use ChemAgent. Existing Python package names, wire headers, environment
 variables and data locations are compatibility contracts. Custom agent names

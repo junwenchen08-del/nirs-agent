@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
+
 from nir_core.io.loaders import load_mat
 from nir_core.io.schema import infer_csv_mapping, parse_number, profile_csv
 
@@ -57,7 +58,32 @@ def read_workbook(path: Path, profile: dict | None = None) -> Workbook:
     mapping = dict((profile or {}).get("mapping") or {})
     settings = mapping.pop("workspace", None)
     groups = None
-    if path.suffix.lower() == ".mat":
+    if mapping.get("model_input"):
+        # Server-recorded ingestion mapping, never inferred from current UI
+        # preferences. Used only for exact, immutable modeling split versions.
+        from nir_core.io.loaders import load_csv
+
+        options = mapping["model_input"]
+        if path.suffix.lower() == ".mat":
+            _check_mat_size(path)
+            data = load_mat(
+                str(path),
+                **{key: options[key] for key in ("x_var", "y_var", "wv_var", "transpose") if key in options},
+            )
+        else:
+            table = profile_csv(str(path), max_rows=202)
+            if table.total_rows > MAX_ROWS + 1 or table.total_rows * table.n_columns > MAX_ELEMENTS:
+                raise WorkspaceError("数据超出工作台支持的规模，无法读取此划分版本。")
+            data = load_csv(str(path), y_col=options["y_col"])
+        X, axis = np.asarray(data.X, dtype=float), data.wv
+        names = list(data.sample_names or [])
+        target = np.asarray(data.y, dtype=float).reshape(-1)
+        if len(target) != len(X):
+            raise WorkspaceError("建模目标与光谱样本不一致。")
+        fields = list(data.y_names or ["目标值"])
+        values = [[float(value)] for value in target]
+        usages = [0] * len(X)
+    elif path.suffix.lower() == ".mat":
         parsed = mapping.get("library_parse", {})
         hdf5 = _check_mat_size(path)
         options = {key: mapping[key] for key in ("x_var", "y_var", "wv_var", "subset", "transpose") if key in mapping}
@@ -142,6 +168,28 @@ def read_workbook(path: Path, profile: dict | None = None) -> Workbook:
     if settings:
         checked = validate_settings(workbook, settings["usages"], settings["range"])
         workbook.usages = checked["usages"]
+    partition = (profile or {}).get("mapping", {}).get("partition")
+    if partition:
+        from nir_core.utils.scientific_validation import _array_digest
+
+        # Also detect parser drift across software upgrades. A saved version
+        # must never silently select different targets/axes from the same bytes.
+        if len(workbook.fields) != 1 or not settings:
+            raise WorkspaceError("固定划分的解析设置不完整，无法读取此版本。")
+        selected = (workbook.coordinates >= settings["range"][0]) & (workbook.coordinates <= settings["range"][1])
+        arrays = {}
+        for part, short, code in (("calibration", "cal", 1), ("validation", "val", 2), ("test", "test", 3)):
+            indices = partition["indices"][part]
+            if any(type(i) is not int or not 0 <= i < len(workbook.X) or workbook.usages[i] != code for i in indices):
+                raise WorkspaceError("固定划分的样本归属校验失败。")
+            arrays["X_" + short] = np.asarray(workbook.X[indices][:, selected], dtype=float)
+            arrays["y_" + short] = np.asarray([workbook.values[i][0] for i in indices], dtype=float)
+            if workbook.groups:
+                arrays["groups_" + short] = np.asarray([workbook.groups[i] for i in indices], dtype=str)
+        if workbook.axis is not None:
+            arrays["wv"] = workbook.axis[selected]
+        if _array_digest(*(arrays[key] for key in sorted(arrays))) != partition["data_sha256"]:
+            raise WorkspaceError("解析结果与建模时的固定划分不一致，无法读取此版本。")
     return workbook
 
 
@@ -210,7 +258,11 @@ def write_workspace_csv(book: Workbook, settings: dict, destination: Path, *, pa
                 *((str(float(book.coordinates[i])) if book.axis is not None else f"index:{i + 1}") for i in selected),
             ]
         )
-        for row, code in enumerate(settings["usages"]):
+        order = settings.get("sample_order", list(range(len(book.X))))
+        if len(order) != len(book.X) or any(type(i) is not int for i in order) or sorted(order) != list(range(len(book.X))):
+            raise WorkspaceError("划分版本的样本顺序无效。")
+        for row in order:
+            code = settings["usages"][row]
             writer.writerow([book.names[row], USAGES[code], *(["1"] if parsing_only else []), *([book.groups[row]] if book.groups else []), *book.values[row], *(float(book.X[row, i]) for i in selected)])
     if destination.stat().st_size > MAX_FILE_BYTES:
         raise WorkspaceError("所选数据导出后超过 64 MB，请缩小光谱范围后再挂载。")

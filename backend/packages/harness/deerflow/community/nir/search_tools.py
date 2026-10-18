@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -12,6 +13,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool
 from langgraph.types import Command
 
+from deerflow.tools.sync import make_sync_tool_wrapper
 from deerflow.tools.types import Runtime
 
 from ._common import _bind_model_metrics, _load_npz_safely, _resolve, _sha256_file, _write_trusted_model_artifact
@@ -168,7 +170,15 @@ def publish_final_delivery(runtime, service, workflow, payload):
 
 
 @tool("nir_prepare_search")
-def nir_prepare_search_tool(runtime: Runtime, cv_folds: int = 5, y_col: int = 0, x_var: str | None = None, y_var: str | None = None, wv_var: str | None = None, transpose: bool | None = None) -> Command:
+def nir_prepare_search_tool(
+    runtime: Runtime,
+    cv_folds: int = 5,
+    y_col: int = 0,
+    x_var: str | None = None,
+    y_var: str | None = None,
+    wv_var: str | None = None,
+    transpose: bool | None = None,
+) -> Command:
     """Bind the workflow source once, seal Test, and return only Cal/Val metadata.
 
     Supports numeric NPZ (X/y or named X_cal/y_cal, X_val/y_val,
@@ -194,6 +204,21 @@ def nir_prepare_search_tool(runtime: Runtime, cv_folds: int = 5, y_col: int = 0,
         source = _resolve(runtime, workflow["data_path"], read_only=True)
         budget.check_file(source, stage="sealed_ingestion")
         source_file = {"virtual_path": workflow["data_path"], "sha256": _sha256_file(source), "size_bytes": Path(source).stat().st_size}
+        partition_manifest = None
+        workspace = None
+        input_mapping = {
+            "y_col": y_col,
+            **{
+                key: value
+                for key, value in {
+                    "x_var": x_var,
+                    "y_var": y_var,
+                    "wv_var": wv_var,
+                    "transpose": transpose,
+                }.items()
+                if value is not None
+            },
+        }
         if Path(source).suffix.lower() == ".npz":
             data = _load_npz_safely(source)
         elif Path(source).suffix.lower() == ".mat":
@@ -204,6 +229,19 @@ def nir_prepare_search_tool(runtime: Runtime, cv_folds: int = 5, y_col: int = 0,
             workspace = load_workspace_export(source)
             if workspace is not None:
                 data = fixed_regression_partitions(workspace)
+                if "X_cal" in data:
+                    partition_manifest = {
+                        "method": "fixed",
+                        "parameters": {},
+                        "indices": {
+                            part: np.flatnonzero(workspace["usage"] == role).tolist()
+                            for part, role in (
+                                ("calibration", "train"),
+                                ("validation", "validation"),
+                                ("test", "test"),
+                            )
+                        },
+                    }
             else:
                 loaded = load_csv(source, y_col=y_col)
                 data = {"X": loaded.X, "y": loaded.y}
@@ -216,8 +254,42 @@ def nir_prepare_search_tool(runtime: Runtime, cv_folds: int = 5, y_col: int = 0,
                 raise ValueError("Grouped datasets require explicit named partitions in phase 1")
             X, y = np.asarray(data["X"]), np.asarray(data["y"])
             budget.check_array(X, target_count=1, stage="sealed_split")
-            cal, val, holdout = split_dataset(X, y, test_ratio=0.2, val_ratio=0.2, random_state=42)
-            data = {"X_cal": cal[0], "y_cal": cal[1], "X_val": val[0], "y_val": val[1], "X_test": holdout[0], "y_test": holdout[1], **({"wv": data["wv"]} if "wv" in data else {})}
+            # Split row identities once alongside X, retaining the exact shuffled
+            # order. Membership must never be reconstructed from values/seeds.
+            cal, val, holdout = split_dataset(X, np.arange(len(X)), test_ratio=0.2, val_ratio=0.2, random_state=42)
+            chosen = [part[1].astype(int) for part in (cal, val, holdout)]
+            partition_manifest = {
+                "method": "random",
+                "parameters": {
+                    "test_ratio": 0.2,
+                    "validation_ratio": 0.2,
+                    "random_state": 42,
+                },
+                "indices": dict(
+                    zip(
+                        ("calibration", "validation", "test"),
+                        [indices.tolist() for indices in chosen],
+                        strict=True,
+                    )
+                ),
+            }
+            data = {
+                "X_cal": cal[0],
+                "y_cal": y[chosen[0]],
+                "X_val": val[0],
+                "y_val": y[chosen[1]],
+                "X_test": holdout[0],
+                "y_test": y[chosen[2]],
+                **({"wv": data["wv"]} if "wv" in data else {}),
+            }
+        if partition_manifest is not None:
+            partition_manifest.update(
+                source_file=source_file,
+                input_mapping=input_mapping,
+                feature_count=int(data["X_cal"].shape[1]),
+            )
+        if _sha256_file(source) != source_file["sha256"] or Path(source).stat().st_size != source_file["size_bytes"]:
+            raise ValueError("Source changed during ingestion")
         for name in ("cal", "val", "test"):
             budget.check_array(data["X_" + name], target_count=1, stage="sealed_partition_integrity")
         options = {"autonomous_rounds": True, "max_decisions": workflow.get("max_decisions", 20), "max_fits": workflow.get("max_fits", 200)} if workflow.get("autonomous_rounds") else {}
@@ -235,7 +307,14 @@ def nir_prepare_search_tool(runtime: Runtime, cv_folds: int = 5, y_col: int = 0,
             if workflow["delivery_policy"].get("automatic_delivery"):
                 options["task_snapshot"]["_workflow_snapshot"] = workflow
         payload = service.prepare(
-            workflow["project_id"], data, cv_folds=cv_folds, max_experiments=workflow["max_attempts"], domain=workflow.get("domain") or "default", decision_strategy=workflow.get("decision_strategy", "legacy"), **options
+            workflow["project_id"],
+            data,
+            cv_folds=cv_folds,
+            max_experiments=workflow["max_attempts"],
+            domain=workflow.get("domain") or "default",
+            decision_strategy=workflow.get("decision_strategy", "legacy"),
+            partition_manifest=partition_manifest,
+            **options,
         )
         updated = {
             **workflow,
@@ -262,6 +341,28 @@ def nir_prepare_search_tool(runtime: Runtime, cv_folds: int = 5, y_col: int = 0,
         )
     except Exception as exc:
         return _ingestion_failure(runtime, exc)
+
+
+_prepare_search_sync = nir_prepare_search_tool.func
+
+
+async def _prepare_search_with_partition(
+    runtime: Runtime,
+    cv_folds: int = 5,
+    y_col: int = 0,
+    x_var: str | None = None,
+    y_var: str | None = None,
+    wv_var: str | None = None,
+    transpose: bool | None = None,
+) -> Command:
+    from .dataset_partitions import save_prepared_partition
+
+    result = await asyncio.to_thread(_prepare_search_sync, runtime, cv_folds, y_col, x_var, y_var, wv_var, transpose)
+    return await save_prepared_partition(runtime, result)
+
+
+nir_prepare_search_tool.coroutine = _prepare_search_with_partition
+nir_prepare_search_tool.func = make_sync_tool_wrapper(_prepare_search_with_partition, "nir_prepare_search")
 
 
 @tool("nir_search_model")

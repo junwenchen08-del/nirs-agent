@@ -26,6 +26,9 @@ import {
   getDatasetParsing,
   previewDatasetParsing,
   saveDatasetParsing,
+  getDatasetWorkspace,
+  getDatasetWorkspaceRows,
+  getDatasetWorkspaceSpectra,
 } from "@/core/nir-library/api";
 
 const mockedFetch = rs.mocked(fetcher);
@@ -42,6 +45,51 @@ beforeEach(() => {
 });
 
 describe("NIR library API", () => {
+  test("pinned workspace reads retain the exact profile for table and charts", async () => {
+    mockedFetch.mockImplementation(async () => jsonResponse(200, {}));
+    await getDatasetWorkspace("ds1", undefined, "split_3");
+    await getDatasetWorkspaceRows("ds1", 50, "样本", undefined, "split_3");
+    await getDatasetWorkspaceSpectra("ds1", [2, 5], undefined, "split_3");
+    for (const [url] of mockedFetch.mock.calls) {
+      expect(url).toContain("profile_id=split_3");
+    }
+  });
+
+  test("explicit partition mounting cannot fall back to the latest parsing profile", async () => {
+    mockedFetch
+      .mockResolvedValueOnce(jsonResponse(200, { thread_id: "t1" }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          profiles: [
+            { id: "split_3", dataset_id: "ds1", profile_status: "split" },
+            {
+              id: "parse_4",
+              profile_status: "confirmed",
+              profile_version: 4,
+              mapping: { workspace: {} },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          dataset_id: "ds1",
+          profile_id: "split_3",
+          status: "attached",
+        }),
+      );
+    await attachDatasetForComposer(
+      "ds1",
+      "t1",
+      new AbortController().signal,
+      "split_3",
+    );
+    const posted = mockedFetch.mock.calls[2]![1]?.body;
+    if (typeof posted !== "string")
+      throw new Error("Expected a JSON attachment request");
+    const body = JSON.parse(posted) as { profile_id: string };
+    expect(body.profile_id).toBe("split_3");
+  });
   test("visual parsing separates read-only preview from confirmed save", async () => {
     const schema = {
       dataset_id: "ds_1",

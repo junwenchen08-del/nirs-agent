@@ -23,6 +23,7 @@ import {
   type NIRDatasetPreview,
   type NIRModelDetail,
 } from "@/core/nir-library";
+import { datasetVersionPath } from "@/core/nir-library/dataset-partitions";
 import {
   modelChatPath,
   modelDisplayName,
@@ -31,6 +32,7 @@ import {
 } from "@/core/nir-library/model-report";
 
 import { FeatureDisabled } from "./dataset-library";
+import { PartitionCounts } from "./dataset-partitions";
 import { DatasetPreview } from "./dataset-preview";
 import { PredictionFigure, SpectraFigure } from "./model-report-charts";
 
@@ -457,26 +459,42 @@ export function ModelDetail({
                   <div>
                     <h3 className="font-medium">{detail.dataset.name}</h3>
                     <p className="text-muted-foreground mt-1 text-xs">
-                      {detail.dataset.profile_id
+                      {detail.dataset.partition
                         ? text(
-                            "下方复用数据集库的概览，使用模型训练时保存的解析版本。",
-                            "This dataset overview uses the parsing version recorded at training.",
+                            `关联本次建模的固定划分版本 v${detail.dataset.partition.version}，样本用途与顺序保持不变。`,
+                            `Linked to the exact modeling partition v${detail.dataset.partition.version}.`,
                           )
-                        : text(
-                            "下方展示库内数据概览。训练时未单独记录解析设置，当前设置可能与训练时不同。",
-                            "No training parsing version was saved. This current library overview may differ from training settings.",
-                          )}
+                        : detail.dataset.profile_id
+                          ? text(
+                              "下方复用数据集库的概览，使用模型训练时保存的解析版本。",
+                              "This dataset overview uses the parsing version recorded at training.",
+                            )
+                          : text(
+                              "下方展示库内数据概览。训练时未单独记录解析设置，当前设置可能与训练时不同。",
+                              "No training parsing version was saved. This current library overview may differ from training settings.",
+                            )}
                     </p>
                   </div>
                   <Button asChild variant="outline" size="sm">
                     <Link
-                      href={`/workspace/nir/datasets/${encodeURIComponent(detail.dataset.id)}`}
+                      href={datasetVersionPath(
+                        detail.dataset.id,
+                        detail.dataset.profile_id,
+                      )}
                     >
-                      {text("查看完整数据集", "Open dataset")}
+                      {detail.dataset.partition
+                        ? text("查看训练时的划分", "Open modeling partition")
+                        : text("查看完整数据集", "Open dataset")}
                       <ArrowUpRightIcon className="size-4" />
                     </Link>
                   </Button>
                 </div>
+                {detail.dataset.partition && (
+                  <PartitionCounts
+                    partition={detail.dataset.partition}
+                    zh={zh}
+                  />
+                )}
                 {previewLoading ? (
                   <p className="text-muted-foreground text-sm">
                     {text(

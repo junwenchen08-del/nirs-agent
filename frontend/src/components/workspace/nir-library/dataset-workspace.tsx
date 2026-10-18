@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeftIcon, LinkIcon, RefreshCwIcon, SaveIcon } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -22,9 +23,15 @@ import {
   type DatasetWorkspaceRows,
   type DatasetWorkspaceSpectra,
 } from "@/core/nir-library";
+import {
+  datasetChatPath,
+  datasetVersionPath,
+  validPartition,
+} from "@/core/nir-library/dataset-partitions";
 
 import { DatasetDetailsPanel } from "./dataset-details-panel";
 import { FeatureDisabled } from "./dataset-library";
+import { PartitionCounts } from "./dataset-partitions";
 
 const selectClass =
   "border-input bg-background h-7 rounded border px-2 text-sm";
@@ -45,7 +52,14 @@ function matches(
     throw new Error("数据版本已变化，请重新载入。当前未保存修改仍保留。");
 }
 
-export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
+export function DatasetWorkspaceView({
+  datasetId,
+  profileId = null,
+}: {
+  datasetId: string;
+  profileId?: string | null;
+}) {
+  const readOnly = !!profileId;
   const router = useRouter();
   const { locale } = useI18n();
   const text = (cn: string, en: string) => (locale.startsWith("zh") ? cn : en);
@@ -70,7 +84,7 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
   useEffect(() => {
     setSection("samples");
     setMetadataOpened(false);
-  }, [datasetId]);
+  }, [datasetId, profileId]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -132,13 +146,15 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
         }
         return data;
       }),
-      getDatasetWorkspace(datasetId, controller.signal),
+      getDatasetWorkspace(datasetId, controller.signal, profileId),
     ])
       .then(([dataset, data]) => {
         if (controller.signal.aborted) return;
         if (
           data.dataset_id !== dataset.id ||
-          data.source_sha256 !== dataset.sha256
+          data.source_sha256 !== dataset.sha256 ||
+          (profileId && (data.profile_id !== profileId || !data.read_only)) ||
+          (data.partition && !validPartition(data.partition, data.profile_id))
         )
           throw new Error("数据校验失败，请重新载入。");
         setName(dataset.name);
@@ -158,14 +174,20 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
         if (!controller.signal.aborted) setReady(true);
       });
     return () => controller.abort();
-  }, [datasetId, enabled, reload]);
+  }, [datasetId, profileId, enabled, reload]);
 
   useEffect(() => {
     if (!workspace) return;
     const controller = new AbortController();
     setRows(null);
     setRowError(null);
-    getDatasetWorkspaceRows(datasetId, offset, query, controller.signal)
+    getDatasetWorkspaceRows(
+      datasetId,
+      offset,
+      query,
+      controller.signal,
+      profileId,
+    )
       .then((data) => {
         if (controller.signal.aborted) return;
         matches(data, workspace);
@@ -178,14 +200,14 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
           );
       });
     return () => controller.abort();
-  }, [datasetId, offset, query, workspace]);
+  }, [datasetId, profileId, offset, query, workspace]);
 
   useEffect(() => {
     if (!workspace) return;
     const controller = new AbortController();
     setOverview(null);
     setPlotError(null);
-    getDatasetWorkspaceSpectra(datasetId, null, controller.signal)
+    getDatasetWorkspaceSpectra(datasetId, null, controller.signal, profileId)
       .then((data) => {
         if (controller.signal.aborted) return;
         matches(data, workspace);
@@ -198,7 +220,7 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
           );
       });
     return () => controller.abort();
-  }, [datasetId, workspace]);
+  }, [datasetId, profileId, workspace]);
 
   useEffect(() => {
     if (!workspace || !selectionKey) {
@@ -211,6 +233,7 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
       datasetId,
       selectionKey.split(",").map(Number),
       controller.signal,
+      profileId,
     )
       .then((data) => {
         if (controller.signal.aborted) return;
@@ -224,7 +247,7 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
           );
       });
     return () => controller.abort();
-  }, [datasetId, selectionKey, workspace]);
+  }, [datasetId, profileId, selectionKey, workspace]);
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
@@ -263,13 +286,14 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
     );
   }
   function changeUsage(indices: number[], code: number) {
+    if (readOnly) return;
     const selected = new Set(indices);
     setUsages((current) =>
       current.map((value, i) => (selected.has(i) ? code : value)),
     );
   }
   async function save() {
-    if (!workspace || !validRange || saving) return;
+    if (!workspace || !validRange || saving || readOnly) return;
     const controller = new AbortController();
     saveRequest.current = controller;
     setSaving(true);
@@ -331,8 +355,12 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
             </h1>
             <p className="text-muted-foreground text-sm">
               {text(
-                "调整样本用途、选择波段，光谱和标签数值只读。",
-                "Assign sample roles and select wavelengths. Values are read-only.",
+                readOnly
+                  ? "查看建模时的固定样本用途与光谱范围。"
+                  : "调整样本用途、选择波段，光谱和标签数值只读。",
+                readOnly
+                  ? "Inspect the sample roles and spectral range recorded at modeling."
+                  : "Assign sample roles and select wavelengths. Values are read-only.",
               )}
             </p>
             {workspace && (
@@ -359,7 +387,11 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
           </Button>
           <Button
             disabled={
-              !workspace || !validRange || saving || (!dirty && workspace.saved)
+              readOnly ||
+              !workspace ||
+              !validRange ||
+              saving ||
+              (!dirty && workspace.saved)
             }
             variant={dirty || !workspace?.saved ? "default" : "outline"}
             onClick={() => void save()}
@@ -375,17 +407,49 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
               dirty ? text("请先保存修改", "Save changes first") : undefined
             }
             disabled={!workspace?.saved || dirty || saving}
-            onClick={() =>
-              router.push(
-                `/workspace/chats/new?dataset=${encodeURIComponent(datasetId)}`,
-              )
-            }
+            onClick={() => router.push(datasetChatPath(datasetId, profileId))}
           >
             <LinkIcon />
             {text("在新对话中使用", "Use in a new chat")}
           </Button>
         </div>
       </div>
+      {readOnly && workspace && (
+        <div className="space-y-2 rounded-xl border p-4" role="status">
+          <p className="font-medium">
+            {workspace.partition
+              ? text(
+                  `固定划分版本 v${workspace.version}`,
+                  `Fixed partition v${workspace.version}`,
+                )
+              : text(
+                  `已保存的数据版本 v${workspace.version}`,
+                  `Saved dataset version v${workspace.version}`,
+                )}
+          </p>
+          <p className="text-muted-foreground text-sm">
+            {text(
+              "此版本只读，保留建模时的样本用途、顺序和光谱范围。",
+              "This read-only version preserves the sample roles, order and spectral range used for modeling.",
+            )}
+          </p>
+          {workspace.partition && (
+            <PartitionCounts
+              partition={workspace.partition}
+              zh={locale.startsWith("zh")}
+            />
+          )}
+          <Link
+            className="text-primary text-sm underline"
+            href={datasetVersionPath(datasetId)}
+          >
+            {text(
+              "查看原始数据与当前设置",
+              "Open original data and current settings",
+            )}
+          </Link>
+        </div>
+      )}
       <SectionTabs
         id="dataset-sections"
         label={text("数据集工作台内容", "Dataset workspace sections")}
@@ -400,7 +464,14 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
         items={[
           { key: "samples", label: text("样本与光谱", "Samples and spectra") },
           { key: "overview", label: text("数据概览", "Overview") },
-          { key: "parsing", label: text("解析设置", "Parsing settings") },
+          ...(!readOnly
+            ? [
+                {
+                  key: "parsing" as const,
+                  label: text("解析设置", "Parsing settings"),
+                },
+              ]
+            : []),
         ]}
       />
       {dataset && metadataOpened && (
@@ -412,6 +483,7 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
           tabIndex={0}
         >
           <DatasetDetailsPanel
+            profileId={profileId}
             key={dataset.id}
             dataset={dataset}
             section={metadataSection}
@@ -471,13 +543,13 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
                     {text("选中", "Selected")} {selection.length}
                   </span>
                   <div
-                    hidden={!selection.length}
+                    hidden={!selection.length || readOnly}
                     className="flex flex-wrap gap-2"
                   >
                     <select
                       className={selectClass}
                       aria-label={text("批量样本用途", "Bulk sample role")}
-                      disabled={saving}
+                      disabled={saving || readOnly}
                       value={batchUsage}
                       onChange={(e) => setBatchUsage(Number(e.target.value))}
                     >
@@ -490,7 +562,7 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={!selection.length || saving}
+                      disabled={!selection.length || saving || readOnly}
                       onClick={() => changeUsage(selection, batchUsage)}
                     >
                       {text("应用到选中样本", "Apply to selection")}
@@ -499,8 +571,12 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
                   {!selection.length && (
                     <span className="text-muted-foreground text-xs">
                       {text(
-                        "选择后可批量设置用途",
-                        "Select samples to assign roles in bulk",
+                        readOnly
+                          ? "点击样本可查看对应光谱"
+                          : "选择后可批量设置用途",
+                        readOnly
+                          ? "Select samples to inspect spectra"
+                          : "Select samples to assign roles in bulk",
                       )}
                     </span>
                   )}
@@ -635,7 +711,7 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
                                 }}
                                 aria-label={`${text("样本用途", "Sample role")} ${row.index + 1}`}
                                 value={usages[row.index] ?? 0}
-                                disabled={saving}
+                                disabled={saving || readOnly}
                                 onChange={(e) =>
                                   changeUsage(
                                     [row.index],
@@ -703,7 +779,7 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
                       type="number"
                       step="any"
                       aria-label={text("波段起始值", "Range start")}
-                      disabled={saving}
+                      disabled={saving || readOnly}
                       value={band[0]}
                       onChange={(e) => setBand([e.target.value, band[1]])}
                     />
@@ -715,14 +791,14 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
                       type="number"
                       step="any"
                       aria-label={text("波段结束值", "Range end")}
-                      disabled={saving}
+                      disabled={saving || readOnly}
                       value={band[1]}
                       onChange={(e) => setBand([band[0], e.target.value])}
                     />
                   </label>
                   <Button
                     variant="outline"
-                    disabled={saving}
+                    disabled={saving || readOnly}
                     onClick={() =>
                       setBand([
                         String(Math.min(...workspace.axis)),
@@ -736,8 +812,12 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
                     {text("保留", "Keeping")} {selectedFeatures} /{" "}
                     {workspace.feature_count}{" "}
                     {text(
-                      "个光谱变量；也可在图上拖动选择",
-                      "variables; drag on either plot to select",
+                      readOnly
+                        ? "个光谱变量，沿用建模时的范围"
+                        : "个光谱变量；也可在图上拖动选择",
+                      readOnly
+                        ? "variables; preserving the modeling range"
+                        : "variables; drag on either plot to select",
                     )}
                   </span>
                   {!validRange && (
@@ -756,8 +836,10 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
                   usages={usages}
                   range={range}
                   axisKind={workspace.axis_kind}
-                  disabled={saving}
-                  onRange={(v) => setBand(v.map(String) as [string, string])}
+                  disabled={saving || readOnly}
+                  onRange={(v) => {
+                    if (!readOnly) setBand(v.map(String) as [string, string]);
+                  }}
                   empty={
                     selection.length
                       ? text("正在读取选中光谱…", "Loading selected spectra…")
@@ -781,8 +863,10 @@ export function DatasetWorkspaceView({ datasetId }: { datasetId: string }) {
                   usages={usages}
                   range={range}
                   axisKind={workspace.axis_kind}
-                  disabled={saving}
-                  onRange={(v) => setBand(v.map(String) as [string, string])}
+                  disabled={saving || readOnly}
+                  onRange={(v) => {
+                    if (!readOnly) setBand(v.map(String) as [string, string]);
+                  }}
                   empty={text("正在读取光谱…", "Loading spectra…")}
                 />
                 {overview && (

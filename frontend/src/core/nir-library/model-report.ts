@@ -1,5 +1,6 @@
 import { methodLabel } from "@/core/nir/presentation";
 
+import { validPartition } from "./dataset-partitions";
 import type {
   ModelChart,
   ModelMetric,
@@ -134,7 +135,9 @@ export function parseModelDetail(
   if (
     detail.dataset &&
     (detail.dataset.id !== detail.model.source_dataset_id ||
-      detail.dataset.profile_id !== detail.model.source_profile_id)
+      detail.dataset.profile_id !== detail.model.source_profile_id ||
+      (detail.dataset.partition &&
+        !validPartition(detail.dataset.partition, detail.dataset.profile_id)))
   )
     throw new Error("训练数据记录与模型不一致，请重新加载。");
   let charts = detail.report.charts.slice(0, 6).filter(validChart);

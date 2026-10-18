@@ -148,9 +148,13 @@ export function saveDatasetParsing(
   );
 }
 
-export function getDatasetWorkspace(datasetId: string, signal?: AbortSignal) {
+export function getDatasetWorkspace(
+  datasetId: string,
+  signal?: AbortSignal,
+  profileId?: string | null,
+) {
   return requestJSON<DatasetWorkspace>(
-    `/api/nir/datasets/${encoded(datasetId)}/workspace`,
+    `/api/nir/datasets/${encoded(datasetId)}/workspace${profileId ? `?profile_id=${encoded(profileId)}` : ""}`,
     { signal },
     "无法读取数据工作台，请重试。",
   );
@@ -161,12 +165,14 @@ export function getDatasetWorkspaceRows(
   offset: number,
   query: string,
   signal?: AbortSignal,
+  profileId?: string | null,
 ) {
   const params = new URLSearchParams({
     offset: String(offset),
     limit: "50",
     query,
   });
+  if (profileId) params.set("profile_id", profileId);
   return requestJSON<DatasetWorkspaceRows>(
     `/api/nir/datasets/${encoded(datasetId)}/workspace/rows?${params}`,
     { signal },
@@ -178,8 +184,12 @@ export function getDatasetWorkspaceSpectra(
   datasetId: string,
   indices: number[] | null,
   signal?: AbortSignal,
+  profileId?: string | null,
 ) {
-  const query = indices === null ? "" : `?indices=${indices.join(",")}`;
+  const params = new URLSearchParams();
+  if (indices !== null) params.set("indices", indices.join(","));
+  if (profileId) params.set("profile_id", profileId);
+  const query = params.size ? `?${params}` : "";
   return requestJSON<DatasetWorkspaceSpectra>(
     `/api/nir/datasets/${encoded(datasetId)}/workspace/spectra${query}`,
     { signal },
@@ -316,6 +326,8 @@ export function attachDataset(
 ) {
   return requestJSON<{
     status: string;
+    dataset_id: string;
+    profile_id: string | null;
     virtual_path: string;
     attachment_size_bytes?: number;
     workspace_version?: number | null;
@@ -362,6 +374,7 @@ export async function attachDatasetForComposer(
   datasetId: string,
   threadId: string,
   signal: AbortSignal,
+  profileId?: string,
 ) {
   await prepareComposerThread(threadId, signal);
   const detail = await getDataset(datasetId, signal);
@@ -374,11 +387,27 @@ export async function attachDatasetForComposer(
       Boolean(latestProfile.mapping?.library_parse))
       ? latestProfile
       : undefined;
-  return attachDataset(datasetId, {
+  if (
+    profileId &&
+    !detail.profiles.some(
+      (profile) =>
+        profile.id === profileId &&
+        profile.dataset_id === datasetId &&
+        ["split", "confirmed"].includes(profile.profile_status),
+    )
+  )
+    throw new Error("所选划分版本已不可用，请回到数据集库重新选择。");
+  const attached = await attachDataset(datasetId, {
     threadId,
     signal,
-    profileId: workspaceProfile?.id,
+    profileId: profileId ?? workspaceProfile?.id,
   });
+  if (
+    profileId &&
+    (attached.dataset_id !== datasetId || attached.profile_id !== profileId)
+  )
+    throw new Error("挂载的数据划分与所选版本不一致。");
+  return attached;
 }
 
 export function archiveDataset(datasetId: string) {

@@ -49,7 +49,22 @@ class SearchSessionStore:
             "supported_models": ["pls", "ridge", "svr", "et"],
         }
 
-    def prepare(self, project: str, partitions: dict, *, cv_folds=5, max_experiments=12, max_fits=200, domain="default", decision_strategy="legacy", autonomous_rounds=False, max_decisions=20, delivery_policy=None, task_snapshot=None):
+    def prepare(
+        self,
+        project: str,
+        partitions: dict,
+        *,
+        cv_folds=5,
+        max_experiments=12,
+        max_fits=200,
+        domain="default",
+        decision_strategy="legacy",
+        autonomous_rounds=False,
+        max_decisions=20,
+        delivery_policy=None,
+        task_snapshot=None,
+        partition_manifest=None,
+    ):
         """Once-only trusted ingestion. Returned metadata has no Test statistics."""
         from nir_core.utils.scientific_validation import _array_digest, validate_calibration_dataset, validate_partition_separation
 
@@ -161,6 +176,12 @@ class SearchSessionStore:
                 "counts": {"calibration": len(arrays["y_cal"]), "validation": len(arrays["y_val"])},
                 "spectral_axis_unit": axis_unit,
             }
+            if partition_manifest is not None:
+                session.update(
+                    source_digest=source_digest,
+                    partition_manifest=partition_manifest,
+                    partition_manifest_sha256=_digest(partition_manifest),
+                )
             if delivery_policy:
                 from .decision_budget import INTAKE_ID, initial_ledger
 
@@ -350,9 +371,10 @@ class SearchSessionStore:
             return session["freeze"]
 
     def _validate_delivery_freeze(self, db, session, row):
+        from sklearn.pipeline import Pipeline
+
         from nir_core.model.parameter_control import authorized_candidates
         from nir_core.models import PreprocessingStep
-        from sklearn.pipeline import Pipeline
 
         from .decision_context import _runtime_snapshot
 
