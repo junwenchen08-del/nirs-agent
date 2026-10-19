@@ -1,8 +1,396 @@
 # AGENTS.md
 
+Autonomous provider projection removes invalid-only assistant calls together
+with their batch-local recovery ToolMessages. DanglingToolCallMiddleware runs
+earlier and may have inserted those failures; pruning only the call produces a
+strict-provider HTTP 400. Keep valid/mixed call batches, reused IDs in other
+batches, parser reminders and original checkpoints/receipts unchanged. Apply the
+projection even before the first decision context. Provider/tool failure,
+invalid-decision closure, repeated calls and actual budget exhaustion have
+distinct Chinese outcomes. Anchors: test_nir_provider_message_pairs.py and the
+sync/async full repair-chain tests in test_nir_malformed_decision_recovery.py.
+
+New sealed regression ingestion records exact ordered Cal/Val/Test row indices
+once in the private session; `dataset_partitions.py` verifies the original owned
+library source and exact input Profile before storing a `profile_status=split`
+snapshot. It does not supersede the current confirmed parsing/workspace Profile.
+Snapshots reuse existing Profile rows (no ORM migration), include source/parser,
+membership, order, split parameters and frozen CV identity, and are not human
+confirmation or model approval. Explicit pinned workspace reads are read-only;
+explicit split attachment materializes the recorded order without repartitioning.
+`library_partition` is a durable idempotent session receipt, exported in the
+model audit and verified at promotion before selecting the model's source Profile.
+Old sessions without recorded membership are never backfilled or re-run. Tests:
+`test_nir_dataset_partitions.py`; see docs/nir-dataset-partitions.md.
+
+Default Lead prompt identity, Gateway API documentation and IM connection/reply
+copy use ChemAgent. Existing Python package names, wire headers, environment
+variables and data locations are compatibility contracts. Custom agent names
+remain configurable. test_lead_agent_prompt.py checks the default rendered prompt
+and custom-name preservation; channel connection suites cover emitted copy.
+
+The advertised Chinese reply `同意保存到模型库` is valid registration approval.
+Approval reads only the latest genuine user reply, excluding runtime context;
+older consent cannot override a current denial, question or unrelated message.
+Registration and library autosave still require the approved exact artifacts and
+the existing owner/policy/integrity gates. Sanitized review questions preserve a
+clear save/defer choice without unchecked metrics or internal status labels.
+Anchors: test_nir_workflow.py, test_nir_model_autosave.py, test_nir_user_wait.py.
+
+Round diagnostics retain safe_search's original Cal fit/Cal OOF/Val predictions
+in SearchFit memory only. The trusted search executor writes bounded immutable
+diagnostics caches and hashes; chart failures preserve successful numeric/model
+results and fit counts. AutonomousView.diagnostics and its owner-checked route
+verify exact execution/model/comparison identity and finite aligned points,
+without opening arrays, estimators or Test. Old caches are never reconstructed.
+Autonomous detail projects the next persisted decision; graph edges use the
+existing base/retained IDs and do not relax execution policy. No migration or
+scientific/approval policy changes. See docs/nir-round-process.md, the shared
+round-diagnostics contract, and test_nir_round_diagnostics.py.
+
+Successful sealed publication passes explicit model/HTML/ZIP references to
+search_tools._result; other tool responses never infer attachments from payload
+claims. STOP/RETAIN automatic delivery shares this path. The artifact reducer
+preserves previous files; deterministic narration includes nir_delivery_session_id
+without fabricating a provider tool call. Unified sync/async tests cover both
+termination sources, preserved artifacts and one Test read.
+
+NIR malformed provider arguments use the existing bounded continuation guard:
+invalid_tool_calls trigger hidden JSON parser feedback, never an inferred plan.
+Raw malformed arguments stay in checkpoints; provider-only projection drops
+them. Model receipts preserve finish_reason and invalid-call identity/hash/size.
+On exhausted continuation, decision_budget.close_incomplete_workflow persists
+safety_closed and a distinct failure reason, preserving budget stop provenance
+and any existing frozen/final artifacts. No Test read or selection is performed.
+Evidence summaries use experiment identity to avoid duplicating latest evidence
+and label mean-fold RMSECV separately from OOF/Val. Regression coverage:
+test_nir_malformed_decision_recovery.py (actual sync/async Lead, Fake provider).
+
+MAT regression intake uses the existing numeric loader and sealed service.
+Ambiguous targets/matrices return a correctable field-level mapping error.
+A completed, unmodeled inspection/knowledge task may hand off to a model-issued
+unified start with its snapshot archived in existing immutable receipt storage;
+active tasks, prior experiments/searches and modeling bindings cannot restart.
+Regression tools remain denied during this handoff until the unified start.
+Tests: test_nir_mat_unified_entry.py (sync/async Lead with Fake LLM and real fits).
+
+Unified default web regression entry is implemented by web_entry.py's trusted
+pending-intent marker and the actual Lead nir_workflow start receipt. Client mode
+and budget fields cannot bind policy. ProcessStore persists the immutable binding
+before preparation; NIRWorkflowMiddleware restores it on resume. Custom agents,
+other tasks and existing v1 sessions retain their prior entry/policy contracts.
+Unified delivery policies (v2) disable both cumulative token caps with None and
+keep usage, per-call output and other hard protections. The first semantic start
+receipt seeds the intake ledger exactly once. All-caller RunJournal usage is a
+separate scoped snapshot; unavailable usage is never invented as zero.
+automatic_delivery.py runs only after accepted STOP/RETAIN is committed, selecting
+exactly the retained experiment through original freeze/finalize/export services.
+It persists events/leases in the existing session, emits a grounded deterministic
+terminal response and exposes read-only status. Startup recovery uses only runs
+RunManager confirms orphaned. Unknown Test/publication states require audit; no
+GET trains, finalizes or recovers. Tests: test_nir_unified_policy.py,
+test_nir_unified_agent.py, test_nir_automatic_delivery.py. Full evidence and known
+baseline failures: docs/chemagent-unified-autonomous-mode-report.md.
+
 This file provides guidance to AI coding agents (Claude Code, Codex, and others) when working with code in this repository. It is the source of truth; the sibling `CLAUDE.md` imports it via `@AGENTS.md`.
 
 ## Project Overview
+
+### Phase-5 desktop web entry and read-only process projection
+
+`community/nir/web_entry.py::bind_web_request` validates only an explicit
+`body.context.nir_autonomous` selection before Gateway creates a run. Writable
+web fields are enabled=true, development/autonomous/custom profile and optional
+max_experiments/max_fits/max_decisions/max_wall_seconds. The existing
+decision_budget.resolve_policy enforces server ceilings; custom resolves from
+server-bounded autonomous defaults with the four explicit training overrides.
+The development profile remains unchanged. Client input cannot supply nir_workflow, and arbitrary
+RunnableConfig context/configurable keys cannot forge the internal binding.
+The Gateway-owned nir_web_request binds sealed_holdout/llm_autonomous plus
+autonomous_rounds/autonomous_delivery; workflow start consumes that binding.
+It disables generic planning/subagent bypasses. Before workflow start, NIR
+middleware already denies legacy execution and applies delivery admission;
+DynamicContext/Memory/Uploads honor the web binding so first-turn cross-task
+memory and spectral row previews remain suppressed. No new Agent or selector.
+
+`autonomous_view.py::AutonomousView` opens the existing owner/thread ProcessStore
+v5 SQLite index with mode=ro and no bootstrap/migration/write connection. The
+existing nir_process router owner-checks sessions, summary, paged decisions,
+one decision detail, rejected submissions and cached chart reads. Summary ETags
+reflect persisted session/decision bytes. Detail exposes sanitized immutable
+proposal plus separately recorded execution/feedback. Rejections reuse bounded
+ProcessStore actions and require a real model-issued receipt; they are never
+accepted decisions or experiments. No array/model loader, fit or finalization
+service is reachable from these read methods. Allowlisted scopes exclude Test
+until finalized; private paths, raw spectra, secrets and full prompts are absent.
+Legacy threads return no autonomous sessions without creating storage.
+
+SearchSessionStore.finalize captures observed/predicted/residual plot evidence
+inside the original unique Test lease, stores at most 2000 deterministic points
+with explicit population/sampling metadata in the existing final session JSON,
+and returns that cache on replay. GET charts reads only that finalized cache;
+it never reopens holdout.npz or the frozen artifact. Old finalized sessions
+without points remain not_recorded. The browser's download allowlist uses
+published output artifact paths, never private session paths. Delivery snapshot,
+quality, genuine user approval and registered-model evidence remain separate.
+No ProcessStore or application ORM migration is added in this phase. Anchors:
+test_nir_web_entry.py, test_nir_autonomous_view.py and
+test_nir_autonomous_router.py. See docs/chemagent-phase5-implementation-report.md
+for browser/provider acceptance status; code presence is not an E2E pass.
+
+The named sealed protocol tools retain atomic JSON through both tool-result and
+history budgeting in ToolOutputBudgetMiddleware; a file preview cannot replace
+the context/version/provider schema when sealed mode correctly denies read_file.
+Generic outputs retain their prior limits, and NIR call admission still charges
+the complete context and schema. test_nir_web_protocol_output.py covers this
+production middleware interaction; the web-entry Fake Lead tests include it.
+CSV intake regression covers an explicit named target followed by numeric
+wavelength headers without mistaking that header for a sample. Intake integrity
+failures stop before prepare, without fabricated diagnostic or Test evidence.
+
+### Phase-4 autonomous final delivery (explicit opt-in)
+
+Phase-6 additions retain these protocols and v5 storage. cal_spectra.py captures
+at most 12 Cal rows and 512 original ordered channels with the actual fitted
+preprocessor; dataset_session.py persists a hash-bound cache at execution time.
+autonomous_view.py and GET /autonomous/{session_id}/spectra/{experiment_id} serve
+that cache only, with owner/thread/session/model identity checks and no recompute.
+Missing old caches stay unavailable. Explicit NPZ wv_unit metadata is validated;
+axis units are never inferred from numeric ranges. prepare_nir_corn.py is a local
+source adapter, not an Agent training entry or a replacement partition manager.
+
+decision_provider.py makes provider-only context and verified coordinator Skill
+projections. It retains all autonomous science/control sections, the exact user
+request and source hash, and omits legacy instructions only in autonomous mode.
+Framework activation messages cannot opt a legacy user task into delivery mode.
+Full context/hash and decisions remain persisted. Current submit schemas enumerate
+real evidence IDs; rejection contracts expose the same allowed IDs. Model receipts
+store serialized UTF-8 component sizes separately from provider token usage. These
+bytes are not tokenizer counts. Phase-6 real run failed final delivery; post-run
+repairs have local Fake LLM evidence only. See the phase-6 implementation report.
+
+SummarizationMiddleware checks the same trusted web binding / active autonomous
+state before sync or async compaction. Governed NIR skips its separate model call
+and retains existing bounded DecisionContext/provider compaction; legacy hooks
+and summary behavior are unchanged. test_nir_autonomous_summarization.py plus the
+web Fake lifecycle exercise this with the real summary middleware enabled.
+RunJournal token totals include auxiliary middleware usage; NIR model receipts
+cover governed Lead requests only. Never label the latter as all provider cost.
+
+Use autonomous_delivery=true only with llm_autonomous/sealed_holdout and
+autonomous_rounds. New budgets are budget_profile=development|autonomous plus
+task_budget JSON; old max_attempts/max_fits/max_decisions arguments remain for
+older modes and cannot silently override phase-4 budgets. Server ceilings are
+NIR_AUTONOMOUS_<FIELD.upper()> (e.g. MAX_FITS); profiles default to 5/50/15/600
+or 40/1000/100/7200 experiments/fits/actions/seconds. Search LLM allowance is
+30/1200000 or 150/3000000 calls/admission tokens, plus separately capped terminal
+6 calls/500000 tokens/300 seconds. Single plans remain 40 trials/200 fits.
+Existing per-operation ResourceBudget/file/memory/cancellation gates also apply.
+
+decision_budget.py stores immutable policy, accumulated fit/experiment/action
+and provider ledgers in existing v5 session payloads. Before each actual Lead
+request it leases a call and estimates input bytes + bounded output; accurate
+usage is tracked separately, unknown usage explicitly counted. Task-intake
+responses are linked by the actual workflow start call and charged at prepare.
+An explicit autonomous_delivery=true request also leases intake calls in the
+existing receipt table before prepare; its ledger transfers without resetting.
+Such requests cannot silently start legacy. Keep the prepare receipt and provide
+current workflow identity/required process action on every model request; after
+STOP remove obsolete search schemas from provider input, not persisted records.
+After delivery, narration/approval uses ordinary runtime limits and is outside
+the immutable delivery cost snapshot. Wall enforcement is cooperative; no fee
+or strict third-party-fit interruption guarantee exists.
+
+STOP requires concise stop_evidence, successful same-session retention and
+explicit retained experiment evidence. Normal optimization never stops on
+quality/plateau/failure counts. Budget exhaustion blocks fits but offers a
+read-only final_selection context for action=RETAIN; source stays budget and
+selection_source=llm. No success/invalid repairs/provider failure/terminal
+quota exhaustion yields an explicit closed, non-frozen outcome. No auto-best.
+If termination repairs/provider failure follows a budget stop, preserve the
+original stop_source/reason and separately persist terminal_failure_source/reason.
+
+The existing nir_freeze_search verifies terminal choice, owner/thread, actual
+configuration/parameters/artifact hash, split/CV bindings and budget ledger,
+then directly freezes Cal without refitting. nir_finalize_search obtains the
+existing unique Test lease, caches final results and never reopens search.
+decision_delivery.py is a publication adapter for _report/artifacts/delivery,
+not a second report system: unique staged generations, hashes, evidence JSON,
+Markdown/HTML/ZIP and compatible nir_predict artifacts. Caught export failures
+retry export only; uncertain in-flight leases require operator recovery.
+Finalized Test/cache survives invalid decision replays and terminal LLM resource
+or provider failures, so publication recovery cannot silently consume Test again.
+Final scope, quality, user approval and registration remain separate. Middleware
+allows genuine approval and exact-artifact registration only after final review;
+legacy/files/scripts/MCP-fit/restart bypasses remain denied. No new database
+schema or frontend change. Anchors: six test_nir_delivery_{budget,decisions,
+freeze,export,agent,recovery}.py modules and verify_nir_delivery_llm.py.
+Earlier phase behavior remains the default. See docs/chemagent-phase4-implementation-report.md.
+
+Phase-4 acceptance stability: decision_schema.py derives initial/feedback/RETAIN
+schemas from the strict contract and writable adapter parameters; the Lead uses
+current-step tool views without choosing modeling actions. nir_submit_decision
+accepts object or legacy JSON string, preserving exact model-call argument hashes.
+Context reuse is keyed to persisted history/stage and runtime/knowledge versions;
+live resource enforcement stays server-side. Budget transitions refresh the
+provider request before final admission; full converted schemas count in byte
+estimates, and failed provider calls retain exception class/status. Regression
+anchor: test_nir_delivery_contract_reliability.py.
+
+### Phase-1 sealed single-target regression
+
+`community/nir/dataset_session.py` and `search_tools.py` implement an opt-in
+`search_protocol="sealed_holdout"` for analysis/calibration with internal holdout.
+`nir_prepare_search` binds CSV/TXT or NPZ once; named partitions can carry isolated
+groups. Search and holdout NPZ files live below owner/thread `nir-process/sessions`,
+outside sandbox-visible user-data. Search loads only search.npz. All family CV in
+`nir_core.model.safe_search` refits preprocessing/scalers within each frozen Cal
+fold; duplicate spectra across folds fail closed. Only PLS/Ridge/SVR/ET are adapted.
+Phase 1 retains its bounded parameter grids for compatible manual search.
+
+ProcessStore now migrates transactionally to user_version=5, preserving v1/v2/v3/v4
+records and phase-1 search_sessions/search_experiments. Session data/split/CV policy
+are locked; request replay cannot refit. Freeze explicitly names a successful
+experiment. A durable testing lease precedes holdout IO; uncertain failure cannot
+reopen search or issue another lease. Exports use a unique session outputs directory
+and existing artifact integrity/prediction/report helpers. Registration of new
+session exports is not enabled yet; legacy registration retains its science and
+final-Test gates. Never claim that validation passed means final Test passed.
+
+Middleware denies every non-allowlisted tool (including scripts, task and MCP fit)
+for this protocol. Public tool signatures do not accept alternative data/Test paths.
+Spectral uploads and paired converted Markdown never inject row previews, including
+before workflow start. Active sealed workflows get metadata-only upload context.
+Use a fresh conversation; existing Test-containing history is not erased. Legacy
+entry points remain available outside this protocol and still evaluate holdout per
+call, so they must not be used as autonomous search. Regression reflect, LV advice,
+comparison and search quality now use explicit Val evidence, with no Test fallback.
+Anchors: test_nir_search_metrics.py, test_nir_safe_search_core.py,
+test_nir_test_sealing.py, test_nir_sealed_search_tools.py, test_nir_compare_validation.py
+and test_nir_upload_preview_isolation.py.
+See docs/chemagent-phase1-implementation-report.md for commands and scope limits.
+
+### Phase-2 LLM initial pipeline decisions
+
+`decision_strategy="llm_autonomous"` is opt-in and requires sealed_holdout.
+`decision_context.py` builds sourced task/Cal/managed-method/runtime/CV/budget
+snapshots without history or Test statistics. `decision_contracts.py` validates
+DecisionContext and strict initial EXPLORE proposals with at least two alternatives.
+The LLM alone selects ordered preprocessing (including Raw []), pls/ridge/svr/et
+and fixed parameters or a discrete Cartesian grid. No model-card priority, quality
+threshold or automatic family/pipe comparison selects or substitutes the plan.
+
+Lead Agent's existing NIR middleware now captures actual sync/async model responses
+before tools run; `decision_origin.py` persists model class/name, AI message and
+run/call IDs, exact argument hash, response hash and available token usage. Fake
+providers are explicitly labeled. Caller-supplied author labels cannot authorize
+execution. v4 adds decision_contexts, initial_decisions and model_issued_calls to
+the existing private ProcessStore, without a second execution/persistence platform.
+Only nir_decision_context → nir_submit_decision → nir_execute_decision is enabled
+after prepare. Direct nir_search_model, legacy entry points and restart/finish
+bypasses are denied; execute accepts only the accepted workflow decision_id.
+
+Acceptance validates context revision/hash, current knowledge/capability snapshots,
+evidence IDs, explicit user hard constraints, pipeline legality, parameter bounds
+and remaining fits. Defaults are disclosed then materialized into the accepted
+spec; preprocessing providers/model runtime versions are bound and rechecked before
+fit. The immutable payload records decision/session/predetermined experiment IDs;
+execution status/feedback are separate columns. A durable single-use lease precedes
+the shared SearchSessionStore search. Success/failure replay never refits.
+
+`nir_core.model.parameter_control` advertises only real adapter parameters. Fixed
+parameters evaluate one candidate across frozen Cal folds and refit once; grid cost
+is Cartesian candidates * n_splits + 1, with 40 trials/200 fits as hard caps and
+smaller session/proposal caps enforced. PLS latent variables are explicit, never
+clamped. Other supported parameters are passed to sklearn and full actual estimator
+params returned. Exact KFold/GroupKFold Cal row indices, seed/shuffle and manifest
+hash accompany context, decision identity and experiment feedback. These indices
+are local to Cal and do not expose Test members.
+
+With autonomous_rounds=false an execution returns Cal CV/Val and enters initial_result/await_next_phase regardless
+of quality; no later autonomous action or STOP is implemented. Response grounding
+rejects sealed-Test performance claims. DynamicContext/Memory middlewares omit
+cross-task memory injection/update for this strategy; use a fresh conversation.
+Default legacy mode and phase-1 manual freeze/finalization remain compatible.
+
+Anchors: test_nir_authorized_parameters.py, test_nir_initial_decisions.py and
+test_nir_autonomous_initial_agent.py (production Lead factory/prompt with Fake model,
+real governed tools and sync/async NIR middleware). Opt-in real-provider smoke:
+`backend/scripts/verify_nir_initial_llm.py --allow-real-provider`, with isolated
+DEER_FLOW_HOME under repo .tmp and configured credentials. It uses the real model
+factory and registered tool providers; unrelated Gateway/UI middleware services
+are omitted. See docs/chemagent-phase2-implementation-report.md for actual evidence.
+
+### Phase-3 task-local feedback decisions
+
+Set autonomous_rounds=true with llm_autonomous/sealed_holdout to use the same
+Lead context → submit → execute tools repeatedly. TUNE keeps family/pipeline;
+CHANGE_PREPROCESS keeps family but changes pipeline; SWITCH_MODEL changes family
+with the same pipeline; EXPLORE requires a different direction and reason. The
+LLM compares alternatives, supplies current observations/uncertainties, rejected
+candidate reasons, fit estimate, improvement goal and hypotheses. Quality, fixed
+thresholds, method-card rank and plateau counts never select actions or stop.
+
+The existing InitialDecisionService (name kept for compatibility) reads immutable
+decision payloads plus separate execution columns. Context contains current/best/
+LLM-retained evidence, four compact recent records, tried parameter regions and
+success/failure counts. nir_decision_history pages at most four full records;
+knowledge_query retrieves a small additional sourced card. Earlier complete
+governed call/response pairs are pruned only from model inputs once a new context
+exists; checkpoint messages and decision bytes remain unchanged. Model response
+receipts account calls, available tokens and elapsed time separately from accepted
+actions, Cartesian candidates, model fits and execution time.
+
+v5 removes only the per-session initial_decisions UNIQUE restriction, copying
+historical opaque payload/execution bytes and retaining the same index. No second
+Agent/search/experiment store is created. Initial defaults stay compatible. New
+accepted decisions hold a durable single-use execution lease; feedback associates
+decision/experiment/feedback IDs, actual configuration, full parameters, Cal CV/
+Val, deltas versus previous/retained, declared goal support, fits/time and failure.
+The pre-execution rationale is never rewritten. Exact duplicate regions require
+replication_reason; repeated grid candidates are rejected. Explicit user model/
+pipeline constraints persist; a failed LLM choice is free to switch legally.
+
+max_attempts/max_fits/max_decisions are cumulative. Hard exhaustion records its
+own reason without selecting a model. LLM STOP must explicitly name a successful
+retained_experiment_id and have null plan/zero fits, then enters
+awaiting_final_confirmation. Direct search, freeze/finalize, legacy/MCP fit/raw
+file/script/task/restart bypasses remain denied even in terminal stages. Test
+stays sealed; final confirmation/freeze/Test integration and crash recovery are
+later work. Anchors: test_nir_multiround_decisions.py, test_nir_multiround_agent.py,
+test_nir_multiround_context_cost.py and test_nir_multiround_legacy_replay.py
+(old opaque phase-2 payload replay/execution without rewriting). The bounded provider smoke is
+verify_nir_initial_llm.py --allow-real-provider --multi-round (two synthetic
+experiments, fourteen fits, at most nine provider requests). See phase-3 report.
+
+### Durable NIR process evidence
+
+Single-target regression and MAT collections return `deliverables` containing an
+offline HTML report and `delivery.zip`. `_report.py` reads actual metric scopes;
+never infer wavelength units or production approval. `delivery.py` packages an
+explicit file allowlist, preserves model/metrics manifest bytes, rejects symlinks,
+and hashes exactly the archived bytes. It never recursively scans outputs or includes
+uploads. Markdown references images; only HTML embeds image bytes. Never read that
+HTML into agent context. Test anchors: `test_nir_delivery.py` and the real four-entry
+`test_nir_process_training.py`. Existing paths and scientific bindings remain valid.
+
+`community/nir/process.py` stores process attempts, step evidence, immutable SHA-256
+chart JSON and runtime-run links in owner/thread-local `nir-process/`, outside
+sandbox-visible `user-data`. The standalone SQLite index uses transactional
+`PRAGMA user_version` migration (currently 5, including upgrade from 1/2/3/4); it is not
+an application ORM table and does not change the central database schema. Thread
+deletion removes the index and blobs together. Never put chart arrays in workflow
+checkpoints, refit a model or resplit data to make charts.
+
+`NIRWorkflowMiddleware` allocates attempts before authorized model tools execute,
+binds their evidence context and records failure/cancellation. Gateway startup
+only interrupts attempts linked to runs confirmed orphaned by `RunManager`.
+`routers/nir_process.py` checks thread ownership on every read, uses bounded offset
+pagination/revision ETags, and verifies chart membership/version/hash. Point
+capabilities apply to owner-only access; no restricted viewer route exists.
+`NIR_PROCESS_ENABLED=false` disables recording/reads. Contracts and six examples
+are in `contracts/nir-process-v1.*`; actual producer output is validated by
+`test_nir_process_training.py`. See the implementation document for QA commands.
 
 DeerFlow is a LangGraph-based AI super agent system with a full-stack architecture. The backend provides a "super agent" with sandbox execution, persistent memory, subagent delegation, and extensible tool integration - all operating in per-thread isolated environments.
 
@@ -66,7 +454,83 @@ deer-flow/
 
 ## Important Development Guidelines
 
+### Official method references before regression preprocessing
+
+`/api/method-knowledge` manages references independently of the paper HTTP
+server. `nir_core.knowledge.method_store.MethodCatalogStore` persists whole
+catalog snapshots and a 30-entry audit view in `knowledge/methods.sqlite3`
+under `get_paths().base_dir`. Packaged JSON is the read-only revision-0 seed.
+Writes require an admin caller, an expected revision, and validated editable
+fields; SQLite `BEGIN IMMEDIATE` prevents lost updates. Provider bindings,
+algorithm implementations and runtime bounds are immutable from this API.
+`knowledge/method_registry.py` binds all 21 installed preprocessors (verified
+Chemotools or native) and four scikit-learn regression references. Model cards
+are planning-only and never enter preprocessing profile results or override
+model-family grids. Native cards cite primitive documentation honestly.
+Snapshot reads/writes merge missing packaged cards/fields, preserving existing
+managed values and retirement/draft state; no read-triggered database writes.
+Sources allow only HTTPS Chemotools methods, scikit-learn module docs or SciPy
+generated references. Expansion anchors: `test_nir_method_expansion.py`.
+`knowledge/method_inventory.py` binds a reviewed 70-document website inventory
+and all 84 public pinned MCP exports. The 94 cards reuse existing preprocessing
+classes; utilities, constants and dataset loaders remain labeled references.
+New `mcp_reference` cards are planning-only for explicit MCP calls, never Cal
+automatic candidates. Live allowlisted MCP schemas/required inputs/operations
+are read-only, separate from website signatures; non-finite defaults use
+`default_repr`. Published documentation-only references may be retrieved but
+cannot execute. Coverage, immutable-schema checks and legacy edit preservation
+are anchored in `test_nir_method_full_catalog.py`; actual stdio and fit/apply
+behavior remain covered by `nir_core/tests/test_mcp`.
+Published cards alone enter retrieval; drafts and retired cards are excluded.
+`community/nir/method_catalog.py` supplies a lazy managed retriever to the
+planning tool, exploratory helper and four primary regression entry points;
+resolve the persistent snapshot inside search so IO failure retains rule
+fallback. Old metrics/model evidence is never rewritten by management edits.
+Anchors: `test_nir_method_catalog.py` and real process-training tests.
+
+`nir_core.knowledge.methods` searches 94 reviewed packaged method cards with
+offline FTS5 BM25 plus bilingual diagnostic expansion. It is independent from
+the optional Chroma paper collection and never satisfies its two-study decision
+gate. `nir_search_method_knowledge` is read-only and allowed in planning; it does
+not advance the knowledge/retry workflow. Only published cards with a matching
+catalog provider class/version can propose candidates. Runtime parameter,
+axis, explicit-only, and low-SNR guards apply to both retrieved and rule candidates.
+`_preprocessing_plan.select_preprocessing` receives Cal/Tuning, never Test,
+retrieves before fitting, and selects by Cal RMSECV with the 1% simplicity rule.
+CSV auto/named trainers default to `pipeline_steps="auto"`; NPZ single-target
+requires the explicit sentinel to preserve legacy already-preprocessed `None`.
+Explicit JSON steps and raw `[]` remain authoritative. Full card hashes and CV
+evidence persist in metrics/model preprocessing selection; bounded citations are
+shown in process facts and reports. Cards are package data in nir-core wheels.
+See `docs/nir-method-knowledge.md`, `test_nir_method_knowledge.py`, and the real
+four-entry regressions in `test_nir_process_training.py`.
+
 ### Documentation Update Policy
+
+NIR response_grounding.py renders concise Chinese status, one evaluation scope,
+rounded R²/RMSE with explanations, a plain description of the test data and one
+next step. Review asks for human confirmation; only saved/reused library outcomes
+claim library storage. Internal codes, detailed attempt ledgers and guard reasons
+remain in audit state/reports. Matching finalized attempt evidence supersedes its
+earlier search-only summary, so Test metrics and delivered paths survive deduplication.
+Recommendations for future validation do not assert completed validation; positive
+claims and wrong metric/joblib paths are still checked. Display does not fit/read
+Test, rewrite checkpoints or register models. Maintained tests: test_nir_plain_responses.py,
+response grounding, malformed decision recovery, unified delivery and model autosave.
+
+Autonomous NIR questions use `community/nir/user_wait.py` and the existing
+NIRWorkflowMiddleware hooks. A natural user-choice question ends the turn;
+ask_clarification preserves only that call in a mixed batch and reuses the existing
+ClarificationMiddleware END. Waiting state persists in the workflow/checkpoint and
+unified ProcessStore binding, without changing session membership, CV, budgets,
+experiments, retained choice or approval. Reload/reentry cannot call the provider,
+execute fits, freeze/finalize or register until a later genuine user message.
+Internal continuation reminders, summary/memory and hidden context do not release
+the pause. Display text is checked; unchecked clarification context is not shown.
+The reply must be interpreted by the Lead and does not itself approve registration.
+Tests: test_nir_user_wait.py (real sync/async Lead with fake provider), clarification,
+autonomous delivery, response grounding and malformed-decision regression suites.
+
 **CRITICAL: Always update README.md and AGENTS.md after every code change**
 
 When making code changes, you MUST update the relevant documentation:
@@ -196,6 +660,12 @@ from deerflow.config import get_app_config
 - Extends `AgentState` with: `sandbox`, `thread_data`, `title`, `artifacts`, `todos`, `uploaded_files`, `viewed_images`, `goal`, `promoted`, `delegations`, `skill_context`, `summary_text`
 - Uses custom reducers: `merge_artifacts` (deduplicate), `merge_viewed_images` (merge/clear), `merge_goal` (preserve the active goal across ordinary state updates unless the goal writer replaces it), `merge_promoted` (catalog-hash-scoped deferred tool promotions), `merge_delegations` (append task delegation entries, same id latest wins, terminal status never downgraded, capped to the most recent entries), and `merge_skill_context` (dedupe active-skill references by path, keep the most recently read entries; entries store a name/path/description reference, not the SKILL.md body). `summary_text` is a LastValue channel updated by summarization and projected into model requests as durable context data instead of being stored as a `messages` item.
 - NIR domain runs use the checkpointed `nir_workflow` channel. The
+  process explanation panel receives a bounded `result_facts` projection from
+  `decision_facts.py` (preprocessing, wavelength, and model candidate choices)
+  in `attempt_evidence`. `record_attempt` copies only the decision facts into
+  each historical attempt, along with the tool-selected method, preserving
+  earlier rounds after later tools run.
+  This projection excludes artifact paths, wavelength index arrays, and raw spectra.
   `deerflow.community.nir.workflow:nir_workflow_tool` applies validated stage
   transitions, retry budgets, required-input checks, and the user approval gate
   before model registration. Modeling tasks inspect available data before asking
@@ -474,7 +944,10 @@ from deerflow.config import get_app_config
   duplicate spectra across partitions and duplicate spectra with conflicting
   targets are blocking. `_bind_model_metrics` adds the metrics and
   training-data hashes to the model manifest; registration must reject any
-  missing/failed scientific or quality gate and any model/metrics mismatch.
+  missing/failed scientific validation, missing quality assessment and any
+  model/metrics mismatch. A measured quality failure may be explicitly accepted
+  by the latest genuine user save reply. Preserve the failed assessment and
+  bind that acceptance to the exact workflow attempt and artifact hashes.
   During an active
   NIR workflow, `NIRWorkflowMiddleware` hard-denies script writes (`.py`,
   notebooks, R/Julia/MATLAB files) and shell-based Python execution so a loader
@@ -891,9 +1364,31 @@ remain isolated. The Gateway exposes owner-scoped save/list/get/rename/archive,
 Profile create/list/confirm, and storage-usage endpoints. Profile mappings are
 size-bounded JSON, versioned separately from the original bytes, and
 `needs_user_mapping` cannot be confirmed. `nir_inspect` remains read-only.
+HTTP upload completion now automatically calls the same immutable save service
+for CSV/TXT/MAT when `nir_library.enabled` and `auto_save_uploads` (default true)
+are on. It runs after all upload validation and sandbox sync, outside agent stage
+gates. New conversations acquire an explicit owner thread row; a concurrent
+creation rechecks ownership and legacy NULL owners are never claimed. Per-file
+`dataset_library` outcomes distinguish saved/reused/failed without failing a
+successful thread upload; setup errors also remain explicit. Manual saves still
+require confirmed intent, profiles are not auto-confirmed, and archive state is
+preserved. Integration anchor: `test_upload_dataset_autosave.py`.
 The owner-only reconciliation endpoint compares active SQL sizes with exact
 asset directories and reports missing/untracked/stale counts without returning
 host paths; it does not mutate files.
+`GET /api/nir/datasets/{dataset_id}/preview` is an owner/feature/RBAC-gated UI
+summary. It verifies immutable source integrity before and after reading,
+uses the latest confirmed profile's task type and bounds files to 64 MiB,
+preflights ordinary numeric MAT variables/HDF5 datasets at 5 million elements,
+retains the core loader's resource limits for complex structures, bounds preview samples to 512,
+spectral chart coordinates to 256 and target distributions to 6 columns.
+MAT v5/v7.3 reuse the existing loader; HDF5 external/symbolic links are denied.
+CSV/TXT reuse confidence-gated profiling; recognizable text class headers are
+interpreted only for display. Ambiguous mappings return a correctable preview
+state, not a guessed training layout. The DTO contains aggregates and bounded
+field names, never host paths or individual spectra. Viewing does not create
+profiles, dataset uses, model evidence or workflow transitions. Tests:
+`test_nir_dataset_preview.py`, service/router tests and dataset-library E2E.
 Stale cleanup only touches old regular files with the service staging prefix in
 the exact owner staging directory. Dataset Attach copies a reverified source to
 an owner-matched target thread through an atomic no-overwrite path, compensates
@@ -913,8 +1408,19 @@ recorded by an approved workflow and the source thread's `registry.json` after
 `nir_register_model` has completed. Promotion re-runs the scientific and
 validation gates, verifies model SHA/size/HMAC, metrics SHA, training-data
 binding, and provenance HMAC before and after a no-symlink staged copy, then
-atomically publishes the bundle and commits a ready SQL record. Production
-signing policy requires both model and provenance signatures. Owner admission
+atomically publishes the bundle and commits a ready SQL record. Below-threshold
+registration requires the hash-bound acceptance issued by the approval tool;
+it exposes `quality_status=below_threshold_user_approved` without rewriting
+quality or metrics. Completed approved but unregistered deliveries can retry
+approval on a fresh genuine save reply, never by retraining or reopening Test.
+Scientific and validation checks cannot be overridden. Direct
+`nir_register_model` retries from a completed unregistered delivery bind
+the exact saved model/metrics paths and validate the same fresh genuine consent
+as `nir_workflow(approve)`, then record approval before normal authorization.
+The handler and owner-scoped autosave hook see the same approved runtime state;
+the resulting registration and library outcomes persist normally. No reply or
+approval is invented. Failed registration is explicit in grounded Chinese replies.
+Production signing policy requires both model and provenance signatures. Owner admission
 serialization covers quotas, the total new-write threshold, disk floor, and
 per-model version cap; retries are idempotent and never overwrite a version.
 Lineage stores source Dataset/Profile when available and always keeps source
@@ -922,15 +1428,41 @@ thread/run/attempt plus the exact existing `validation_scope`; null Dataset
 lineage remains valid for older direct uploads.
 
 `nir_model_list/get/promote/attach` are bounded Agent tools and the Gateway
-exposes matching owner-scoped endpoints. Promotion requires explicit current
-user intent and the `registered` workflow stage. The intent matcher accepts
+exposes matching owner-scoped endpoints. Manual promotion requires explicit current
+user intent and an approved `registered/completed` workflow. Completed workflows
+still need the actual thread registry to match the current approved evidence.
+The intent matcher accepts
 natural Chinese/English confirmation even when a long model identity separates
 the save action from the cross-session scope, while explicit negation fails
 closed. Attach re-verifies the library
 package, copies it to `/mnt/user-data/outputs/models/{model_id}/{version}/` in
 an owner-matched target thread, re-verifies the copy, and returns the model path
-accepted by `nir_predict`; remote sandbox sync copies the whole bundle. Model
-promotion is distinct from thread registration and is never automatic.
+accepted by `nir_predict`; remote sandbox sync copies the whole bundle.
+After successful approved agent registration, `NIRWorkflowMiddleware` calls
+`community/nir/model_autosave.py` when the library and its default-on
+`auto_save_registered_models` policy are enabled. It reuses `ModelService`'s
+owner, scientific, hash, signing, lineage, quota and atomic-copy gates; it never
+promotes a raw upload or unapproved attempt. Explicit visible user refusal skips
+storage. The exact `registered_model` identity and bounded `model_library` outcome
+persist in workflow state and the tool response; saved/reused, failed, disabled
+and skipped are distinct. Storage failure preserves scientific registration,
+and an explicit manual retry may run even after workflow completion. Async agent
+execution awaits persistence before returning; a sync wrapper inside a running
+event loop reports a separate storage failure instead of nesting event loops.
+Tests: `test_nir_model_autosave.py`, `test_nir_model_service.py` and
+`test_nir_models_router.py`.
+
+`GET /api/nir/models/{model_id}/versions/{version}/report` verifies the owned
+stored package without deserializing an estimator. `models/report.py` projects
+finite per-partition metrics, actual parameters and bounded saved charts. New
+promotions embed a portable report in the already verified metadata file; no
+schema migration or model/metrics rewrite is involved. Legacy process charts
+must match the exact workflow project/tool-call identity. Autonomous charts
+require the finalized metrics-bound session/freeze and existing hash-checked
+Cal cache. Missing or corrupt old charts remain unavailable, never recomputed.
+The dataset preview accepts an optional owner/dataset-matched Profile ID, including
+superseded confirmed versions, so model details do not silently use later parsing.
+Tests: `test_nir_model_report.py` and the pinned-profile DatasetService regression.
 
 Cross-session prediction attaches both assets before starting a prediction
 workflow, then runs inspect/load while the workflow is still in `data_audit`,
@@ -1056,6 +1588,7 @@ Returns `{}` when Langfuse is not in the enabled providers — LangSmith-only de
 - vLLM reasoning models should use `deerflow.models.vllm_provider:VllmChatModel`; for Qwen-style parsers prefer `when_thinking_enabled.extra_body.chat_template_kwargs.enable_thinking`, and DeerFlow will also normalize the older `thinking` alias
 - `tools[]` - Tool configs with `use` variable path and `group`
 - `tool_groups[]` - Logical groupings for tools
+- Keep `nir_*` tools in the `nir` group. Host Bash filtering checks the shell provider path, not group membership, so NIR tools remain available when `sandbox.allow_host_bash` is false.
 - `sandbox.use` - Sandbox provider class path
 - `skills.path` / `skills.container_path` - Host and container paths to skills directory
 - `title` - Auto-title generation (enabled, max_words, max_chars, model_name; null model_name uses fast local fallback, explicit model_name uses the prompt_template LLM path)
@@ -1108,6 +1641,35 @@ Both can be modified at runtime via Gateway API endpoints or `DeerFlowClient` me
 ## Development Workflow
 
 ### Test-Driven Development (TDD) — MANDATORY
+
+NIR pause/termination regressions cover colon/newline and numbered answer requests,
+question options and ordinary-user waits. Model-source regression coverage lives
+in test_nir_model_dataset_link.py: new input hashes are captured during ingestion;
+ModelService promotion derives verified missing Dataset/Profile IDs. Historical
+detail reads may recover links using bounded original uploads and exact complete
+partition bindings, without opening private Test/search caches, fitting, loading
+an estimator, changing rows or rewriting model packages. Pinned profile bytes and
+library manifests are verified read-only; temporary profile exports use system
+temp storage. Missing or ambiguous history stays missing. Saved curve/validation
+metadata supplies feature counts, without inventing dimensionality.
+Report recovery projects effective Dataset/Profile IDs consistently in both the
+model and dataset response objects. The original stored row/package remains
+unchanged; front-end strict identity validation must remain enabled. Regression
+coverage includes raw/no-Profile and derived/pinned-Profile historical responses,
+and acceptance must inspect actual authenticated UI rendering, not HTTP 200 only.
+
+NIR pause/termination regressions cover colon/newline and numbered answer requests,
+question options, mixed tool batches and genuine-user-only resume in the actual
+Lead chain, including LoopDetectionMiddleware. A completed experiment changes the
+no-argument context-read loop key; transport IDs, workflow revisions and status
+refreshes do not. Loop/token hard stops carry typed agent_termination metadata.
+NIR ends the graph, persists runtime_termination in the current binding and closes
+incomplete search with the exact failure reason, preserving prior budget source,
+frozen/final artifacts and approvals. It never turns a runtime stop into LLM
+STOP/RETAIN or a final Test. Incomplete provider drafts keep their original data
+but are hidden before continuation; streaming ignores hidden messages. Anchors:
+tests/test_nir_user_wait.py, tests/test_nir_runtime_stop.py,
+tests/test_nir_response_grounding.py and existing loop/token tests.
 
 **Every new feature or bug fix MUST be accompanied by unit tests. No exceptions.**
 
@@ -1230,3 +1792,68 @@ See `docs/` directory for detailed documentation:
 - [PATH_EXAMPLES.md](docs/PATH_EXAMPLES.md) - Path types and usage
 - [summarization.md](docs/summarization.md) - Context summarization
 - [plan_mode_usage.md](docs/plan_mode_usage.md) - Plan mode with TodoList
+
+
+Dataset editing workbench: `GET/PUT /api/nir/datasets/{id}/workspace`, plus
+owner/RBAC-gated bounded `/workspace/rows` and `/workspace/spectra` reads, reuse
+verified immutable assets. `datasets/workspace.py` resolves exact sample order
+and original coordinates; ambiguous mappings fail without guesses. Full reads
+are capped at 64 MiB, 5000 samples, 20000 spectral variables and 5 million
+matrix elements. Rows page at 100 maximum; charts expose at most 24 curves and
+512 points each. Viewing does not create profiles, attachments or model evidence.
+PUT strictly accepts only source SHA, current confirmed Profile ID, integer
+sample-role codes and a contiguous coordinate interval. Raw-value writes are
+rejected. The owner admission lock and current Profile identity implement
+compare-and-swap; successful saves create an immutable confirmed Profile version
+and supersede the previous one without changing source bytes or existing uses.
+Web attachments select the saved Profile and deterministically materialize a
+UTF-8 CSV in owner staging, with exact full-resolution selected values and named
+roles. The source SHA remains original-asset lineage; Profile/filename bind the
+materialized version. Attachment size and idempotent verification use the actual
+copy. Old copies remain unchanged. Ordinary attachments retain their old path.
+UI-export detection is restricted to exact reserved headers and does not decode
+ordinary CSV files. Regression `nir_prepare_search` preserves named Cal/Val/Test
+membership in the existing sealed protocol. Classification keeps named roles,
+checks scientific integrity, and records original row indices after exclusions.
+All-unassigned exports use the existing automatic split, regardless of whether
+the old parsing-only marker is present. `has_fixed_partitions` treats any explicit
+role (including exclusion) as fixed: partial assignments or missing required
+partitions fail without random repair. Group separation protections remain active.
+`search_tools` returns safe Chinese WorkspaceError messages with a nonretryable
+intake code; autonomous failures block before a session and project status-only
+tools, rather than repeating preparation. Generic
+conversion and automatic repartitioning reject these exports with a supported
+entry hint, protecting explicit membership. Saved labels never imply external
+validation. No migration or training during save/view is required. Anchors:
+`test_nir_dataset_workspace.py`, dataset router tests and workspace E2E.
+
+Direct library upload: `POST /api/nir/datasets/upload` accepts multipart `file`
+and optional `name` through the existing authenticated/CSRF/RBAC Gateway.
+`DatasetService.save_from_local_upload` validates CSV/TXT/MAT filenames, nonempty
+actual multipart sizes and policy limits, then shares staging, SHA deduplication,
+owner admission, immutable publication and compensation with thread-based saves.
+It never accepts a host path, creates a source thread/run or resurrects archived
+assets. Blocking stream copies finish before cancellation cleans their stage.
+The original thread-save API remains compatible. Uploaded assets reuse existing
+workspace, preview and attach endpoints. Tests: dataset service/router tests.
+
+Workspace CSV exports preserve recognized batch/replicate-group IDs; role edits
+reject crossing groups, and existing regression/classification CV receives the
+source grouping. Physical coordinates and index-only coordinates stay distinct.
+Only the bounded UI display truncates names/labels; attachment values remain exact.
+
+Visual parsing adds owner/RBAC-gated GET/PUT `/datasets/{id}/parsing` and read-only
+POST `/parsing/preview`. `datasets/parsing.py` enumerates bounded MAT groups,
+spectral blocks, compatible targets and axes, or CSV/TXT column/header/orientation
+choices. Multi-group files never silently select or merge groups. Generated
+candidate IDs are revalidated against the exact source; saves compare source SHA
+and current Profile ID, create a confirmed immutable version and supersede the
+previous selection. Unchanged selection retains workspace roles/range; changed
+selection resets them. Advanced JSON/Profile APIs remain compatible.
+`library_parse` profiles are used by preview, workspace and deterministic chat
+attachments. Parsing-only exports carry `_nir_workspace_parsing_only=1` and
+unassigned roles: existing regression/classification splitting stays available.
+Assigned-role exports retain fixed partitions and cannot use this marker to
+override membership. MAT v5 compressed expansion is bounded before nested array
+allocation; HDF5 links and oversized structures remain rejected. Tests:
+`test_nir_dataset_parsing.py`, router/workspace tests and dataset-parsing E2E.

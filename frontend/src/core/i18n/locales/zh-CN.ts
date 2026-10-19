@@ -61,13 +61,12 @@ export const zhCN: Translations = {
 
   // Welcome
   welcome: {
-    greeting: "你好，欢迎回来！",
+    greeting: "你好，欢迎使用 ChemAgent",
     description:
-      "欢迎使用 🦌 DeerFlow，一个完全开源的超级智能体。通过内置和自定义的 Skills，\nDeerFlow 可以帮你搜索网络、分析数据，还能为你生成幻灯片、\n图片、视频、播客及网页等，几乎可以做任何事情。",
-
-    createYourOwnSkill: "创建你自己的 Agent SKill",
+      "面向近红外光谱分析的智能工作台。上传或挂载数据集，\n开展数据解析、预处理、自主建模与诊断，查看报告并管理模型。",
+    createYourOwnSkill: "创建 ChemAgent 分析技能",
     createYourOwnSkillDescription:
-      "创建你的 Agent Skill 来释放 DeerFlow 的潜力。通过自定义技能，DeerFlow\n可以帮你搜索网络、分析数据，还能为你生成幻灯片、\n网页等作品，几乎可以做任何事情。",
+      "将常用的光谱分析步骤、报告规范和专业方法整理为可复用技能，\n让 ChemAgent 更好地适配你的分析工作。",
   },
 
   // Clipboard
@@ -113,6 +112,22 @@ export const zhCN: Translations = {
     followupConfirmReplace: "替换并发送",
     suggestionPlaceholderRequired: "发送前请先填写建议模板中的占位内容。",
     goalCommandDescription: "设置、查看或清除当前目标",
+    datasetCommandDescription: "查看并使用已保存的数据集",
+    datasetPickerDescription:
+      "选择数据集后只挂载文件。输入分析要求并点击发送后，智能体才开始处理。",
+    datasetAttached: "已挂载，输入要求后点击发送",
+    datasetAttaching: "正在挂载数据集，请稍候",
+    datasetAttachFailed: "挂载未成功，请重试",
+    datasetClearSelection: "取消本次数据集选择",
+    modelCommandDescription: "选择已保存的模型用于新数据预测",
+    modelPickerDescription:
+      "选择模型版本后只挂载到当前对话。上传新数据或用 /datasets 选择数据，输入预测要求并手动发送后开始预测。",
+    modelAttached: "模型已挂载，添加新数据并输入预测要求后发送",
+    modelAttaching: "正在挂载模型，请稍候",
+    modelAttachFailed: "模型挂载未成功，请重试",
+    modelClearSelection: "取消本次模型选择",
+    modelSelectionContext:
+      "本次手动选择的预测模型（请先审查新数据，并复用该模型进行预测；挂载不代表预测已执行）：",
     goalLabel: "目标",
     goalContinuing: "续跑中 {count}/{max}",
     goalContinuationTooltip:
@@ -179,88 +194,42 @@ export const zhCN: Translations = {
     channels: "渠道",
     recentChats: "最近的对话",
     demoChats: "演示对话",
-    agents: "智能体",
-    agentsDisabledTooltip: "功能未启用",
-    evaluations: "NIR 评测",
-    nirDatasets: "光谱数据集库",
+    nirDatasets: "数据集库",
     nirModels: "模型库",
-  },
-
-  // Agents
-  agents: {
-    title: "智能体",
-    description: "创建和管理具有专属 Prompt 与能力的自定义智能体。",
-    newAgent: "新建智能体",
-    emptyTitle: "还没有自定义智能体",
-    emptyDescription: "创建你的第一个自定义智能体，设置专属系统提示词。",
-    featureDisabledTitle: "智能体功能未启用",
-    featureDisabledDescription: "该功能未在此服务器上启用，请联系管理员。",
-    chat: "对话",
-    delete: "删除",
-    deleteConfirm: "确定要删除该智能体吗？此操作不可撤销。",
-    deleteSuccess: "智能体已删除",
-    newChat: "新对话",
-    createPageTitle: "设计你的智能体",
-    createPageSubtitle: "描述你想要的智能体，我来帮你通过对话创建。",
-    nameStepTitle: "给新智能体起个名字",
-    nameStepHint:
-      "只允许字母、数字和连字符，存储时自动转为小写（例如 code-reviewer）",
-    nameStepPlaceholder: "例如 code-reviewer",
-    nameStepContinue: "继续",
-    nameStepInvalidError: "名称无效，只允许字母、数字和连字符",
-    nameStepAlreadyExistsError: "已存在同名智能体",
-    nameStepNetworkError: "网络请求失败，请检查网络或后端连接",
-    nameStepCheckError: "无法验证名称可用性，请稍后重试",
-    nameStepCheckErrorWithDetail: "名称校验失败：{detail}",
-    nameStepApiDisabledError:
-      "服务器未开启自定义智能体管理功能，请联系管理员。",
-    nameStepBootstrapMessage:
-      "新智能体的名称是 {name}。请先帮我设计它的用途、行为方式和 SOUL.md，再保存它。",
-    save: "保存智能体",
-    saving: "正在保存智能体...",
-    saveRequested:
-      "已提交保存请求，DeerFlow 正在根据当前对话生成并保存初版智能体。",
-    saveHint:
-      "你可以在右上角的菜单里随时保存这个智能体，就算目前还只是初稿也可以。",
-    saveCommandMessage:
-      "请现在根据我们目前已经讨论的全部内容保存这个自定义智能体。这就是我明确的保存确认。如果仍有少量细节缺失，请根据上下文做出合理假设，生成一份简洁的英文初始 SOUL.md，并直接调用 setup_agent，不要再向我索要额外确认。",
-    agentCreatedPendingRefresh:
-      "智能体已创建，但 DeerFlow 暂时还无法读取到它。请稍后刷新当前页面。",
-    more: "更多操作",
-    agentCreated: "智能体已创建！",
-    startChatting: "开始对话",
-    backToGallery: "返回 Gallery",
+    methods: "方法库",
   },
 
   // Breadcrumb
   breadcrumb: {
     workspace: "工作区",
+    backToCurrentChat: "返回当前对话",
     chats: "对话",
-    evaluations: "NIR 评测",
-    nirLibrary: "NIR 资产库",
+    nirLibrary: "数据集与模型",
+    nirProcess: "建模过程",
+    methods: "方法库",
   },
 
   // Workspace
   workspace: {
-    officialWebsite: "访问 DeerFlow 官方网站",
-    githubTooltip: "访问 DeerFlow 的 Github 仓库",
+    officialWebsite: "ChemAgent 使用文档",
+    githubTooltip: "访问 ChemAgent 的 Github 仓库",
     settingsAndMore: "设置和更多",
-    visitGithub: "在 Github 上查看 DeerFlow",
+    visitGithub: "在 Github 上查看 ChemAgent",
     reportIssue: "报告问题",
     contactUs: "联系我们",
-    about: "关于 DeerFlow",
+    about: "关于 ChemAgent",
     logout: "退出登录",
     gatewayUnavailable: "网关暂时不可用。",
     gatewayUnavailableRetrying: "正在后台重试…",
   },
 
   nirLibrary: {
-    datasetsTitle: "光谱数据集库",
+    datasetsTitle: "数据集库",
     datasetsDescription:
       "管理明确保存的 CSV、TXT 和 MAT 数据，维护解析配置并安全挂载到新会话。",
-    modelsTitle: "持久模型库",
+    modelsTitle: "模型库",
     modelsDescription:
-      "查看通过审批和注册门槛的模型版本、验证范围、来源血缘及跨会话复用状态。",
+      "查看模型使用的数据、处理方法和预测效果，也可以带到新对话中使用。",
     featureDisabledTitle: "NIR 资产库未启用",
     featureDisabledDescription:
       "请由管理员在配置中启用 nir_library，然后重新打开此页面。",
@@ -270,10 +239,10 @@ export const zhCN: Translations = {
     search: "搜索名称、ID 或版本",
     saveDataset: "保存数据集",
     name: "名称",
-    sourceThread: "来源会话 ID",
+    sourceThread: "来源对话编号",
     targetThread: "目标会话 ID",
     sourcePath: "上传文件路径",
-    saveConfirmation: "我确认把该上传文件长期保存到个人数据集库。",
+    saveConfirmation: "我确认将此文件保存到数据集库，便于后续使用。",
     cancel: "取消",
     save: "保存",
     attach: "挂载到会话",
@@ -281,13 +250,12 @@ export const zhCN: Translations = {
     details: "详情与历史",
     rename: "重命名",
     archive: "归档",
-    delete: "删除实体",
-    permanentDelete: "永久删除长期库实体",
-    deleteWarning:
-      "必须先归档，再输入下方精确标识。删除会释放长期库空间，但保留数据库审计墓碑。",
+    delete: "删除文件",
+    permanentDelete: "永久删除文件",
+    deleteWarning: "请输入下方编号确认删除。文件删除后无法在这里恢复。",
     deleteCopiesWarning:
       "已经挂载到会话的副本及现有备份不会自动删除；数据集仍被模型引用时服务器会拒绝删除。",
-    typeExact: "输入精确标识",
+    typeExact: "输入下方编号确认",
     status: "状态",
     created: "创建时间",
     size: "大小",
@@ -308,8 +276,8 @@ export const zhCN: Translations = {
     noHistory: "暂无挂载历史",
     createProfile: "新建解析配置",
     taskType: "任务类型",
-    schemaStatus: "结构状态",
-    mappingJson: "字段映射 JSON",
+    schemaStatus: "数据识别结果",
+    mappingJson: "列与矩阵对应关系（高级设置）",
     confirmProfile: "确认此版本",
     invalidJson: "字段映射必须是有效的 JSON 对象。",
     storageTitle: "个人空间",
@@ -332,47 +300,6 @@ export const zhCN: Translations = {
       superseded: "已被替代",
       attached: "已挂载",
     },
-  },
-
-  nirEvaluations: {
-    eyebrow: "近红外智能体质量实验室",
-    title: "评测控制台",
-    description:
-      "将已完成的近红外对话映射到回归场景，对完整工具轨迹进行评分，并统一观察安全性、质量、延迟和成本。",
-    scenarios: "个场景",
-    deterministic: "确定性评分",
-    mappingTitle: "回归批次",
-    mappingDescription:
-      "每个场景在一次运行中只能出现一次，Gateway 会校验线程所有权和 checkpoint 证据。",
-    threadId: "线程",
-    threadPlaceholder: "粘贴已完成的线程 ID",
-    scenario: "预期场景",
-    selectScenario: "选择场景",
-    remove: "移除用例",
-    addCase: "添加用例",
-    run: "执行评测",
-    running: "评测中…",
-    loadError: "无法加载 NIR 评测场景目录",
-    runError: "NIR 评测执行失败",
-    duplicateScenario: "同一批次中一个场景只能出现一次。",
-    recentTrend: "近期质量趋势",
-    trendDescription: "最近 12 次浏览器本地记录，琥珀色柱表示存在策略违规。",
-    noHistory: "执行首个回归批次以建立质量基线。",
-    older: "较早",
-    latest: "最新",
-    passRate: "通过率",
-    averageScore: "平均分",
-    policyViolations: "策略违规",
-    tokens: "Token 总量",
-    duration: "耗时",
-    results: "场景证据",
-    passed: "通过",
-    failed: "失败",
-    trace: "追踪",
-    noTraceId: "未记录追踪 ID",
-    exportEvidence: "导出证据",
-    clearResult: "清除",
-    noResults: "请至少配置一个已完成的 NIR 线程并执行评测，以查看轨迹证据。",
   },
 
   // Conversation
@@ -411,20 +338,20 @@ export const zhCN: Translations = {
     saveAndConnect: "保存并连接",
     saveChanges: "保存修改",
     descriptions: {
-      telegram: "通过 DeerFlow Bot 接收 Telegram 私聊消息。",
+      telegram: "通过 ChemAgent Bot 接收 Telegram 私聊消息。",
       slack: "接收 Slack 工作区消息和提及。",
-      discord: "通过 DeerFlow Bot 接收 Discord 服务器消息。",
-      feishu: "通过 DeerFlow 应用接收飞书和 Lark 消息。",
-      dingtalk: "通过 DeerFlow Bot 接收钉钉 Stream Push 消息。",
-      wechat: "通过 DeerFlow Bot 接收微信 iLink 消息。",
-      wecom: "通过 DeerFlow AI Bot 接收企业微信消息。",
+      discord: "通过 ChemAgent Bot 接收 Discord 服务器消息。",
+      feishu: "通过 ChemAgent 应用接收飞书和 Lark 消息。",
+      dingtalk: "通过 ChemAgent Bot 接收钉钉 Stream Push 消息。",
+      wechat: "通过 ChemAgent Bot 接收微信 iLink 消息。",
+      wecom: "通过 ChemAgent AI Bot 接收企业微信消息。",
     },
     connectedAs: (name: string) => `已连接为 ${name}。`,
   },
 
   // Page titles (document title)
   pages: {
-    appName: "DeerFlow",
+    appName: "ChemAgent",
     chats: "对话",
     newChat: "新对话",
     untitled: "未命名",
@@ -449,10 +376,27 @@ export const zhCN: Translations = {
     writeFile: "写入文件",
     clickToViewContent: "点击查看文件内容",
     writeTodos: "更新 To-do 列表",
-    skillInstallTooltip: "安装技能并使其可在 DeerFlow 中使用",
+    skillInstallTooltip: "安装技能并使其可在 ChemAgent 中使用",
   },
 
   uploads: {
+    datasetsSaved: (saved: number, reused: number) =>
+      `${saved ? `${saved} 个数据集已自动保存至数据集库。` : ""}${reused ? `${reused} 个数据集已在库中，已复用现有记录。` : ""}下次输入 /datasets 即可选择使用。`,
+    datasetSaveFailed: (filename: string, errorCode: string) => {
+      const reasons: Record<string, string> = {
+        quota_exceeded: "数据集库容量不足",
+        library_write_limit: "已达到资料库存储写入上限",
+        insufficient_free_space: "磁盘剩余空间不足",
+        file_too_large: "文件超过数据集库的单文件限制",
+        dataset_archived: "相同数据集已归档，请在数据集库中恢复",
+        dataset_unavailable: "已有数据集暂不可用",
+        source_hash_mismatch: "已有数据集校验失败",
+        source_changed: "保存期间文件发生变化",
+        database_unavailable: "数据集库服务暂不可用",
+        thread_not_owned: "当前对话缺少有效的数据归属记录",
+      };
+      return `“${filename}”已上传，但未保存至数据集库：${reasons[errorCode] ?? "保存失败，请稍后从数据集库重试"}。当前对话仍可使用此文件。`;
+    },
     uploading: "上传中...",
     uploadingFiles: "文件上传中，请稍候...",
     limitsHint: (maxFiles: number, maxFileSize: string, maxTotalSize: string) =>
@@ -513,6 +457,13 @@ export const zhCN: Translations = {
     open: "打开近红外建模过程",
     description: "展示当前结构化工作流证据，不显示原始光谱或模型隐藏推理。",
     currentStage: "当前阶段",
+    progress: "流程进展",
+    milestones: {
+      data: "确认数据",
+      plan: "制定方案",
+      model: "建模与评估",
+      review: "审核与交付",
+    },
     task: "任务类型",
     attempt: (current: number, maximum: number) =>
       maximum > 0
@@ -528,6 +479,28 @@ export const zhCN: Translations = {
     profile: "解析版本",
     hash: "SHA-256",
     nextAction: "下一步必做动作",
+    nextActions: {
+      collect_prerequisites: "补充任务信息",
+      search_knowledge: "检索知识证据",
+      inspect_data: "检查数据结构",
+      resolve_data_issues: "处理数据问题",
+      ask_targeted_clarification: "请确认数据字段",
+      prepare_analysis_plan: "制定分析方案",
+      execute_nir_tools: "运行分析与建模",
+      request_user_approval: "请审阅模型结果",
+      reflect_on_attempt: "分析未达标原因",
+      report_best_effort: "汇报当前可得结果",
+      retrieve_evidence_for_retry: "检索重试依据",
+      prepare_retry_plan: "制定重试方案",
+      activate_retry_plan: "执行重试方案",
+      register_or_deliver_model: "注册或交付模型",
+      await_user_direction: "等待你的决定",
+      complete_workflow: "完成工作流",
+      start_workflow: "启动工作流",
+    },
+    resultFiles: "查看本对话的图表与报告",
+    qualityPassed: "通过",
+    qualityFailed: "未通过",
     revision: "工作流版本",
     notAvailable: "尚未产生",
     stages: {
@@ -594,7 +567,7 @@ export const zhCN: Translations = {
     noResults: "未找到结果。",
     actions: "操作",
     keyboardShortcuts: "键盘快捷键",
-    keyboardShortcutsDescription: "使用键盘快捷键更快地操作 DeerFlow。",
+    keyboardShortcutsDescription: "使用键盘快捷键更快地操作 ChemAgent。",
     openCommandPalette: "打开命令面板",
     toggleSidebar: "切换侧边栏",
   },
@@ -602,7 +575,7 @@ export const zhCN: Translations = {
   // Settings
   settings: {
     title: "设置",
-    description: "根据你的偏好调整 DeerFlow 的界面和行为。",
+    description: "根据你的偏好调整 ChemAgent 的界面和行为。",
     sections: {
       account: "账号",
       appearance: "外观",
@@ -617,7 +590,7 @@ export const zhCN: Translations = {
     memory: {
       title: "记忆",
       description:
-        "DeerFlow 会在后台不断从你的对话中自动学习。这些记忆能帮助 DeerFlow 更好地理解你，并提供更个性化的体验。",
+        "ChemAgent 会在后台不断从你的对话中自动学习。这些记忆能帮助 ChemAgent 更好地理解你，并提供更个性化的体验。",
       empty: "暂无可展示的记忆数据。",
       rawJson: "原始 JSON",
       exportButton: "导出记忆",
@@ -711,7 +684,7 @@ export const zhCN: Translations = {
     },
     channels: {
       title: "渠道",
-      description: "连接可在浏览器外向 DeerFlow 发送消息的即时通讯账号。",
+      description: "连接可在浏览器外向 ChemAgent 发送消息的即时通讯账号。",
       disabled:
         "当前服务器未启用渠道连接。请联系管理员开启 channel_connections。",
     },
@@ -721,7 +694,7 @@ export const zhCN: Translations = {
       createSkill: "新建技能",
       emptyTitle: "还没有技能",
       emptyDescription:
-        "将你的 Agent Skill 文件夹放在 DeerFlow 根目录下的 `/skills/custom` 文件夹中。",
+        "将你的 Agent Skill 文件夹放在 ChemAgent 根目录下的 `/skills/custom` 文件夹中。",
       emptyButton: "创建你的第一个技能",
       adminRequired: "需要管理员权限才能管理 Agent Skill。",
       installAdminRequired: "需要管理员权限才能安装 Agent Skill。",
@@ -806,12 +779,12 @@ export const zhCN: Translations = {
     notification: {
       title: "通知",
       description:
-        "DeerFlow 只会在窗口不活跃时发送完成通知，特别适合长时间任务：你可以先去做别的事，完成后会收到提醒。",
+        "ChemAgent 只会在窗口不活跃时发送完成通知，特别适合长时间任务：你可以先去做别的事，完成后会收到提醒。",
       requestPermission: "请求通知权限",
       deniedHint:
         "通知权限已被拒绝。可在浏览器的网站设置中重新开启，以接收完成提醒。",
       testButton: "发送测试通知",
-      testTitle: "DeerFlow",
+      testTitle: "ChemAgent",
       testBody: "这是一条测试通知。",
       notSupported: "当前浏览器不支持通知功能。",
       disableNotification: "关闭通知",
@@ -825,7 +798,7 @@ export const zhCN: Translations = {
       changePasswordDescription: "更新你的账号密码。",
       ssoPasswordDescription: "密码由你的 SSO 提供商管理。",
       ssoPasswordMessage:
-        "此账号通过 {provider} 登录，DeerFlow 无法在此管理或修改密码。请前往你的 SSO 提供商账号设置中进行操作。",
+        "此账号通过 {provider} 登录，ChemAgent 无法在此管理或修改密码。请前往你的 SSO 提供商账号设置中进行操作。",
       currentPassword: "当前密码",
       newPassword: "新密码",
       confirmNewPassword: "确认新密码",
@@ -842,6 +815,22 @@ export const zhCN: Translations = {
       emptyDescription: "相关的致谢信息会展示在这里。",
     },
   },
+  blog: {
+    title: "分析指南",
+    allPosts: "全部文章",
+    recentPosts: "近期文章",
+    tags: "主题",
+    language: "语言",
+    taggedPosts: (title, count) => `“${title}”主题下共 ${count} 篇文章`,
+  },
+  setup: {
+    createAdminDescription: "首次使用 ChemAgent，请先创建管理员账号。",
+    completeTitle: "完成管理员账号设置",
+    completeDescription: "请填写你的邮箱，并设置新的登录密码。",
+    creatingAccount: "正在创建账号…",
+    completingSetup: "正在保存设置…",
+    completeSetup: "完成设置",
+  },
   login: {
     signInTitle: "登录你的账号",
     createAccountTitle: "创建新账号",
@@ -855,7 +844,7 @@ export const zhCN: Translations = {
     createAdminAccount: "创建管理员账号",
     adminSetupRequiredTitle: "需要先完成管理员初始化",
     adminSetupRequiredDescription:
-      "DeerFlow 需要先创建管理员账号，然后才能创建新的普通账号。",
+      "ChemAgent 需要先创建管理员账号，然后才能创建新的普通账号。",
     orContinueWith: "或使用以下方式登录",
     ssoHint: "如果你的账号使用单点登录（SSO），请改用下方的选项登录。",
     continueWith: (provider: string) => `使用 ${provider} 登录`,
@@ -864,6 +853,9 @@ export const zhCN: Translations = {
     backToHome: "← 返回首页",
     networkError: "网络错误，请重试。",
     authFailed: "身份验证失败。",
+    signingIn: "正在登录…",
+    redirecting: "登录成功，正在进入工作台…",
+    redirectingToLogin: "身份验证失败，正在返回登录页…",
     errors: {
       sso_failed: "SSO 登录失败，请重试或使用邮箱登录。",
       sso_cancelled: "SSO 登录已取消。",

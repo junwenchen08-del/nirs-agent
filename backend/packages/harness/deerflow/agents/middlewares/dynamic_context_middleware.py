@@ -236,7 +236,7 @@ class DynamicContextMiddleware(AgentMiddleware):
         )
         return messages
 
-    def _inject(self, state) -> dict | None:
+    def _inject(self, state, *, autonomous=False) -> dict | None:
         messages = list(state.get("messages", []))
         if not messages:
             return None
@@ -255,7 +255,10 @@ class DynamicContextMiddleware(AgentMiddleware):
             first_idx = next((i for i, m in enumerate(messages) if _is_user_injection_target(m)), None)
             if first_idx is None:
                 return None
-            date_reminder, memory_block = self._build_full_reminder()
+            if autonomous or (state.get("nir_workflow") or {}).get("decision_strategy") == "llm_autonomous":
+                date_reminder, memory_block = self._build_date_update_reminder(), None
+            else:
+                date_reminder, memory_block = self._build_full_reminder()
             logger.info(
                 "DynamicContextMiddleware: injecting full reminder (has_memory=%s) into first HumanMessage id=%r",
                 memory_block is not None,
@@ -279,6 +282,10 @@ class DynamicContextMiddleware(AgentMiddleware):
 
     @override
     def before_agent(self, state, runtime: Runtime) -> dict | None:
+        from deerflow.community.nir.web_entry import web_request
+
+        if web_request(getattr(runtime, "context", None)):
+            return self._inject(state, autonomous=True)
         return self._inject(state)
 
     @override
@@ -295,8 +302,11 @@ class DynamicContextMiddleware(AgentMiddleware):
         # the request degrades gracefully (no memory context) rather than
         # hanging.
         try:
+            from deerflow.community.nir.web_entry import web_request
+
+            options = {"autonomous": True} if web_request(getattr(runtime, "context", None)) else {}
             return await asyncio.wait_for(
-                asyncio.to_thread(self._inject, state),
+                asyncio.to_thread(self._inject, state, **options),
                 timeout=_INJECT_TIMEOUT_SECONDS,
             )
         except TimeoutError:

@@ -61,13 +61,12 @@ export const enUS: Translations = {
 
   // Welcome
   welcome: {
-    greeting: "Hello, again!",
+    greeting: "Welcome to ChemAgent",
     description:
-      "Welcome to 🦌 DeerFlow, an open source super agent. With built-in and custom skills, DeerFlow helps you search on the web, analyze data, and generate artifacts like slides, web pages and do almost anything.",
-
-    createYourOwnSkill: "Create Your Own Skill",
+      "Your workspace for near-infrared spectroscopy. Upload or attach a dataset to explore spectra, preprocess data, model and diagnose results, and manage reports and models.",
+    createYourOwnSkill: "Create a ChemAgent analysis skill",
     createYourOwnSkillDescription:
-      "Create your own skill to release the power of DeerFlow. With customized skills,\nDeerFlow can help you search on the web, analyze data, and generate\n artifacts like slides, web pages and do almost anything.",
+      "Turn recurring spectroscopy workflows, reporting conventions and analytical methods into reusable ChemAgent skills.",
   },
 
   // Clipboard
@@ -119,6 +118,23 @@ export const enUS: Translations = {
     suggestionPlaceholderRequired:
       "Replace the suggestion placeholder before sending.",
     goalCommandDescription: "Set, show, or clear an active goal",
+    datasetCommandDescription: "Browse and use saved datasets",
+    datasetPickerDescription:
+      "Attach a file without sending a message. Enter your request and send it when ready.",
+    datasetAttached: "Attached. Enter your request and send when ready.",
+    datasetAttaching: "Attaching dataset, please wait",
+    datasetAttachFailed: "Dataset was not attached. Please retry.",
+    datasetClearSelection: "Clear this dataset selection",
+    modelCommandDescription: "Select a saved model to predict new data",
+    modelPickerDescription:
+      "Select a model version to attach it to this chat. Upload new data or select it with /datasets, enter your prediction request, and send when ready.",
+    modelAttached:
+      "Model attached. Add new data, enter your prediction request, and send.",
+    modelAttaching: "Attaching model. Please wait.",
+    modelAttachFailed: "Could not attach the model. Please retry.",
+    modelClearSelection: "Clear this model selection",
+    modelSelectionContext:
+      "Manually selected prediction model (inspect the new data first, then reuse this model for prediction; attachment does not mean inference has run):",
     goalLabel: "Goal",
     goalContinuing: "Continuing {count}/{max}",
     goalContinuationTooltip:
@@ -186,83 +202,30 @@ export const enUS: Translations = {
     channels: "Channels",
     recentChats: "Recent chats",
     demoChats: "Demo chats",
-    agents: "Agents",
-    agentsDisabledTooltip: "Feature not enabled",
-    evaluations: "NIR evaluations",
     nirDatasets: "Spectral datasets",
     nirModels: "Model library",
-  },
-
-  // Agents
-  agents: {
-    title: "Agents",
-    description:
-      "Create and manage custom agents with specialized prompts and capabilities.",
-    newAgent: "New Agent",
-    emptyTitle: "No custom agents yet",
-    emptyDescription:
-      "Create your first custom agent with a specialized system prompt.",
-    featureDisabledTitle: "Agents feature is not enabled",
-    featureDisabledDescription:
-      "This feature is not enabled on this server. Please contact your administrator.",
-    chat: "Chat",
-    delete: "Delete",
-    deleteConfirm:
-      "Are you sure you want to delete this agent? This action cannot be undone.",
-    deleteSuccess: "Agent deleted",
-    newChat: "New chat",
-    createPageTitle: "Design your Agent",
-    createPageSubtitle:
-      "Describe the agent you want — I'll help you create it through conversation.",
-    nameStepTitle: "Name your new Agent",
-    nameStepHint:
-      "Letters, digits, and hyphens only — stored lowercase (e.g. code-reviewer)",
-    nameStepPlaceholder: "e.g. code-reviewer",
-    nameStepContinue: "Continue",
-    nameStepInvalidError:
-      "Invalid name — use only letters, digits, and hyphens",
-    nameStepAlreadyExistsError: "An agent with this name already exists",
-    nameStepNetworkError:
-      "Network request failed — check your network or backend connection",
-    nameStepCheckError: "Could not verify name availability — please try again",
-    nameStepCheckErrorWithDetail: "Name check failed: {detail}",
-    nameStepApiDisabledError:
-      "Custom agent management is not enabled on this server. Please contact your administrator.",
-    nameStepBootstrapMessage:
-      "The new custom agent name is {name}. Help me design its purpose, behavior, and SOUL.md before saving it.",
-    save: "Save agent",
-    saving: "Saving agent...",
-    saveRequested:
-      "Save requested. DeerFlow is generating and saving an initial version now.",
-    saveHint:
-      "You can save this agent at any time from the top-right menu, even if this is only a first draft.",
-    saveCommandMessage:
-      "Please save this custom agent now based on everything we have discussed so far. Treat this as my explicit confirmation to save. If some details are still missing, make reasonable assumptions, generate a concise first SOUL.md in English, and call setup_agent immediately without asking me for more confirmation.",
-    agentCreatedPendingRefresh:
-      "The agent was created, but DeerFlow could not load it yet. Please refresh this page in a moment.",
-    more: "More actions",
-    agentCreated: "Agent created!",
-    startChatting: "Start chatting",
-    backToGallery: "Back to Gallery",
+    methods: "Method library",
   },
 
   // Breadcrumb
   breadcrumb: {
     workspace: "Workspace",
+    backToCurrentChat: "Back to current chat",
     chats: "Chats",
-    evaluations: "NIR evaluations",
     nirLibrary: "NIR asset library",
+    nirProcess: "Modeling process",
+    methods: "Method library",
   },
 
   // Workspace
   workspace: {
-    officialWebsite: "DeerFlow's official website",
-    githubTooltip: "DeerFlow on Github",
+    officialWebsite: "ChemAgent documentation",
+    githubTooltip: "ChemAgent on Github",
     settingsAndMore: "Settings and more",
-    visitGithub: "DeerFlow on GitHub",
+    visitGithub: "ChemAgent on GitHub",
     reportIssue: "Report a issue",
     contactUs: "Contact us",
-    about: "About DeerFlow",
+    about: "About ChemAgent",
     logout: "Log out",
     gatewayUnavailable: "Gateway is temporarily unavailable.",
     gatewayUnavailableRetrying: "Retrying in the background…",
@@ -349,49 +312,6 @@ export const enUS: Translations = {
     },
   },
 
-  nirEvaluations: {
-    eyebrow: "NIR agent quality lab",
-    title: "Evaluation control room",
-    description:
-      "Map completed NIR conversations to regression scenarios, score their full tool trajectory, and keep safety, quality, latency, and cost visible in one place.",
-    scenarios: "scenarios",
-    deterministic: "Deterministic scoring",
-    mappingTitle: "Regression batch",
-    mappingDescription:
-      "Each scenario can appear once per run. Thread ownership and checkpoint evidence are verified by the Gateway.",
-    threadId: "Thread",
-    threadPlaceholder: "Paste a completed thread ID",
-    scenario: "Expected scenario",
-    selectScenario: "Select a scenario",
-    remove: "Remove case",
-    addCase: "Add case",
-    run: "Run evaluation",
-    running: "Evaluating…",
-    loadError: "Failed to load the NIR scenario catalog",
-    runError: "Failed to run the NIR evaluation",
-    duplicateScenario: "A scenario can only appear once in the same batch.",
-    recentTrend: "Recent quality trend",
-    trendDescription:
-      "The latest 12 browser-local runs. Amber bars indicate policy violations.",
-    noHistory: "Run the first regression batch to establish a baseline.",
-    older: "Older",
-    latest: "Latest",
-    passRate: "Pass rate",
-    averageScore: "Average score",
-    policyViolations: "Policy violations",
-    tokens: "Total tokens",
-    duration: "Duration",
-    results: "Scenario evidence",
-    passed: "passed",
-    failed: "failed",
-    trace: "Trace",
-    noTraceId: "No trace ID recorded",
-    exportEvidence: "Export evidence",
-    clearResult: "Clear",
-    noResults:
-      "Configure at least one completed NIR thread and run an evaluation to inspect its evidence.",
-  },
-
   // Conversation
   conversation: {
     noMessages: "No messages yet",
@@ -428,20 +348,20 @@ export const enUS: Translations = {
     saveAndConnect: "Save and connect",
     saveChanges: "Save changes",
     descriptions: {
-      telegram: "Telegram direct messages through your DeerFlow bot.",
+      telegram: "Telegram direct messages through your ChemAgent bot.",
       slack: "Slack workspace messages and mentions.",
-      discord: "Discord server messages through your DeerFlow bot.",
-      feishu: "Feishu and Lark messages through your DeerFlow app.",
-      dingtalk: "DingTalk Stream Push messages through your DeerFlow bot.",
-      wechat: "WeChat iLink messages through your DeerFlow bot.",
-      wecom: "WeCom messages through your DeerFlow AI bot.",
+      discord: "Discord server messages through your ChemAgent bot.",
+      feishu: "Feishu and Lark messages through your ChemAgent app.",
+      dingtalk: "DingTalk Stream Push messages through your ChemAgent bot.",
+      wechat: "WeChat iLink messages through your ChemAgent bot.",
+      wecom: "WeCom messages through your ChemAgent AI bot.",
     },
     connectedAs: (name: string) => `Connected as ${name}.`,
   },
 
   // Page titles (document title)
   pages: {
-    appName: "DeerFlow",
+    appName: "ChemAgent",
     chats: "Chats",
     newChat: "New chat",
     untitled: "Untitled",
@@ -467,11 +387,29 @@ export const enUS: Translations = {
     writeFile: "Write file",
     clickToViewContent: "Click to view file content",
     writeTodos: "Update to-do list",
-    skillInstallTooltip: "Install skill and make it available to DeerFlow",
+    skillInstallTooltip: "Install skill and make it available to ChemAgent",
   },
 
   // Subtasks
   uploads: {
+    datasetsSaved: (saved: number, reused: number) =>
+      `${saved ? `${saved} dataset(s) saved automatically. ` : ""}${reused ? `${reused} dataset(s) already in the library; existing records reused. ` : ""}Use /datasets to select them next time.`,
+    datasetSaveFailed: (filename: string, errorCode: string) => {
+      const reasons: Record<string, string> = {
+        quota_exceeded: "dataset library capacity exceeded",
+        library_write_limit: "library write limit reached",
+        insufficient_free_space: "insufficient free disk space",
+        file_too_large: "file exceeds the library file-size limit",
+        dataset_archived:
+          "identical dataset is archived; restore it in the library",
+        dataset_unavailable: "existing dataset is unavailable",
+        source_hash_mismatch: "existing dataset failed verification",
+        source_changed: "file changed during saving",
+        database_unavailable: "dataset library is temporarily unavailable",
+        thread_not_owned: "this chat has no valid ownership record",
+      };
+      return `“${filename}” was uploaded but not saved to the dataset library: ${reasons[errorCode] ?? "save failed; retry from the dataset library later"}. It remains available in this chat.`;
+    },
     uploading: "Uploading...",
     uploadingFiles: "Uploading files, please wait...",
     limitsHint: (maxFiles: number, maxFileSize: string, maxTotalSize: string) =>
@@ -534,6 +472,13 @@ export const enUS: Translations = {
     description:
       "Current structured workflow evidence. This view does not expose raw spectra or hidden reasoning.",
     currentStage: "Current stage",
+    progress: "Workflow progress",
+    milestones: {
+      data: "Check data",
+      plan: "Plan analysis",
+      model: "Model and evaluate",
+      review: "Review and deliver",
+    },
     task: "Task",
     attempt: (current: number, maximum: number) =>
       maximum > 0 ? `Attempt ${current} of ${maximum}` : `Attempt ${current}`,
@@ -547,6 +492,28 @@ export const enUS: Translations = {
     profile: "Profile",
     hash: "SHA-256",
     nextAction: "Next required action",
+    nextActions: {
+      collect_prerequisites: "Provide task details",
+      search_knowledge: "Search evidence",
+      inspect_data: "Inspect data structure",
+      resolve_data_issues: "Resolve data issues",
+      ask_targeted_clarification: "Confirm data fields",
+      prepare_analysis_plan: "Prepare analysis plan",
+      execute_nir_tools: "Run analysis and modeling",
+      request_user_approval: "Review the model results",
+      reflect_on_attempt: "Diagnose the failed attempt",
+      report_best_effort: "Report available results",
+      retrieve_evidence_for_retry: "Find evidence for retry",
+      prepare_retry_plan: "Prepare retry plan",
+      activate_retry_plan: "Run retry plan",
+      register_or_deliver_model: "Register or deliver model",
+      await_user_direction: "Waiting for your decision",
+      complete_workflow: "Complete workflow",
+      start_workflow: "Start workflow",
+    },
+    resultFiles: "View charts and reports from this chat",
+    qualityPassed: "Passed",
+    qualityFailed: "Needs attention",
     revision: "Workflow revision",
     notAvailable: "Not available yet",
     stages: {
@@ -614,7 +581,7 @@ export const enUS: Translations = {
     actions: "Actions",
     keyboardShortcuts: "Keyboard Shortcuts",
     keyboardShortcutsDescription:
-      "Navigate DeerFlow faster with keyboard shortcuts.",
+      "Navigate ChemAgent faster with keyboard shortcuts.",
     openCommandPalette: "Open Command Palette",
     toggleSidebar: "Toggle Sidebar",
   },
@@ -622,7 +589,7 @@ export const enUS: Translations = {
   // Settings
   settings: {
     title: "Settings",
-    description: "Adjust how DeerFlow looks and behaves for you.",
+    description: "Adjust how ChemAgent looks and behaves for you.",
     sections: {
       account: "Account",
       appearance: "Appearance",
@@ -637,7 +604,7 @@ export const enUS: Translations = {
     memory: {
       title: "Memory",
       description:
-        "DeerFlow automatically learns from your conversations in the background. These memories help DeerFlow understand you better and deliver a more personalized experience.",
+        "ChemAgent automatically learns from your conversations in the background. These memories help ChemAgent understand you better and deliver a more personalized experience.",
       empty: "No memory data to display.",
       rawJson: "Raw JSON",
       exportButton: "Export memory",
@@ -735,7 +702,7 @@ export const enUS: Translations = {
     channels: {
       title: "Channels",
       description:
-        "Connect IM accounts that can send messages to DeerFlow from outside the browser.",
+        "Connect IM accounts that can send messages to ChemAgent from outside the browser.",
       disabled:
         "Channel connections are not enabled on this server. Ask an administrator to enable channel_connections.",
     },
@@ -746,7 +713,7 @@ export const enUS: Translations = {
       createSkill: "Create skill",
       emptyTitle: "No agent skill yet",
       emptyDescription:
-        "Put your agent skill folders under the `/skills/custom` folder under the root folder of DeerFlow.",
+        "Put your agent skill folders under the `/skills/custom` folder under the root folder of ChemAgent.",
       emptyButton: "Create Your First Skill",
       adminRequired: "Admin privileges are required to manage agent skills.",
       installAdminRequired:
@@ -836,12 +803,12 @@ export const enUS: Translations = {
     notification: {
       title: "Notification",
       description:
-        "DeerFlow only sends a completion notification when the window is not active. This is especially useful for long-running tasks so you can switch to other work and get notified when done.",
+        "ChemAgent only sends a completion notification when the window is not active. This is especially useful for long-running tasks so you can switch to other work and get notified when done.",
       requestPermission: "Request notification permission",
       deniedHint:
         "Notification permission was denied. You can enable it in your browser's site settings to receive completion alerts.",
       testButton: "Send test notification",
-      testTitle: "DeerFlow",
+      testTitle: "ChemAgent",
       testBody: "This is a test notification.",
       notSupported: "Your browser does not support notifications.",
       disableNotification: "Disable notification",
@@ -855,7 +822,7 @@ export const enUS: Translations = {
       changePasswordDescription: "Update your account password.",
       ssoPasswordDescription: "Password is managed by your SSO provider.",
       ssoPasswordMessage:
-        "This account signs in with {provider}, so DeerFlow cannot manage or change its password here. Use your SSO provider's account settings instead.",
+        "This account signs in with {provider}, so ChemAgent cannot manage or change its password here. Use your SSO provider's account settings instead.",
       currentPassword: "Current password",
       newPassword: "New password",
       confirmNewPassword: "Confirm new password",
@@ -872,6 +839,23 @@ export const enUS: Translations = {
       emptyDescription: "Credits and acknowledgements will show here.",
     },
   },
+  blog: {
+    title: "Analysis guides",
+    allPosts: "All articles",
+    recentPosts: "Recent articles",
+    tags: "Topics",
+    language: "Language",
+    taggedPosts: (title, count) => `${count} articles about “${title}”`,
+  },
+  setup: {
+    createAdminDescription:
+      "Create the administrator account to start using ChemAgent.",
+    completeTitle: "Complete administrator account setup",
+    completeDescription: "Enter your email and set a new sign-in password.",
+    creatingAccount: "Creating account…",
+    completingSetup: "Saving settings…",
+    completeSetup: "Complete setup",
+  },
   login: {
     signInTitle: "Sign in to your account",
     createAccountTitle: "Create a new account",
@@ -885,7 +869,7 @@ export const enUS: Translations = {
     createAdminAccount: "Create admin account",
     adminSetupRequiredTitle: "Administrator setup is required",
     adminSetupRequiredDescription:
-      "DeerFlow needs an administrator account before new regular accounts can be created.",
+      "ChemAgent needs an administrator account before new regular accounts can be created.",
     orContinueWith: "Or continue with",
     ssoHint:
       "If your account uses single sign-on, sign in with the option below instead.",
@@ -895,6 +879,9 @@ export const enUS: Translations = {
     backToHome: "← Back to home",
     networkError: "Network error. Please try again.",
     authFailed: "Authentication failed.",
+    signingIn: "Signing you in…",
+    redirecting: "Signed in. Opening your workspace…",
+    redirectingToLogin: "Authentication failed. Returning to sign in…",
     errors: {
       sso_failed: "SSO login failed. Please try again or use email login.",
       sso_cancelled: "SSO login was cancelled.",

@@ -1,380 +1,66 @@
-# NIR-Agent — 近红外光谱智能体
+# ChemAgent
 
-> **版本**：v2.1.0　|　**基础框架**：DeerFlow 2.x（LangGraph + FastAPI）
+ChemAgent 是面向近红外光谱分析的智能工作台，连接数据管理、预处理、自主建模、过程诊断、报告与模型管理。
 
-[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](./backend/pyproject.toml)
-[![nir-core](https://img.shields.io/badge/nir--core-0.1.0-blue)](./nir_core/pyproject.toml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+## 分析工作流
 
-NIR-Agent 是基于 [DeerFlow](https://github.com/bytedance/deer-flow) 构建的近红外光谱
-专用智能体。用户可以通过自然语言完成数据检查、预处理、定量或定性建模、质量评估、
-模型注册和新样本预测。
+1. 上传光谱数据，在数据集工作台核对字段映射、波长轴、样本角色和分析区间。
+2. 保存解析版本，将数据集挂载到新会话，说明目标变量和分析约束后发送任务。
+3. 在建模过程中查看实际执行的轮次、参数、范围明确的指标、预测与残差诊断。
+4. 查看报告和最终保留模型，按人工审批流程保存到模型库。
+5. 挂载已保存模型，对兼容的未知样品数据进行预测。
 
-算法计算由独立的确定性 Python 包 `nir_core` 完成，LLM 负责理解需求、选择工具、组织流程
-和解释结果。原始光谱矩阵不会直接进入 LLM 上下文。
+模型质量未达门槛时，明确回复“同意保存到模型库”仍可保存，卡片与详情会标明
+未达标及用户确认，保留真实指标。此前因门槛未保存的已审批会话，可在原对话
+再次确认保存，复用已有模型；无需重新建模。数据、文件完整性与来源校验仍需通过。
 
-> 当前部署定位是可信用户使用的本地或单机 Docker 环境。不要直接把默认的 `2026`
-> 端口暴露到公网。
+已入库数据用于新的自主回归建模时，系统会自动保存本次训练、验证和测试样本的固定划分版本。
+在数据集的“数据概览”中可查看或复用该版本；模型库的“训练数据”直接关联训练时的划分。
+划分版本只读，保留样本归属、组内顺序和光谱范围，原始数据与当前解析设置继续保留。
 
-## 核心能力
+自主建模遇到不完整的决策 JSON 时，会保留原始记录并在限定次数内要求更正。
+发送给模型的消息会同时处理无效调用及其失败回复，避免消息配对错误；服务调用异常与运行额度耗尽分别提示。
 
-| 能力 | 说明 |
-|---|---|
-| 数据接入 | MAT v5/v7.3、CSV、TXT；识别样本方向、波长轴、目标列和嵌套矩阵 |
-| 数据检查 | 对不唯一的矩阵、方向或字段映射要求人工确认，不静默猜测 |
-| 定量分析 | 单目标、多目标、自动划分或具名 Cal/Tuning/Test 分区建模 |
-| 定性分析 | PLS-DA、逻辑回归和校准 SVM，支持字符串类别与分组隔离 |
-| 预处理 | 21 种目录化方法，Chemotools 优先、原生补充，支持训练边界拟合和预测严格回放 |
-| Chemotools MCP | 将固定版本公共工具集作为 MCP 组件提供给智能体，覆盖目录查询、受控执行、诊断和绘图 |
-| 校准迁移 | 对同类仪器配对样本执行 DS/PDS/SST，绑定方向、波长轴、仪器和验证证据 |
-| 模型选择 | PLS 基线以及受控的 Ridge、SVR、Extra Trees 等候选比较 |
-| 波长选择 | 全光谱基线与 CARS 等方案仅使用校准/调优数据比较 |
-| 质量控制 | 三集分离、泄漏检查、质量门禁、审批注册和可追溯模型产物 |
-| 预测监控 | 产物哈希校验、适用域漂移、连续告警和防篡改预测审计 |
-| 跨会话复用（可选） | 显式保存数据集；将已审批、已注册模型提升到用户模型库并安全挂载到新会话 |
-| 可选知识库 | 对已审核文献进行检索，为失败诊断和重试提供证据 |
+ChemAgent 的登录、初始化、侧栏、设置、通知、关于页面和中英文使用文档使用统一品牌。浏览器页签使用分子轮廓与光谱线图标；分享链接指向当前实例。
 
-## Docker 启动
+产品面向中文用户：首次访问默认中文，登录与初始化提示、首页说明、设置、文档导航和日期均提供中文体验。浏览器的英文语言设置不会覆盖产品默认；在外观设置中主动选择的语言会被保存。
 
-先安装并启动 Docker Desktop，同时确保终端可以使用 Git 和 `make`。Windows 建议使用
-Git Bash。Docker 镜像已经包含项目所需的 Python 3.12 和 CPU 版 PyTorch，用户不需要
-准备本机 Python 或 Conda 环境。
+## 本地开发
 
-### 1. 下载项目
+运行环境：Python 3.12+、Node.js 22+、pnpm 10.26.2+、uv。根据 `config.example.yaml` 准备本地配置，密钥与运行数据只保留本地。
 
 ```bash
-git clone https://github.com/junwenchen08-del/nirs-agent.git
-cd nirs-agent
+make install
+make dev
 ```
 
-### 2. 创建配置文件
+后端位于 `backend/`，算法包位于 `nir_core/`，前端位于 `frontend/`。模块结构和维护规范见各模块的 `AGENTS.md`。
 
 ```bash
-cp config.example.yaml config.yaml
-cp .env.example .env
-cp extensions_config.example.json extensions_config.json
-cp frontend/.env.example frontend/.env
+cd frontend
+pnpm check
+pnpm test
+pnpm build
 ```
-
-这些本地配置均已被 Git 忽略。重复部署时不要用模板覆盖已经配置好的文件。
-
-`config.example.yaml` 中的 `nir_library.enabled` 默认关闭。可选能力包括受所有权保护的
-数据集和模型库：用户明确要求后，可保存当前线程的 CSV/TXT/MAT、维护版本化解析
-Profile，并把已通过科学门禁、用户审批和 `nir_register_model` 注册的模型完整提升到长期
-目录。新会话挂载时会再次校验模型、metrics、训练数据绑定和可选 HMAC，返回现有
-`nir_predict` 可直接使用的路径；原验证范围会原样保留，内部留出验证不会被标成外部验证
-或生产批准。`nir_inspect` 不会自动保存数据，模型也不会仅因注册成功而自动长期保存。
-启用后，侧栏会显示“数据集库”和“模型库”；用户可查看用量、Profile、使用历史和模型
-血缘，向新会话挂载资产，并执行受控归档/删除。物理删除要求先归档、再输入精确资产编号；
-仍被模型引用的数据集会拒绝删除。删除长期库版本不会删除已经挂载到旧会话的副本，也不
-替代部署者的备份保留策略。普通上传、建模、线程注册和预测不受该开关影响。模板版本为
-21，已有 `config.yaml` 可运行 `make config-upgrade` 合并新工具条目，不要直接覆盖本地密钥
-配置。
-
-### 3. 配置模型
-
-在 `config.yaml` 的 `models:` 中启用一个可用模型，并在 `.env` 中填写该供应商的 API
-Key。密钥应通过环境变量引用，不要直接写入配置模板、README 或提交记录。
-
-知识库和外部 MCP 均为可选功能，基础 NIR 分析不要求启用。模板会默认启用项目内置的
-Chemotools MCP；它随 Gateway 镜像运行，不需要单独部署服务。
-
-### 4. 启动项目
-
-```bash
-make docker-start
-```
-
-首次启动需要下载并构建镜像。完成后打开
-[http://localhost:2026](http://localhost:2026)，首次使用时按页面提示创建管理员账号。
-
-可用下面的命令确认服务状态：
-
-```bash
-docker ps --filter "name=deer-flow"
-curl http://localhost:2026/health
-```
-
-### 5. 查看日志或停止
-
-```bash
-make docker-logs
-make docker-stop
-```
-
-## 基本使用
-
-第一次使用建议先阅读[《NIR-Agent 用户使用说明》](./docs/nir-user-guide.md)，其中包含从
-Docker 启动、数据检查、建模审批到跨会话预测的完整操作示例和可直接复制的对话模板。
-
-在网页中新建对话，通过附件按钮上传自己的 MAT、CSV 或 TXT 光谱文件。建议先检查数据
-结构，再开始建模。
-
-```text
-先检查我刚上传的近红外文件，只报告样本方向、波长轴、目标变量候选和需要确认的映射，暂时不要建模。
-```
-
-确认结构后，可以直接提出分析目标：
-
-```text
-分析这批光谱并建立蛋白质含量定量模型，使用独立留出集评估。
-```
-
-```text
-根据类别标签建立定性鉴别模型，并报告 balanced accuracy、macro-F1、MCC 和混淆矩阵。
-```
-
-```text
-使用已经批准的模型预测新样本，同时检查适用域漂移。
-```
-
-智能体会记录当前任务类型、数据确认、建模尝试和审批状态。模型未经用户明确批准不能进入
-正式注册阶段；显式选择的模型失败后，也不会在未获得同意时擅自替换模型家族。
-
-当当前对话存在 NIR 工作流时，聊天页右上角会显示 `NIR` 状态入口。打开后可查看当前阶段、
-尝试次数、模型与预处理、经过筛选的指标、验证范围、审批状态，以及数据集血缘标识。普通
-聊天不会显示该入口；面板只展示当前线程最近一次工作流的结构化摘要，不展示隐藏推理、
-原始光谱、完整证据 JSON 或宿主机文件路径。正在运行的任务优先使用实时工作流状态；旧会话
-若未从实时流恢复该字段，会通过带所有权校验的线程状态接口读取最近检查点。
-
-### 跨会话资产库（可选）
-
-在 `config.yaml` 中把 `nir_library.enabled` 设为 `true` 并重启服务后，侧栏会出现：
-
-- `/workspace/nir/datasets`：保存、重命名、查看解析 Profile 与使用历史、挂载、归档和删除数据集；
-- `/workspace/nir/models`：查看模型版本、验证范围、指标和来源，并执行挂载、归档和删除。
-
-页面只调用当前登录用户范围内的 API，不把原始光谱、模型二进制或宿主机路径放进浏览器
-缓存。空间卡片中的“库写入准入门槛”只决定是否接受新的长期资产，不是对普通上传、线程
-临时副本或沙箱输出的严格总配额。归档只隐藏资产，不释放磁盘；完成精确确认的物理删除才
-回收长期库目录。验证范围说明模型如何被评估，并不等于模型已获生产部署批准。
-
-对话中要求保存当前上传时，智能体会在数据检查后、离开数据审计阶段前完成保存。跨会话
-预测会先挂载数据集和模型，再在同一个新工作流中重新检查并标准化输入，最后调用预测；不会
-继承旧会话的检查结论、漂移连续计数或预测审计。预测成功后，最终总结可以引用本工作流
-已经绑定并验证的精确模型路径；其他模型路径仍会被回答门禁拒绝。模型提升需要最新消息明确表达“保存模型到
-模型库供以后/跨会话使用”；自然中文或英文确认可以包含较长的模型编号，否定表达仍会拒绝。
-
-Docker 部署时，长期资产位于实际 `DEER_FLOW_HOME` 卷的 `users/<用户>/nir-datasets` 和
-`users/<用户>/nir-models`。SQLite 部署需要把解析后的 `database.sqlite_dir` 中数据库与
-`users/` 目录作为同一恢复点备份；PostgreSQL 部署需要让数据库快照与资产卷保持同一时间
-点。建议先停止或冻结库写入，再备份数据库和资产卷，并定期用一份合成数据及模型做恢复
-演练。不要把真实数据卷、数据库或密钥提交到 Git。
-
-## 工作流程
-
-```text
-用户需求
-  → 数据结构检查与人工确认
-  → 科学有效性和泄漏检查
-  → 校准/调优/测试划分
-  → 预处理、波长与模型选择
-  → 独立测试和质量门禁
-  → 不达标时反思并生成受约束的重试计划
-  → 用户审批
-  → 模型注册；按需显式保存到跨会话模型库
-  → 新数据预测、漂移监控和防篡改审计
-```
-
-模型选择和超参数调整只能使用校准集与调优集；最终测试集不会参与候选生成或选择。
-具名外部数据只有在来源和分区语义满足要求时才能报告为外部验证，否则必须表述为独立留出。
-
-## 数据接入
-
-- MAT v5 和 v7.3 会递归检查数值矩阵、波长轴及目标变量候选。
-- CSV/TXT 会检测编码、分隔符、小数点格式、数值波长表头和字段角色。
-- 样本在行和样本在列的常见光谱表均可识别。
-- 多个候选得分相同或字段角色不明确时返回 `needs_user_mapping`。
-- 数据加载、训练和预测均受文件大小、矩阵规模、内存和运行时间上限保护。
-
-仓库不附带真实业务数据。用户应上传自己拥有合法使用权的数据。
-
-## 预处理方法
-
-`nir_core` 通过统一流水线接口提供以下 21 种预处理方法。新建流水线默认优先调用固定版本
-`chemotools==0.4.4` 中经过数值和边界验证的实现；Chemotools 没有等价能力、参数语义不一致
-或需要兼容旧模型时，使用项目原生实现：
-
-| 方法 | 作用 | 常用参数 |
-|---|---|---|
-| `snv` | 标准正态变量变换 | — |
-| `robust_snv` | 基于中位数和 MAD 的稳健 SNV | `consistency` |
-| `rnv` | Chemotools 稳健正态变量 | `percentile`、`epsilon` |
-| `msc` | 多元散射校正 | —（参考谱由训练流水线拟合） |
-| `emsc` | 扩展多元散射校正 | `polynomial_order`、`min_multiplicative` |
-| `despike` | 检测并替换孤立尖峰 | `window`、`z_threshold` |
-| `sg_smooth` | Savitzky-Golay 平滑 | `window`、`order` |
-| `whittaker_smooth` | Whittaker 惩罚平滑 | `lambda_` |
-| `median_filter` | 中值滤波 | `window_length`、`mode` |
-| `derivative1` | 一阶 SG 导数 | `window`、`order`、`delta`、`spacing_mode` |
-| `derivative2` | 二阶 SG 导数 | `window`、`order`、`delta`、`spacing_mode` |
-| `norris_derivative1` | Norris-Williams 一阶导数 | `gap`、`segment`、`delta` |
-| `norris_derivative2` | Norris-Williams 二阶导数 | `gap`、`segment`、`delta` |
-| `airpls` | airPLS 基线校正 | `lambda_`、`max_iters` |
-| `arpls` | ArPLS 基线校正 | `lambda_`、`ratio`、`max_iters` |
-| `asls` | 非对称最小二乘基线校正 | `lambda_`、`p` |
-| `rubberband` | 橡皮筋基线校正 | — |
-| `detrend` | 多项式去趋势 | — |
-| `mean_center` | 均值中心化 | — |
-| `autoscale` | 均值中心化和单位方差缩放 | — |
-| `normalize` | 行级 L1、L2 或 max 归一化 | `norm` |
-
-典型顺序是：去尖峰 → 基线校正 → 散射校正 → 平滑/导数 → 缩放。稳健 SNV、EMSC、孤立尖峰
-去除和 Norris-Williams 导数属于显式选择能力，不会自动加入默认候选流水线。EMSC 参考谱
-只在训练数据上拟合，并随预处理状态保存以供预测回放。
-
-预处理选择采用 MCP-first 协议：智能体先查询 Chemotools MCP 能力目录和候选详情，再用项目
-运行时注册表检查方法 ID、参数边界、执行顺序和工件回放兼容性。Gateway 会在
-分析计划确认以及 `nir_preprocess` 或建模工具执行前，检查本工作流是否已经尝试过 MCP 目录
-查询；目录不可用时会保留失败记录并允许受治理的原生回退。自动候选只使用校准分区，始终比较原始光谱基线，
-最终测试集不会参与候选生成或选择。
-
-新建流水线对 Chemotools 中已完成数值和边界验证的对应方法优先使用固定版本
-`chemotools==0.4.4`；项目原生实现只保留给 Chemotools 没有等价能力的 `robust_snv`、
-孤立尖峰 `despike`，以及 `normalize(norm="max")` 等语义不重叠分支。模型工件会保存每一步
-的实现来源和版本，旧工件没有来源记录时固定按原生实现回放，不会因升级后端而改变预测。
-需要临时回滚有原生等价实现的新训练时，可在 `.env` 设置：
-
-```dotenv
-NIR_PREPROCESSING_PROVIDER_POLICY=native
-```
-
-Docker 镜像会安装并锁定该依赖，使用者不需要本机 Conda 或 `torch1` 环境。
-
-波长轴对齐由独立的 `nir_align_wavelengths` 完成。它会同时更新光谱矩阵和波长轴，要求
-输入轴严格单调，并默认禁止外推。它只做轴归一化，不等于校准迁移。
-
-## Chemotools MCP
-
-项目将固定版本 `chemotools==0.4.4` 的公共工具集封装为线程隔离的 stdio MCP 组件。
-`extensions_config.example.json` 已默认启用，复制配置后随 Docker Gateway 一起启动。智能体会先
-调用能力目录，再读取所选方法的真实构造参数和允许操作，不依赖模型记忆猜测参数。
-目录查询必须先于预处理或建模执行并单独完成，不能与执行工具并行发起。
-
-MCP 目录覆盖 Chemotools 0.4.4 的全部公开预处理类（30 个），并包含校准适配、数据增强、
-特征选择、PLS 回归、异常值诊断、物理强度转换、绘图和 Inspector。对外提供的是稳定的
-`list_capabilities`、`describe_capability`、`validate_operation`、`fit_estimator`、
-`apply_estimator`、`call_function`、`render_plot` 和 `run_inspector` 等受控接口，而不是允许
-任意模块名或 Python 代码执行。
-
-MCP 训练对象保存在当前对话工作区，并在再次加载前校验 SHA-256；NumPy 输入禁止 pickle，
-读写路径不能越出线程工作区。完整可调用目录不等于全部进入自动候选：普通生产建模仍由
-`nir_train_*`/`nir_analyze` 在训练折内拟合预处理；校准迁移、增强、正交投影、特征选择和
-异常值诊断默认只允许显式选择。因此新增 MCP 不会绕过现有三集分离、质量门禁和审批注册。
-
-## 跨仪器校准迁移
-
-DS、PDS 和 SST 通过独立工具提供，不会进入普通预处理候选。使用前必须准备同类仪器对
-同一批实体样本的配对光谱；默认依据两份 NPZ 中唯一且集合一致的 `sample_names` 配对，
-并明确参考仪器、目标仪器和“目标 → 参考”的迁移方向。不同波长轴只允许在共同覆盖范围
-内对齐，禁止外推。NIR 与 Raman 等不同光谱模态不能按此协议互相迁移。
-
-智能体先查询 `nir_list_calibration_transfer_methods`，再使用
-`nir_fit_calibration_transfer`、`nir_apply_calibration_transfer` 和
-`nir_evaluate_calibration_transfer`。工件记录 Chemotools 版本、方法参数、仪器 ID、轴哈希、
-配对数据哈希和验证指标，并像模型工件一样在加载前校验 SHA-256（可选强制 HMAC）。只有
-光谱误差改善时标记为 `spectrally_validated`。内部配对留出即使通过参考模型 RMSEP 验证，
-也只标记为 `model_validated_internal`；只有另行提供不与训练样本重叠的
-`validation_source_path` / `validation_target_path`，并同时绑定可信参考模型且迁移后 RMSEP
-改善时，才标记为 `production_validated` / `approved`。
-
-## 建模与质量控制
-
-主要训练路径支持：
-
-- 无官方分区数据的自动校准/调优/留出划分；
-- 按批次、年份、产地、仪器等字段进行组间隔离；
-- 使用既有 Cal/Tuning/Test 分区的固定验证；
-- 单目标、多目标回归以及监督分类；
-- 训练边界拟合预处理和波长选择；
-- PLS 基线与有条件启用的替代模型比较；
-- 对重复光谱、冲突参考值和跨分区泄漏进行阻断。
-
-默认质量门禁按应用领域设置：
-
-| 领域 | 最低 R² | 最低 RPD |
-|---|---:|---:|
-| 水分 | 0.90 | 4.0 |
-| 蛋白质 | 0.85 | 3.5 |
-| 制药 | 0.85 | 3.0 |
-| 饲料 | 0.75 | 2.5 |
-| 土壤 | 0.70 | 2.0 |
-| 默认 | 0.80 | 3.0 |
-
-显著 bias 即使在 R² 和 RPD 达标时也会阻止通过。内部独立留出不能描述成外部验证。
-
-## 模型产物与预测安全
-
-- 模型、指标和训练数据通过 SHA-256 清单绑定，注册时再次核验。
-- 预测只接受指定输出目录中由 NIR 流程生成且清单验证通过的产物。
-- 部署可通过 `NIR_ARTIFACT_SIGNING_KEY` 和 `NIR_REQUIRE_SIGNED_ARTIFACTS=1` 强制签名。
-- 预测结果包含训练域适用性检查，并可连续累计漂移状态。
-- 预测审计只记录必要摘要，不保存原始光谱和逐样本预测值。
-- 审计事件使用哈希链和同步落盘；链损坏或无法持久化时失败关闭。
-
-## 项目结构
-
-```text
-nirs-agent/
-├── backend/            # FastAPI Gateway、智能体运行时和 NIR 工具桥接
-├── frontend/           # Next.js 网页界面
-├── nir_core/           # 确定性 NIR 算法包和测试
-├── skills/             # 智能体技能
-├── docker/             # Docker Compose 和 Nginx 配置
-├── config.example.yaml
-├── extensions_config.example.json
-└── README.md
-```
-
-## 测试
-
-运行完整的 `nir_core` 测试：
-
-```bash
-cd nir_core
-pytest
-```
-
-仅运行 Chemotools MCP 契约、执行和安全测试：
-
-```bash
-cd nir_core
-pytest tests/test_mcp -q
-```
-
-运行后端 NIR 回归：
 
 ```bash
 cd backend
-make test-nir
+make test
+make lint
 ```
 
-CI 会分别执行生产代码 Ruff 检查、快速测试和慢速计算回归。正式测试保留在仓库中，并优先
-使用程序生成的合成数据。
+## 使用说明
 
-## 知识库（可选）
+启动应用后访问 `/zh/docs` 或 `/en/docs`。文档涵盖数据与评价范围、工作台操作、会话记录，以及从数据到模型的完整流程。更多维护说明见 `docs/`；品牌约定见 `docs/chemagent-branding.md`。
 
-知识库默认不启用，不影响数据检查、预处理、训练和预测。需要启用时，在 `.env` 中设置
-`UV_EXTRAS=knowledge`，并按 [.env.example](./.env.example) 配置对应的
-`NIR_KNOWLEDGE_*` 参数。
+## 部署与数据
 
-知识文档默认以 `draft` 状态导入，只有补全必要来源信息并审核发布后才会被智能体检索。
-更换嵌入模型或向量维度时，应使用新的索引路径和索引版本。
+Docker 配置位于 `docker/`。更新已有部署时，保留现有配置、数据挂载和 Compose 项目，并从审计后的新源码快照构建镜像。兼容性模块、环境变量和持久化标识沿用现有契约，品牌修改不会迁移历史数据。
 
-## 公开仓库边界
+实验脚本、原始数据、实验输出、日志和本地运行时副本不属于产品发布内容。仓库根目录 `experiments/` 与仓库外的本地备份保持本地使用。
 
-公开仓库不包含真实 MAT 数据及压缩包、本地参考项目、个人资料、内部修改方案、实施日志、
-临时测试输出、上传文件、模型产物、数据库、运行日志和知识库索引。正式源码、配置模板和
-自动化测试保留；数据来源、再分发授权和隐私合规由数据提供者负责。
+## 项目
 
-## 致谢
+[ChemAgent 源码](https://github.com/junwenchen08-del/nirs-agent) · [问题反馈](https://github.com/junwenchen08-del/nirs-agent/issues)
 
-- [DeerFlow](https://github.com/bytedance/deer-flow)：智能体运行时、编排、沙箱和技能系统。
-- [LangChain](https://github.com/langchain-ai/langchain) 与
-  [LangGraph](https://github.com/langchain-ai/langgraph)：底层智能体框架。
-- [Chemotools](https://chemotools.org/)：化学计量学预处理、建模、诊断和适配工具集。
-- NIR 算法实现使用或参考了 scikit-learn、SciPy 等开源科学计算项目。
-
-## 许可证
-
-本项目基于 [MIT License](./LICENSE) 开源；DeerFlow 框架同样采用 MIT License。
+项目许可与第三方版权声明见 [LICENSE](LICENSE)。

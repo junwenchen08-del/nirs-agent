@@ -13,6 +13,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { BRAND } from "@/core/branding";
 import { useI18n } from "@/core/i18n/hooks";
 import { cn } from "@/lib/utils";
 
@@ -34,8 +35,9 @@ export function WorkspaceContainer({
 export function WorkspaceHeader({
   className,
   children,
+  returnToThreadId,
   ...props
-}: React.ComponentProps<"header">) {
+}: React.ComponentProps<"header"> & { returnToThreadId?: string }) {
   const { t } = useI18n();
   const pathname = usePathname();
   const segments = useMemo(() => {
@@ -44,6 +46,10 @@ export function WorkspaceHeader({
       return parts.slice(1, 3);
     }
   }, [pathname]);
+  const section = useMemo(() => pathname?.split("/")[3], [pathname]);
+  // `/workspace/nir` has no page of its own: the library label would misname the
+  // process explorer, and linking there would 404.
+  const nirRoot = segments?.[0] === "workspace" && segments?.[1] === "nir";
   return (
     <header
       className={cn(
@@ -59,7 +65,18 @@ export function WorkspaceHeader({
             {segments?.[0] && (
               <BreadcrumbItem className="hidden md:block">
                 <BreadcrumbLink asChild>
-                  <Link href={`/${segments[0]}`}>
+                  <Link
+                    href={
+                      returnToThreadId
+                        ? `/workspace/chats/${encodeURIComponent(returnToThreadId)}`
+                        : `/${segments[0]}`
+                    }
+                    title={
+                      returnToThreadId
+                        ? t.breadcrumb.backToCurrentChat
+                        : undefined
+                    }
+                  >
                     {nameOfSegment(segments[0], t)}
                   </Link>
                 </BreadcrumbLink>
@@ -69,16 +86,16 @@ export function WorkspaceHeader({
               <>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
-                  {segments.length >= 2 ? (
+                  {nirRoot ? (
+                    <BreadcrumbPage>
+                      {nameOfSegment(segments[1], t, section)}
+                    </BreadcrumbPage>
+                  ) : (
                     <BreadcrumbLink asChild>
                       <Link href={`/${segments[0]}/${segments[1]}`}>
-                        {nameOfSegment(segments[1], t)}
+                        {nameOfSegment(segments[1], t, section)}
                       </Link>
                     </BreadcrumbLink>
-                  ) : (
-                    <BreadcrumbPage>
-                      {nameOfSegment(segments[1], t)}
-                    </BreadcrumbPage>
                   )}
                 </BreadcrumbItem>
               </>
@@ -95,7 +112,7 @@ export function WorkspaceHeader({
       <div className="pr-4">
         <Tooltip content={t.workspace.githubTooltip}>
           <a
-            href="https://github.com/bytedance/deer-flow"
+            href={BRAND.repositoryUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="opacity-75 transition hover:opacity-100"
@@ -129,11 +146,17 @@ export function WorkspaceBody({
 function nameOfSegment(
   segment: string | undefined,
   t: ReturnType<typeof useI18n>["t"],
+  section?: string,
 ) {
   if (!segment) return t.common.home;
   if (segment === "workspace") return t.breadcrumb.workspace;
   if (segment === "chats") return t.breadcrumb.chats;
-  if (segment === "evaluations") return t.breadcrumb.evaluations;
-  if (segment === "nir") return t.breadcrumb.nirLibrary;
+  if (segment === "methods") return t.breadcrumb.methods;
+  if (segment === "nir") {
+    if (section === "process") return t.breadcrumb.nirProcess;
+    if (section === "datasets") return t.sidebar.nirDatasets;
+    if (section === "models") return t.sidebar.nirModels;
+    return t.breadcrumb.nirLibrary;
+  }
   return segment[0]?.toUpperCase() + segment.slice(1);
 }

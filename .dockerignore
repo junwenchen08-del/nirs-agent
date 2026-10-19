@@ -65,6 +65,7 @@ tests/
 *.log
 
 # Local-only NIR data, reference projects, and internal notes
+.tmp/
 参考/
 药品2-310条/
 local-data/

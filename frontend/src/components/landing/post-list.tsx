@@ -1,6 +1,13 @@
 import Link from "next/link";
 
-import { getBlogRoute, normalizeTagSlug, type BlogPost } from "@/core/blog";
+import {
+  getBlogRoute,
+  normalizeTagSlug,
+  formatTagName,
+  type BlogPost,
+  type BlogLang,
+} from "@/core/blog";
+import { translations } from "@/core/i18n/translations";
 import { cn } from "@/lib/utils";
 
 type PostListProps = {
@@ -16,7 +23,7 @@ type PostMetaProps = {
   pathname?: string;
 };
 
-function formatDate(date?: string): string | null {
+function formatDate(date?: string, lang = "zh"): string | null {
   if (!date) {
     return null;
   }
@@ -26,7 +33,7 @@ function formatDate(date?: string): string | null {
     return date;
   }
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(lang === "en" ? "en-US" : "zh-CN", {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -39,7 +46,7 @@ export function PostMeta({
   languages,
   pathname,
 }: PostMetaProps) {
-  const formattedDate = formatDate(date ?? undefined);
+  const formattedDate = formatDate(date ?? undefined, currentLang);
   const availableLanguages = Array.isArray(languages)
     ? languages.filter((lang): lang is string => typeof lang === "string")
     : [];
@@ -56,7 +63,13 @@ export function PostMeta({
 
       {pathname && availableLanguages.length > 1 ? (
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-secondary-foreground text-sm">Language:</span>
+          <span className="text-secondary-foreground text-sm">
+            {
+              translations[currentLang === "en" ? "en-US" : "zh-CN"].blog
+                .language
+            }
+            ：
+          </span>
           {availableLanguages.map((lang) => {
             const isActive = lang === currentLang;
             return (
@@ -69,7 +82,7 @@ export function PostMeta({
                     : "text-muted-foreground hover:text-foreground text-sm transition-colors"
                 }
               >
-                {lang.toUpperCase()}
+                {lang === "zh" ? "中文" : "English"}
               </Link>
             );
           })}
@@ -82,7 +95,9 @@ export function PostMeta({
 export function PostTags({
   tags,
   className,
+  lang = "zh",
 }: {
+  lang?: BlogLang;
   tags?: unknown;
   className?: string;
 }) {
@@ -100,14 +115,16 @@ export function PostTags({
 
   return (
     <div className={cn("flex flex-wrap items-center gap-3", className)}>
-      <span className="text-secondary-foreground text-sm">Tags:</span>
+      <span className="text-secondary-foreground text-sm">
+        {translations[lang === "en" ? "en-US" : "zh-CN"].blog.tags}：
+      </span>
       {validTags.map((tag) => (
         <Link
           key={tag}
           href={`/blog/tags/${normalizeTagSlug(tag)}`}
           className="border-border text-secondary-foreground hover:text-foreground rounded-xl border px-2 py-1 text-sm transition-colors"
         >
-          {tag}
+          {formatTagName(tag, lang)}
         </Link>
       ))}
     </div>
@@ -153,7 +170,7 @@ export function PostList({ description, posts, title }: PostListProps) {
                   {post.metadata.description}
                 </p>
               ) : null}
-              <PostTags tags={post.metadata.tags} />
+              <PostTags tags={post.metadata.tags} lang={post.lang} />
             </article>
           );
         })}

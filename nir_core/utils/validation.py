@@ -275,6 +275,8 @@ def suggest_lv_adjustment(
     metrics: dict,
     domain: str = "default",
     n_samples: int | None = None,
+    *,
+    evaluation_scope: str = "legacy",
 ) -> dict:
     """Suggest a latent-variable (n_components) adjustment based on diagnostics.
 
@@ -308,9 +310,13 @@ def suggest_lv_adjustment(
         - ``recommendation``: Chinese recommendation text.
         - ``retry_preprocessing``: bool — whether a new pipeline is advised.
     """
-    from nir_core.utils.metrics import evaluate_quality  # avoid cycle
+    from nir_core.utils.metrics import evaluate_quality, search_metrics  # avoid cycle
 
-    quality = evaluate_quality(metrics, domain=domain, n_samples=n_samples)
+    if evaluation_scope == "validation":
+        metrics = search_metrics(metrics)
+    quality = evaluate_quality(
+        metrics, domain=domain, n_samples=n_samples, evaluation_scope=evaluation_scope
+    )
     current_n = metrics.get("n_components")
     if current_n is not None:
         try:
@@ -325,7 +331,11 @@ def suggest_lv_adjustment(
     delta = 0
 
     # --- 1. Overfitting detection ---
-    rmsep = metrics.get("RMSEP")
+    rmsep = (
+        metrics.get("RMSE_val")
+        if evaluation_scope == "validation"
+        else metrics.get("RMSEP")
+    )
     rmsecv = metrics.get("RMSECV")
     overfitting = False
     if rmsep is not None and rmsecv is not None:
@@ -346,7 +356,7 @@ def suggest_lv_adjustment(
         retry_pp = True
 
     # --- 2. Bias issue detection ---
-    test_block = metrics.get("test")
+    test_block = metrics.get("val" if evaluation_scope == "validation" else "test")
     test_bias = 0.0
     if isinstance(test_block, dict):
         try:
@@ -404,7 +414,7 @@ def suggest_lv_adjustment(
         rec_parts.append("模型健康，无需调整潜变量数。")
     elif change == "reduce":
         rec_parts.append(
-            f"检测到过拟合(RMSEP={rmsep:.4f} > 2×RMSECV={rmsecv:.4f})，"
+            f"检测到过拟合({'RMSE(Val)' if evaluation_scope == 'validation' else 'RMSEP'}={rmsep:.4f} > 2×RMSECV={rmsecv:.4f})，"
             f"建议将成分数从 {current_n} 减少到 {suggested_n}。"
         )
     elif change == "increase":

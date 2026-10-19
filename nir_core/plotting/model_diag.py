@@ -387,6 +387,8 @@ def plot_vip(
     wv: np.ndarray | None = None,
     threshold: float = 1.0,
     top_n: int = 20,
+    *,
+    wavelength_unit: str | None = "nm",
 ) -> str:
     """Plot Variable Importance in Projection (VIP) scores vs wavelength.
 
@@ -398,6 +400,7 @@ def plot_vip(
         wv: Optional wavelength axis. If None, column indices are used.
         threshold: VIP threshold line (default 1.0).
         top_n: Number of top wavelengths to highlight with markers.
+        wavelength_unit: Explicit axis unit; None labels an unknown unit.
 
     Returns:
         Base64-encoded PNG string.
@@ -409,7 +412,11 @@ def plot_vip(
         x = np.asarray(wv, dtype=float).ravel()
         if x.size != n_wv:
             x = np.arange(n_wv, dtype=float)
-        x_label = "Wavelength (nm)"
+        x_label = (
+            f"Spectral axis ({wavelength_unit})"
+            if wavelength_unit
+            else "Spectral axis (unit not recorded)"
+        )
     else:
         x = np.arange(n_wv, dtype=float)
         x_label = "Variable index"
@@ -457,6 +464,8 @@ def plot_vip(
 def plot_regression_coefficients(
     coefficients: np.ndarray,
     wv: np.ndarray | None = None,
+    *,
+    wavelength_unit: str | None = "nm",
 ) -> str:
     """Plot PLS regression coefficients vs wavelength.
 
@@ -466,6 +475,7 @@ def plot_regression_coefficients(
     Args:
         coefficients: 1-D array of regression coefficients (n_wavelengths,).
         wv: Optional wavelength axis. If None, column indices are used.
+        wavelength_unit: Explicit axis unit; None labels an unknown unit.
 
     Returns:
         Base64-encoded PNG string.
@@ -477,7 +487,11 @@ def plot_regression_coefficients(
         x = np.asarray(wv, dtype=float).ravel()
         if x.size != n_wv:
             x = np.arange(n_wv, dtype=float)
-        x_label = "Wavelength (nm)"
+        x_label = (
+            f"Spectral axis ({wavelength_unit})"
+            if wavelength_unit
+            else "Spectral axis (unit not recorded)"
+        )
     else:
         x = np.arange(n_wv, dtype=float)
         x_label = "Variable index"

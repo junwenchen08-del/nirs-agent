@@ -15,5 +15,7 @@ export default defineConfig({
     // Rsbuild processes that CSS import instead of Node trying to load it.
     bundleDependencies: ["streamdown", "katex"],
   },
-  include: ["tests/unit/**/*.test.ts"],
+  // Component render tests cover the visual fixes that pure projection tests
+  // cannot see (see tests/unit/components/workspace/nir).
+  include: ["tests/unit/**/*.test.ts", "tests/unit/**/*.test.tsx"],
 });

@@ -1,266 +1,275 @@
 "use client";
 
 import {
-  ArchiveIcon,
+  ArrowUpRightIcon,
   BoxesIcon,
+  DatabaseIcon,
   LinkIcon,
   RefreshCwIcon,
-  ShieldCheckIcon,
-  Trash2Icon,
+  SearchIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/core/i18n/hooks";
+import { methodLabel } from "@/core/nir/presentation";
+import { formatProcessNumber } from "@/core/nir/process-display";
 import {
-  archiveModel,
-  attachModel,
-  deleteModel,
-  getStorageUsage,
+  listDatasets,
   listModels,
   useNirLibraryEnabled,
   type NIRModelVersion,
-  type NIRStorageUsage,
 } from "@/core/nir-library";
+import {
+  cardMetrics,
+  modelChatPath,
+  modelDisplayName,
+  modelReportPath,
+  scopeLabel,
+} from "@/core/nir-library/model-report";
 
 import { FeatureDisabled } from "./dataset-library";
-import { formatBytes, StorageUsageCard } from "./storage-usage-card";
-
-type DialogKind = "attach" | "delete" | "details" | null;
-
-function shortHash(value: string) {
-  return `${value.slice(0, 10)}…${value.slice(-6)}`;
-}
-
-function dateText(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
-}
+import { ModelQualityNotice } from "./model-quality-notice";
 
 export function ModelLibrary() {
-  const { t } = useI18n();
-  const copy = t.nirLibrary;
+  const { t, locale } = useI18n();
+  const zh = locale.startsWith("zh");
+  const text = (cn: string, en: string) => (zh ? cn : en);
   const { enabled, isLoading: featureLoading } = useNirLibraryEnabled();
   const [models, setModels] = useState<NIRModelVersion[]>([]);
-  const [usage, setUsage] = useState<NIRStorageUsage | null>(null);
+  const [datasetNames, setDatasetNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
   const [query, setQuery] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [dialog, setDialog] = useState<DialogKind>(null);
-  const [selected, setSelected] = useState<NIRModelVersion | null>(null);
-  const [targetThread, setTargetThread] = useState("");
-  const [deleteConfirmation, setDeleteConfirmation] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
-    if (featureLoading) return;
-    if (!enabled) {
-      setLoading(false);
-      return;
-    }
+    if (featureLoading || !enabled) return;
     const controller = new AbortController();
     setLoading(true);
-    Promise.all([
-      listModels(controller.signal),
-      getStorageUsage(controller.signal),
-    ])
-      .then(([modelRows, storage]) => {
-        setModels(modelRows);
-        setUsage(storage);
-        setError(null);
-      })
-      .catch((reason: unknown) => {
+    setError(false);
+    void listModels(controller.signal)
+      .then((rows) => {
         if (!controller.signal.aborted)
-          setError(reason instanceof Error ? reason.message : String(reason));
+          setModels(rows.filter((row) => row.status === "ready"));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setError(true);
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
+    void listDatasets(controller.signal)
+      .then((rows) => {
+        if (!controller.signal.aborted)
+          setDatasetNames(
+            Object.fromEntries(rows.map((row) => [row.id, row.name])),
+          );
+      })
+      .catch(() => {
+        /* Models remain usable when dataset names are unavailable. */
+      });
     return () => controller.abort();
-  }, [enabled, featureLoading, refreshKey]);
+  }, [enabled, featureLoading, refresh]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return models;
     return models.filter((model) =>
       [
         model.model_id,
         model.version,
         model.method ?? "",
-        model.validation_scope,
+        model.report_summary?.target ?? "",
+        datasetNames[model.source_dataset_id ?? ""] ?? "",
+        methodLabel(model.method, zh),
       ].some((value) => value.toLowerCase().includes(needle)),
     );
-  }, [models, query]);
+  }, [models, query, datasetNames, zh]);
 
-  function open(kind: DialogKind, model: NIRModelVersion) {
-    setSelected(model);
-    setDialog(kind);
-    setTargetThread("");
-    setDeleteConfirmation("");
-  }
-
-  async function action(work: () => Promise<unknown>) {
-    setBusy(true);
-    try {
-      await work();
-      toast.success(copy.operationSuccess);
-      setDialog(null);
-      refresh();
-    } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (!featureLoading && !enabled) {
+  if (!featureLoading && !enabled)
     return (
       <FeatureDisabled
-        title={copy.featureDisabledTitle}
-        description={copy.featureDisabledDescription}
+        title={t.nirLibrary.featureDisabledTitle}
+        description={t.nirLibrary.featureDisabledDescription}
       />
     );
-  }
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-4 sm:p-6">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-6">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">{copy.modelsTitle}</h1>
-          <p className="text-muted-foreground mt-1 max-w-3xl text-sm">
-            {copy.modelsDescription}
+          <h1 className="text-2xl font-semibold">{t.nirLibrary.modelsTitle}</h1>
+          <p className="text-muted-foreground mt-2 text-sm">
+            {text(
+              "查看模型用过的数据、处理方法和预测效果，也可以带到新对话中使用。",
+              "Explore training data, processing steps and prediction results, or use a model in a new chat.",
+            )}
           </p>
         </div>
-        <Button variant="outline" onClick={refresh} disabled={loading}>
-          <RefreshCwIcon className="size-4" /> {copy.refresh}
+        <Button
+          variant="outline"
+          disabled={loading}
+          onClick={() => setRefresh((value) => value + 1)}
+        >
+          <RefreshCwIcon className="size-4" />
+          {t.nirLibrary.refresh}
         </Button>
       </div>
-      <StorageUsageCard usage={usage} />
-      <Input
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder={copy.search}
-        className="max-w-lg"
-      />
-      {error && (
-        <div className="border-destructive/40 bg-destructive/5 text-destructive rounded-lg border p-4 text-sm">
-          {error}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative w-full max-w-lg">
+          <SearchIcon
+            aria-hidden
+            className="text-muted-foreground absolute top-3 left-3 size-4"
+          />
+          <Input
+            aria-label={text("搜索模型", "Search models")}
+            placeholder={text(
+              "搜索模型、数据集或预测目标",
+              "Search models, datasets or targets",
+            )}
+            className="pl-9"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
         </div>
-      )}
-      {loading ? (
-        <p className="text-muted-foreground py-8 text-center">{copy.loading}</p>
-      ) : filtered.length === 0 ? (
-        <p className="text-muted-foreground py-8 text-center">{copy.empty}</p>
+        <p className="text-muted-foreground text-sm">
+          {text(
+            `${filtered.length} 个可用模型`,
+            `${filtered.length} available models`,
+          )}
+        </p>
+      </div>
+      {error ? (
+        <div role="alert" className="rounded-xl border p-6 text-sm">
+          <p>
+            {text(
+              "模型暂时未能加载，请重试。",
+              "Models could not be loaded. Please retry.",
+            )}
+          </p>
+          <Button
+            variant="outline"
+            className="mt-3"
+            onClick={() => setRefresh((value) => value + 1)}
+          >
+            {text("重新加载", "Retry")}
+          </Button>
+        </div>
+      ) : loading || featureLoading ? (
+        <p className="text-muted-foreground py-12 text-center">
+          {t.nirLibrary.loading}
+        </p>
+      ) : !filtered.length ? (
+        <div className="text-muted-foreground rounded-xl border border-dashed p-12 text-center">
+          <BoxesIcon className="mx-auto mb-3 size-8" />
+          <p>
+            {query
+              ? text(
+                  "没有找到匹配的模型，试试其他关键词。",
+                  "No matching models. Try another search.",
+                )
+              : text(
+                  "模型保存后会出现在这里。",
+                  "Saved models will appear here.",
+                )}
+          </p>
+        </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="resource-grid">
           {filtered.map((model) => {
-            const external =
-              model.validation_scope === "independent_external_validation";
+            const metrics = cardMetrics(model);
+            const metric =
+              metrics.find(
+                (row) =>
+                  row.scope === "final_test" &&
+                  (row.R2 !== null || row.RMSE !== null),
+              ) ?? metrics.find((row) => row.scope === "validation");
+            const datasetName = datasetNames[model.source_dataset_id ?? ""];
             return (
-              <Card key={model.id} data-testid="nir-model-card">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <CardTitle className="truncate text-base">
-                        {model.model_id}
-                      </CardTitle>
-                      <CardDescription className="mt-1 font-mono text-xs">
-                        {model.version}
-                      </CardDescription>
-                    </div>
-                    <Badge variant="outline">
-                      {copy.statuses[model.status] ?? model.status}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                  <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                    <span className="text-muted-foreground">{copy.method}</span>
-                    <span>{model.method ?? "—"}</span>
-                    <span className="text-muted-foreground">{copy.size}</span>
-                    <span>{formatBytes(model.artifact_size_bytes)}</span>
-                    <span className="text-muted-foreground">{copy.hash}</span>
-                    <span className="font-mono text-xs">
-                      {shortHash(model.artifact_sha256)}
-                    </span>
-                    <span className="text-muted-foreground">
-                      {copy.created}
-                    </span>
-                    <span>{dateText(model.created_at)}</span>
-                  </div>
-                  <div className="bg-muted/50 rounded-md p-3">
-                    <p className="flex items-center gap-2 font-medium">
-                      <ShieldCheckIcon className="size-4" />
-                      {copy.validation}
-                    </p>
-                    <p className="text-muted-foreground mt-1 text-xs">
-                      {external
-                        ? copy.validationExternal
-                        : copy.validationInternal}
-                    </p>
-                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                      {copy.productionNotApproved}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {model.status === "ready" && (
-                      <Button size="sm" onClick={() => open("attach", model)}>
-                        <LinkIcon className="size-4" />
-                        {copy.attach}
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => open("details", model)}
+              <Card
+                key={model.id}
+                data-testid="nir-model-card"
+                className="group hover:border-primary/40 relative gap-3 transition-colors"
+              >
+                <CardHeader className="gap-3 pb-0">
+                  <CardTitle className="min-w-0 text-base">
+                    <Link
+                      href={modelReportPath(model)}
+                      className="line-clamp-2 break-words hover:underline"
                     >
-                      <BoxesIcon className="size-4" />
-                      {copy.details}
+                      {modelDisplayName(model, zh)}
+                    </Link>
+                  </CardTitle>
+                  <p
+                    className="text-muted-foreground truncate text-xs"
+                    title={`${model.model_id} · ${model.version}`}
+                  >
+                    {model.model_id} · {model.version}
+                  </p>
+                  <p className="text-muted-foreground text-sm">
+                    {methodLabel(model.method, zh)}
+                    {model.report_summary?.target
+                      ? ` · ${model.report_summary.target}`
+                      : ""}
+                  </p>
+                </CardHeader>
+                <CardContent className="flex flex-1 flex-col gap-4 text-sm">
+                  <ModelQualityNotice status={model.quality_status} zh={zh} />
+                  <p className="text-muted-foreground flex items-start gap-2">
+                    <DatabaseIcon className="mt-0.5 size-4 shrink-0" />
+                    <span className="line-clamp-2">
+                      {datasetName ??
+                        text(
+                          model.source_dataset_id
+                            ? "已关联训练数据集"
+                            : "训练数据关联未记录",
+                          model.source_dataset_id
+                            ? "Linked training dataset"
+                            : "Training dataset link not recorded",
+                        )}
+                    </span>
+                  </p>
+                  <div className="bg-muted/40 rounded-xl p-3">
+                    <p className="text-muted-foreground mb-2 text-xs">
+                      {metric
+                        ? `${scopeLabel(metric.scope, zh)}${metric.n !== null ? ` · ${metric.n} ${text("个样本", "samples")}` : ""}`
+                        : text("预测效果", "Prediction results")}
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-muted-foreground text-xs">
+                          {text("贴合程度 R²", "Fit R²")}
+                        </p>
+                        <p className="mt-1 text-xl font-semibold tabular-nums">
+                          {formatProcessNumber(metric?.R2)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground text-xs">
+                          {text("预测误差 RMSE", "Prediction error RMSE")}
+                        </p>
+                        <p className="mt-1 text-xl font-semibold tabular-nums">
+                          {formatProcessNumber(metric?.RMSE)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="relative z-10 mt-auto flex flex-wrap gap-2 border-t pt-4">
+                    <Button size="sm" variant="outline" asChild>
+                      <Link href={modelChatPath(model)}>
+                        <LinkIcon className="size-4" />
+                        {text("在新对话中使用", "Use in a new chat")}
+                      </Link>
                     </Button>
-                    {model.status === "ready" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          action(() =>
-                            archiveModel(model.model_id, model.version),
-                          )
-                        }
-                      >
-                        <ArchiveIcon className="size-4" />
-                        {copy.archive}
-                      </Button>
-                    )}
-                    {model.status === "archived" && (
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => open("delete", model)}
-                      >
-                        <Trash2Icon className="size-4" />
-                        {copy.delete}
-                      </Button>
-                    )}
+                    <Button size="sm" variant="ghost" asChild>
+                      <Link href={modelReportPath(model)}>
+                        {text("查看详情", "View details")}
+                        <ArrowUpRightIcon className="size-4" />
+                      </Link>
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -268,150 +277,6 @@ export function ModelLibrary() {
           })}
         </div>
       )}
-
-      <Dialog
-        open={dialog === "attach"}
-        onOpenChange={(value) => !value && setDialog(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{copy.attach}</DialogTitle>
-            <DialogDescription>
-              {selected ? `${selected.model_id} · ${selected.version}` : ""}
-            </DialogDescription>
-          </DialogHeader>
-          <label className="grid gap-1.5 text-sm">
-            <span className="font-medium">{copy.targetThread}</span>
-            <Input
-              value={targetThread}
-              onChange={(event) => setTargetThread(event.target.value)}
-            />
-          </label>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialog(null)}>
-              {copy.cancel}
-            </Button>
-            <Button
-              disabled={busy || !selected || !targetThread.trim()}
-              onClick={() =>
-                action(() =>
-                  attachModel(
-                    selected!.model_id,
-                    selected!.version,
-                    targetThread.trim(),
-                  ),
-                )
-              }
-            >
-              {copy.attach}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={dialog === "delete"}
-        onOpenChange={(value) => !value && setDialog(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{copy.permanentDelete}</DialogTitle>
-            <DialogDescription>{copy.deleteWarning}</DialogDescription>
-          </DialogHeader>
-          <p className="text-muted-foreground text-sm">
-            {copy.deleteCopiesWarning}
-          </p>
-          <label className="grid gap-1.5 text-sm">
-            <span className="font-medium">
-              {copy.typeExact}:{" "}
-              {selected ? `${selected.model_id}:${selected.version}` : ""}
-            </span>
-            <Input
-              value={deleteConfirmation}
-              onChange={(event) => setDeleteConfirmation(event.target.value)}
-            />
-          </label>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialog(null)}>
-              {copy.cancel}
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={
-                busy ||
-                !selected ||
-                deleteConfirmation !==
-                  `${selected.model_id}:${selected.version}`
-              }
-              onClick={() =>
-                action(() =>
-                  deleteModel(
-                    selected!.model_id,
-                    selected!.version,
-                    deleteConfirmation,
-                  ),
-                )
-              }
-            >
-              {copy.delete}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={dialog === "details"}
-        onOpenChange={(value) => !value && setDialog(null)}
-      >
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{selected?.model_id}</DialogTitle>
-            <DialogDescription>{selected?.version}</DialogDescription>
-          </DialogHeader>
-          {selected && (
-            <div className="space-y-4 text-sm">
-              <section>
-                <h3 className="font-medium">{copy.metrics}</h3>
-                <pre className="bg-muted mt-2 max-h-48 overflow-auto rounded-md p-3 text-xs">
-                  {JSON.stringify(selected.metrics_summary, null, 2)}
-                </pre>
-              </section>
-              <section>
-                <h3 className="font-medium">{copy.source}</h3>
-                <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border p-3">
-                  <span className="text-muted-foreground">dataset</span>
-                  <span className="font-mono text-xs">
-                    {selected.source_dataset_id ?? "—"}
-                  </span>
-                  <span className="text-muted-foreground">profile</span>
-                  <span className="font-mono text-xs">
-                    {selected.source_profile_id ?? "—"}
-                  </span>
-                  <span className="text-muted-foreground">thread</span>
-                  <span className="font-mono text-xs">
-                    {selected.source_thread_id}
-                  </span>
-                  <span className="text-muted-foreground">run</span>
-                  <span className="font-mono text-xs">
-                    {selected.source_run_id ?? "—"}
-                  </span>
-                  <span className="text-muted-foreground">attempt</span>
-                  <span>{selected.source_attempt}</span>
-                </div>
-              </section>
-              <section>
-                <h3 className="font-medium">{copy.validation}</h3>
-                <p className="text-muted-foreground mt-1">
-                  {selected.validation_scope}
-                </p>
-                <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                  {copy.productionNotApproved}
-                </p>
-              </section>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

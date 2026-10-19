@@ -25,7 +25,7 @@ const OPTIMISTIC_PROMPT_MARKER = "LEAK-OPTIMISTIC-SVG-PROMPT-SHOULD-DISAPPEAR";
 
 test.describe("Thread history", () => {
   test("sidebar shows existing threads", async ({ page }) => {
-    mockLangGraphAPI(page, { threads: THREADS });
+    await mockLangGraphAPI(page, { threads: THREADS }).ready;
 
     await page.goto("/workspace/chats/new");
 
@@ -37,7 +37,7 @@ test.describe("Thread history", () => {
   });
 
   test("clicking a thread in sidebar navigates to it", async ({ page }) => {
-    mockLangGraphAPI(page, { threads: THREADS });
+    await mockLangGraphAPI(page, { threads: THREADS }).ready;
 
     await page.goto("/workspace/chats/new");
 
@@ -56,7 +56,7 @@ test.describe("Thread history", () => {
   test("clicking blank space in a sidebar thread row navigates to it", async ({
     page,
   }) => {
-    mockLangGraphAPI(page, { threads: THREADS });
+    await mockLangGraphAPI(page, { threads: THREADS }).ready;
 
     await page.goto("/workspace/chats/new");
 
@@ -83,7 +83,7 @@ test.describe("Thread history", () => {
   });
 
   test("existing thread loads historical messages", async ({ page }) => {
-    mockLangGraphAPI(page, { threads: THREADS });
+    await mockLangGraphAPI(page, { threads: THREADS }).ready;
 
     // Navigate directly to an existing thread
     await page.goto(`/workspace/chats/${MOCK_THREAD_ID}`);
@@ -100,7 +100,7 @@ test.describe("Thread history", () => {
     const firstPrompt = "Summarize the latest quarterly report";
     const secondPrompt = "Turn the summary into an action plan";
 
-    mockLangGraphAPI(page, {
+    await mockLangGraphAPI(page, {
       threads: [
         {
           thread_id: MOCK_THREAD_ID,
@@ -130,7 +130,7 @@ test.describe("Thread history", () => {
           ],
         },
       ],
-    });
+    }).ready;
 
     await page.goto(`/workspace/chats/${MOCK_THREAD_ID}`);
     await expect(page.getByText("Second answer")).toBeVisible({
@@ -161,7 +161,7 @@ test.describe("Thread history", () => {
   test("deleting an inactive chat keeps the current chat open", async ({
     page,
   }) => {
-    mockLangGraphAPI(page, { threads: THREADS });
+    await mockLangGraphAPI(page, { threads: THREADS }).ready;
 
     await page.goto(`/workspace/chats/${MOCK_THREAD_ID}`);
     await expect(
@@ -191,7 +191,7 @@ test.describe("Thread history", () => {
   test("new chat does not show previous thread messages after client-side navigation", async ({
     page,
   }) => {
-    mockLangGraphAPI(page, {
+    await mockLangGraphAPI(page, {
       threads: [
         {
           thread_id: SVG_PROMPT_THREAD_ID,
@@ -216,7 +216,7 @@ test.describe("Thread history", () => {
           ],
         },
       ],
-    });
+    }).ready;
 
     await page.goto(`/workspace/chats/${SVG_PROMPT_THREAD_ID}`);
     await expect(page.getByText(SVG_PROMPT_MARKER)).toBeVisible({
@@ -235,7 +235,7 @@ test.describe("Thread history", () => {
   test("new chat does not show previous optimistic user message after client-side navigation", async ({
     page,
   }) => {
-    mockLangGraphAPI(page, {
+    await mockLangGraphAPI(page, {
       threads: [
         {
           thread_id: MOCK_THREAD_ID_2,
@@ -243,7 +243,7 @@ test.describe("Thread history", () => {
           updated_at: "2025-06-04T12:00:00Z",
         },
       ],
-    });
+    }).ready;
 
     const metadataOnlyStream = async (route: Route) => {
       const body = [
@@ -298,14 +298,14 @@ test.describe("Thread history", () => {
   test("new chat resets immediately after a history-only thread URL update", async ({
     page,
   }) => {
-    mockLangGraphAPI(page);
+    await mockLangGraphAPI(page).ready;
 
     await page.goto("/workspace/chats/new");
     const textarea = page.getByPlaceholder(/how can i assist you/i);
     await expect(textarea).toBeVisible({ timeout: 15_000 });
     await textarea.fill("Message that must disappear in the next new chat");
     await textarea.press("Enter");
-    await expect(page.getByText("Hello from DeerFlow!")).toBeVisible({
+    await expect(page.getByText("Hello from ChemAgent!")).toBeVisible({
       timeout: 15_000,
     });
 
@@ -328,14 +328,14 @@ test.describe("Thread history", () => {
     // interaction forcing another render.
     await newChatLink.click();
     await expect(page).toHaveURL(/\/workspace\/chats\/new$/);
-    await expect(page.getByText("Hello from DeerFlow!")).toHaveCount(0);
+    await expect(page.getByText("Hello from ChemAgent!")).toHaveCount(0);
     await expect(textarea).toBeVisible();
   });
 
   test("deleting the active newly created chat returns to the new chat screen", async ({
     page,
   }) => {
-    mockLangGraphAPI(page);
+    await mockLangGraphAPI(page).ready;
     await page.route(/\/api\/threads\/[^/]+$/, (route) => {
       if (route.request().method() === "DELETE") {
         return route.fulfill({
@@ -353,7 +353,7 @@ test.describe("Thread history", () => {
     await textarea.fill("What should disappear after deletion?");
     await textarea.press("Enter");
 
-    await expect(page.getByText("Hello from DeerFlow!")).toBeVisible({
+    await expect(page.getByText("Hello from ChemAgent!")).toBeVisible({
       timeout: 15_000,
     });
 
@@ -372,19 +372,19 @@ test.describe("Thread history", () => {
 
     await expect(page).toHaveURL(/\/workspace\/chats\/new$/);
     await expect(page.getByText("Previous question")).toHaveCount(0);
-    await expect(page.getByText("Hello from DeerFlow!")).toHaveCount(0);
+    await expect(page.getByText("Hello from ChemAgent!")).toHaveCount(0);
     await expect(page.getByPlaceholder(/how can i assist you/i)).toBeVisible();
 
     await page.goto(`/workspace/chats/${MOCK_THREAD_ID}`);
     await page.waitForURL("**/workspace/chats/new");
-    await expect(page.getByText("Hello from DeerFlow!")).toHaveCount(0);
+    await expect(page.getByText("Hello from ChemAgent!")).toHaveCount(0);
     await expect(page.getByPlaceholder(/how can i assist you/i)).toBeVisible();
   });
 
   test("mock thread does not load real backend run history", async ({
     page,
   }) => {
-    mockLangGraphAPI(page, {
+    await mockLangGraphAPI(page, {
       threads: [
         {
           thread_id: DEMO_THREAD_ID,
@@ -404,7 +404,7 @@ test.describe("Thread history", () => {
           ],
         },
       ],
-    });
+    }).ready;
     const backendRunHistoryUrls: string[] = [];
     await page.route(
       /\/api\/langgraph\/threads\/[^/]+\/runs(?:\?|$)/,
@@ -448,6 +448,35 @@ test.describe("Thread history", () => {
       },
     );
 
+    await page.route(`**/mock/api/threads/${DEMO_THREAD_ID}/history`, (route) =>
+      route.fulfill({
+        json: [
+          {
+            values: {
+              messages: [
+                {
+                  type: "human",
+                  id: "demo-question",
+                  content:
+                    "What might be the trends and opportunities in 2026?",
+                },
+                {
+                  type: "ai",
+                  id: "demo-answer",
+                  content: "I've created a modern, minimalist website",
+                },
+              ],
+            },
+            next: [],
+            tasks: [],
+            metadata: { step: 1 },
+            checkpoint: { checkpoint_id: "mock-history" },
+            parent_checkpoint: null,
+          },
+        ],
+      }),
+    );
+
     await page.goto(`/workspace/chats/${DEMO_THREAD_ID}?mock=true`);
 
     await expect(
@@ -460,7 +489,7 @@ test.describe("Thread history", () => {
   });
 
   test("chats list page shows all threads", async ({ page }) => {
-    mockLangGraphAPI(page, { threads: THREADS });
+    await mockLangGraphAPI(page, { threads: THREADS }).ready;
 
     await page.goto("/workspace/chats");
 
@@ -475,7 +504,7 @@ test.describe("Thread history", () => {
   test("IM channel threads show their source in thread lists", async ({
     page,
   }) => {
-    mockLangGraphAPI(page, {
+    await mockLangGraphAPI(page, {
       threads: [
         {
           thread_id: MOCK_THREAD_ID,
@@ -490,7 +519,7 @@ test.describe("Thread history", () => {
           },
         },
       ],
-    });
+    }).ready;
 
     await page.goto("/workspace/chats/new");
 

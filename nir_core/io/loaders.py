@@ -17,7 +17,9 @@ import numpy as np
 
 from nir_core.io.resources import ResourceBudget
 from nir_core.io.schema import (
+    _MISSING,
     csv_profile_numeric_matrix,
+    flatten_mat_leaves,
     infer_mat_mapping,
     load_inferred_mat_arrays,
     profile_csv,
@@ -226,17 +228,24 @@ def load_csv(
     if delimiter is None:
         delimiter = _sniff_delimiter(filepath)
     has_header = _sniff_header(filepath, delimiter)
-    header_candidate = (
-        _read_header_cells(filepath, delimiter) if y_cols is not None else []
+    explicit_targets = (
+        y_cols if y_cols is not None else ([y_col] if y_col is not None else None)
     )
-    if not has_header and y_cols is not None:
+    header_candidate = (
+        _read_header_cells(filepath, delimiter) if explicit_targets is not None else []
+    )
+    if not has_header and explicit_targets is not None:
         selected_headers = [
             header_candidate[index]
-            for index in y_cols
+            for index in explicit_targets
             if 0 <= index < len(header_candidate)
         ]
-        if len(selected_headers) == len(y_cols) and all(
-            value.strip() and not _is_float_text(value) for value in selected_headers
+        # An explicitly mapped named target can accompany numeric wavelength
+        # headers. Missing-reference markers remain numeric-invalid samples;
+        # they must never be silently discarded as a header.
+        if len(selected_headers) == len(explicit_targets) and all(
+            value.strip().lower() not in _MISSING and not _is_float_text(value)
+            for value in selected_headers
         ):
             has_header = True
     header_cells = (
@@ -936,6 +945,11 @@ def _resolve_mat_variables(
     """
     if not variables:
         raise ValueError("MAT file contains no variables.")
+
+    # Explicit dotted paths come from the same schema inference used by inspect.
+    # Preserve those paths rather than stripping the struct wrapper's name.
+    if any(value and "." in value for value in (x_var, y_var, wv_var)):
+        variables = flatten_mat_leaves(variables)
 
     # Check if any value is struct-like; if so, flatten first.
     has_struct = any(_is_struct_like(v) for v in variables.values())

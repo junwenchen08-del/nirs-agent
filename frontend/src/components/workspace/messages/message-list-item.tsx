@@ -48,6 +48,7 @@ import { cn } from "@/lib/utils";
 import { CopyButton } from "../copy-button";
 
 import { MarkdownContent } from "./markdown-content";
+import { NIRDeliveryFiles } from "./nir-delivery-files";
 
 function FeedbackButtons({
   threadId,
@@ -280,13 +281,26 @@ function MessageContent_({
           return (
             <a
               {...props}
+              className={cn(
+                "text-primary underline underline-offset-4",
+                props.className,
+              )}
               href={url}
               target="_blank"
               rel="noopener noreferrer"
             />
           );
         }
-        return <a {...props} href={href} />;
+        return (
+          <a
+            {...props}
+            href={href}
+            className={cn(
+              "text-primary underline underline-offset-4",
+              props.className,
+            )}
+          />
+        );
       },
     }),
     [threadId],
@@ -400,6 +414,7 @@ function MessageContent_({
         className="my-3"
         components={components}
       />
+      <NIRDeliveryFiles message={message} threadId={threadId} />
     </AIElementMessageContent>
   );
 }

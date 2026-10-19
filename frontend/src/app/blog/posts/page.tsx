@@ -7,18 +7,16 @@ import { useMDXComponents as getMDXComponents } from "../../../mdx-components";
 // eslint-disable-next-line @typescript-eslint/unbound-method
 const Wrapper = getMDXComponents().wrapper;
 
-export const metadata = {
-  title: "All Posts",
-  filePath: "blog/index.mdx",
-};
+export const metadata = { title: "全部文章", filePath: "blog/index.mdx" };
 
 export default async function PostsPage() {
-  const { locale } = await getI18n();
+  const { locale, t } = await getI18n();
+  const localizedMetadata = { ...metadata, title: t.blog.allPosts };
   const posts = await getAllPosts(getPreferredBlogLang(locale));
 
   return (
-    <Wrapper toc={[]} metadata={metadata} sourceCode="">
-      <PostList title={metadata.title} posts={posts} />
+    <Wrapper toc={[]} metadata={localizedMetadata} sourceCode="">
+      <PostList title={localizedMetadata.title} posts={posts} />
     </Wrapper>
   );
 }

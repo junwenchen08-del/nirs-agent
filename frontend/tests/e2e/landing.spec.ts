@@ -8,22 +8,25 @@ test.describe("Landing page", () => {
 
     // Header brand name
     await expect(
-      page.locator("header h1", { hasText: "NIR-Agent" }),
+      page.locator("header h1", { hasText: "ChemAgent" }),
     ).toBeVisible();
 
     // Workspace call-to-action button in hero
     await expect(
-      page.getByRole("link", { name: "进入近红外工作台" }),
+      page
+        .locator("main")
+        .getByRole("link", { name: "进入工作台", exact: true }),
     ).toBeVisible();
   });
 
   test("Get Started link navigates to workspace", async ({ page }) => {
-    mockLangGraphAPI(page);
+    mockLangGraphAPI(page, { locale: "zh-CN" });
 
     await page.goto("/");
 
-    const getStarted = page.getByRole("link", {
-      name: "进入近红外工作台",
+    const getStarted = page.locator("main").getByRole("link", {
+      name: "进入工作台",
+      exact: true,
     });
     await getStarted.click();
 

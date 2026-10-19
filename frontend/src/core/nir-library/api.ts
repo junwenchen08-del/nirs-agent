@@ -1,13 +1,22 @@
 import { fetch } from "@/core/api/fetcher";
-import { getBackendBaseURL } from "@/core/config";
+import { getBackendBaseURL, getLangGraphBaseURL } from "@/core/config";
 
+import { parseModelDetail } from "./model-report";
 import type {
+  DatasetParsing,
+  DatasetParsingPreview,
+  DatasetParsingSelection,
+  DatasetWorkspace,
+  DatasetWorkspaceRows,
+  DatasetWorkspaceSpectra,
   NIRDataset,
   NIRDatasetDetail,
   NIRDatasetProfile,
+  NIRDatasetPreview,
   NIRDatasetUse,
   NIRDeleteResult,
   NIRModelVersion,
+  NIRModelDetail,
   NIRStorageUsage,
 } from "./types";
 
@@ -75,6 +84,142 @@ export function getDataset(datasetId: string, signal?: AbortSignal) {
   );
 }
 
+export function getDatasetPreview(
+  datasetId: string,
+  signal?: AbortSignal,
+  profileId?: string | null,
+) {
+  return requestJSON<NIRDatasetPreview>(
+    `/api/nir/datasets/${encoded(datasetId)}/preview${profileId ? `?profile_id=${encoded(profileId)}` : ""}`,
+    { signal },
+    "暂时无法读取数据预览，请重试。",
+  );
+}
+
+export function getDatasetParsing(datasetId: string, signal?: AbortSignal) {
+  return requestJSON<DatasetParsing>(
+    `/api/nir/datasets/${encoded(datasetId)}/parsing`,
+    { signal },
+    "无法识别文件结构，请重试。",
+  );
+}
+
+export function previewDatasetParsing(
+  schema: DatasetParsing,
+  selection: DatasetParsingSelection,
+  taskType: string,
+  signal?: AbortSignal,
+) {
+  return requestJSON<DatasetParsingPreview>(
+    `/api/nir/datasets/${encoded(schema.dataset_id)}/parsing/preview`,
+    {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source_sha256: schema.source_sha256,
+        profile_id: schema.profile_id,
+        selection,
+        task_type: taskType,
+      }),
+    },
+    "无法预览当前选择，请调整解析设置。",
+  );
+}
+
+export function saveDatasetParsing(
+  schema: DatasetParsing,
+  selection: DatasetParsingSelection,
+  taskType: string,
+) {
+  return requestJSON<NIRDatasetProfile>(
+    `/api/nir/datasets/${encoded(schema.dataset_id)}/parsing`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source_sha256: schema.source_sha256,
+        profile_id: schema.profile_id,
+        selection,
+        task_type: taskType,
+      }),
+    },
+    "保存解析设置失败，当前选择仍保留。",
+  );
+}
+
+export function getDatasetWorkspace(
+  datasetId: string,
+  signal?: AbortSignal,
+  profileId?: string | null,
+) {
+  return requestJSON<DatasetWorkspace>(
+    `/api/nir/datasets/${encoded(datasetId)}/workspace${profileId ? `?profile_id=${encoded(profileId)}` : ""}`,
+    { signal },
+    "无法读取数据工作台，请重试。",
+  );
+}
+
+export function getDatasetWorkspaceRows(
+  datasetId: string,
+  offset: number,
+  query: string,
+  signal?: AbortSignal,
+  profileId?: string | null,
+) {
+  const params = new URLSearchParams({
+    offset: String(offset),
+    limit: "50",
+    query,
+  });
+  if (profileId) params.set("profile_id", profileId);
+  return requestJSON<DatasetWorkspaceRows>(
+    `/api/nir/datasets/${encoded(datasetId)}/workspace/rows?${params}`,
+    { signal },
+    "无法读取样本表格，请重试。",
+  );
+}
+
+export function getDatasetWorkspaceSpectra(
+  datasetId: string,
+  indices: number[] | null,
+  signal?: AbortSignal,
+  profileId?: string | null,
+) {
+  const params = new URLSearchParams();
+  if (indices !== null) params.set("indices", indices.join(","));
+  if (profileId) params.set("profile_id", profileId);
+  const query = params.size ? `?${params}` : "";
+  return requestJSON<DatasetWorkspaceSpectra>(
+    `/api/nir/datasets/${encoded(datasetId)}/workspace/spectra${query}`,
+    { signal },
+    "无法读取光谱图，请重试。",
+  );
+}
+
+export function saveDatasetWorkspace(
+  workspace: DatasetWorkspace,
+  usages: number[],
+  range: [number, number],
+  signal?: AbortSignal,
+) {
+  return requestJSON<DatasetWorkspace>(
+    `/api/nir/datasets/${encoded(workspace.dataset_id)}/workspace`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        source_sha256: workspace.source_sha256,
+        profile_id: workspace.profile_id,
+        usages,
+        range,
+      }),
+    },
+    "保存失败，请重试。当前修改仍保留。",
+  );
+}
+
 export async function listDatasetUses(
   datasetId: string,
   signal?: AbortSignal,
@@ -113,6 +258,17 @@ export function saveDataset(input: {
       }),
     },
     "Failed to save dataset",
+  );
+}
+
+export function uploadDataset(file: File, name: string) {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("name", name);
+  return requestJSON<NIRDataset & { reused_existing: boolean }>(
+    "/api/nir/datasets/upload",
+    { method: "POST", body },
+    "上传失败，请重试。",
   );
 }
 
@@ -161,13 +317,26 @@ export function confirmDatasetProfile(datasetId: string, profileId: string) {
 
 export function attachDataset(
   datasetId: string,
-  input: { threadId: string; profileId?: string; desiredFilename?: string },
+  input: {
+    threadId: string;
+    profileId?: string;
+    desiredFilename?: string;
+    signal?: AbortSignal;
+  },
 ) {
-  return requestJSON<{ status: string; virtual_path: string }>(
+  return requestJSON<{
+    status: string;
+    dataset_id: string;
+    profile_id: string | null;
+    virtual_path: string;
+    attachment_size_bytes?: number;
+    workspace_version?: number | null;
+  }>(
     `/api/nir/datasets/${encoded(datasetId)}/attach`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: input.signal,
       body: JSON.stringify({
         thread_id: input.threadId,
         profile_id: input.profileId ?? null,
@@ -177,6 +346,68 @@ export function attachDataset(
     },
     "Failed to attach dataset",
   );
+}
+
+async function prepareComposerThread(threadId: string, signal: AbortSignal) {
+  const response = await fetch(
+    `${getLangGraphBaseURL().replace(/\/+$/, "")}/threads`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({ thread_id: threadId, metadata: {} }),
+    },
+  );
+  if (!response.ok)
+    throw new Error(
+      await errorMessage(
+        response,
+        "Failed to prepare this chat for attachment",
+      ),
+    );
+  const thread = (await response.json()) as { thread_id: string };
+  if (thread.thread_id !== threadId)
+    throw new Error("Attachment chat does not match the current chat");
+}
+
+export async function attachDatasetForComposer(
+  datasetId: string,
+  threadId: string,
+  signal: AbortSignal,
+  profileId?: string,
+) {
+  await prepareComposerThread(threadId, signal);
+  const detail = await getDataset(datasetId, signal);
+  const latestProfile = (detail.profiles ?? [])
+    .filter((profile) => profile.profile_status === "confirmed")
+    .sort((a, b) => b.profile_version - a.profile_version)[0];
+  const workspaceProfile =
+    latestProfile &&
+    (Boolean(latestProfile.mapping?.workspace) ||
+      Boolean(latestProfile.mapping?.library_parse))
+      ? latestProfile
+      : undefined;
+  if (
+    profileId &&
+    !detail.profiles.some(
+      (profile) =>
+        profile.id === profileId &&
+        profile.dataset_id === datasetId &&
+        ["split", "confirmed"].includes(profile.profile_status),
+    )
+  )
+    throw new Error("所选划分版本已不可用，请回到数据集库重新选择。");
+  const attached = await attachDataset(datasetId, {
+    threadId,
+    signal,
+    profileId: profileId ?? workspaceProfile?.id,
+  });
+  if (
+    profileId &&
+    (attached.dataset_id !== datasetId || attached.profile_id !== profileId)
+  )
+    throw new Error("挂载的数据划分与所选版本不一致。");
+  return attached;
 }
 
 export function archiveDataset(datasetId: string) {
@@ -214,16 +445,58 @@ export function attachModel(
   modelId: string,
   version: string,
   threadId: string,
+  signal?: AbortSignal,
 ) {
-  return requestJSON<{ status: string; model_path: string }>(
+  return requestJSON<{
+    status: string;
+    model_id: string;
+    version: string;
+    model_path: string;
+  }>(
     `/api/nir/models/${encoded(modelId)}/versions/${encoded(version)}/attach`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal,
       body: JSON.stringify({ thread_id: threadId }),
     },
     "Failed to attach model",
   );
+}
+
+export function getModel(
+  modelId: string,
+  version: string,
+  signal?: AbortSignal,
+) {
+  return requestJSON<NIRModelVersion>(
+    `/api/nir/models/${encoded(modelId)}?version=${encoded(version)}`,
+    { signal },
+    "暂时无法读取模型，请重试。",
+  );
+}
+
+export async function getModelReport(
+  modelId: string,
+  version: string,
+  signal?: AbortSignal,
+): Promise<NIRModelDetail> {
+  const payload = await requestJSON<unknown>(
+    `/api/nir/models/${encoded(modelId)}/versions/${encoded(version)}/report`,
+    { signal },
+    "暂时无法读取模型详情，请重试。",
+  );
+  return parseModelDetail(payload, modelId, version);
+}
+
+export async function attachModelForComposer(
+  modelId: string,
+  version: string,
+  threadId: string,
+  signal: AbortSignal,
+) {
+  await prepareComposerThread(threadId, signal);
+  return attachModel(modelId, version, threadId, signal);
 }
 
 export function archiveModel(modelId: string, version: string) {

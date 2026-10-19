@@ -19,8 +19,8 @@ import { cn } from "@/lib/utils";
 import { SettingsSection } from "./settings-section";
 
 const languageOptions: { value: Locale; label: string }[] = [
-  { value: "en-US", label: enUS.locale.localName },
   { value: "zh-CN", label: zhCN.locale.localName },
+  { value: "en-US", label: enUS.locale.localName },
 ];
 
 export function AppearanceSettingsPage() {

@@ -12,42 +12,37 @@ export function SandboxSection({ className }: { className?: string }) {
   return (
     <Section
       className={className}
-      title="确定性 NIR 分析引擎"
+      title="可复现的光谱分析"
       subtitle="大模型不直接计算光谱；所有关键步骤均由受控工具执行并留下可复核证据"
     >
       <div className="mx-auto mt-10 flex w-full max-w-6xl flex-col items-center gap-12 px-4 lg:flex-row lg:gap-16">
         <div className="w-full flex-1">
           <Terminal className="h-[380px] w-full">
-            <TypingAnimation>$ nir_load_data /uploads/corn.mat</TypingAnimation>
-            <AnimatedSpan delay={900} className="text-green-500">
-              ✓ 80 samples · 700 wavelengths · schema verified
+            <TypingAnimation>光谱分析流程示意</TypingAnimation>
+            <AnimatedSpan delay={700} className="text-zinc-400">
+              实际方案、指标和报告以当前任务的执行记录为准
             </AnimatedSpan>
-
-            <TypingAnimation delay={1500}>
-              $ nir_train_auto_split_model --method auto
+            <TypingAnimation delay={1400}>
+              01 导入并核对光谱数据
             </TypingAnimation>
-            <AnimatedSpan delay={2400} className="text-blue-400">
-              → split: SPXY · preprocessing: SNV + SG
+            <AnimatedSpan delay={2100} className="text-blue-400">
+              确认目标变量、波长轴与样本角色
             </AnimatedSpan>
-            <AnimatedSpan delay={3000} className="text-blue-400">
-              → comparing PLS, Ridge, SVR and Extra Trees
+            <TypingAnimation delay={2800}>02 执行预处理与建模</TypingAnimation>
+            <AnimatedSpan delay={3500} className="text-blue-400">
+              记录方案、参数及训练和验证指标
             </AnimatedSpan>
-            <AnimatedSpan delay={3700} className="text-green-500">
-              ✓ best model: PLS · external test passed
-            </AnimatedSpan>
-
-            <TypingAnimation delay={4400}>
-              $ nir_register_model --require-approval
+            <TypingAnimation delay={4200}>
+              03 查看诊断与分析报告
             </TypingAnimation>
-            <AnimatedSpan delay={5200} className="text-amber-300">
-              ✓ scientific gate · quality gate · integrity manifest
+            <AnimatedSpan delay={4900} className="text-amber-300">
+              按评价范围解读结果，确认后再将模型入库
             </AnimatedSpan>
-
-            <TypingAnimation delay={5900}>
-              $ nir_predict /uploads/unknown.csv
+            <TypingAnimation delay={5600}>
+              04 使用已保存模型预测新样品
             </TypingAnimation>
-            <AnimatedSpan delay={6700} className="text-green-500">
-              ✓ predictions.csv · applicability domain monitored
+            <AnimatedSpan delay={6300} className="text-green-500">
+              检查输入兼容性，保留预测记录和分析依据
             </AnimatedSpan>
           </Terminal>
         </div>
@@ -55,16 +50,15 @@ export function SandboxSection({ className }: { className?: string }) {
         <div className="w-full flex-1 space-y-6">
           <div className="space-y-4">
             <p className="text-sm font-medium tracking-wider text-amber-300 uppercase">
-              Reproducible by design
+              分析有依据，结果可追踪
             </p>
             <h2 className="text-4xl font-bold tracking-tight lg:text-5xl">
-              nir_core
+              ChemAgent 分析引擎
             </h2>
           </div>
           <div className="space-y-4 text-lg leading-8 text-zinc-400">
             <p>
-              独立的 Python
-              化学计量学算法包负责数据加载、预处理、模型训练、指标计算和质量判断。
+              专业的化学计量学算法负责数据加载、预处理、模型训练、指标计算和质量判断。
             </p>
             <p>
               固定随机种子、训练集拟合边界、产物哈希与预测审计链，让每次分析都能够解释、复现和追踪。

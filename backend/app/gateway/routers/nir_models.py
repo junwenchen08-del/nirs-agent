@@ -91,7 +91,7 @@ async def _registered_workflow(request: Request, thread_id: str) -> Mapping[str,
     checkpoint = getattr(checkpoint_tuple, "checkpoint", {}) if checkpoint_tuple is not None else {}
     channel_values = checkpoint.get("channel_values", {}) if isinstance(checkpoint, Mapping) else {}
     workflow = channel_values.get("nir_workflow") if isinstance(channel_values, Mapping) else None
-    if not isinstance(workflow, Mapping) or workflow.get("stage") != "registered" or workflow.get("approval_status") != "approved":
+    if not isinstance(workflow, Mapping) or workflow.get("stage") not in {"registered", "completed"} or workflow.get("approval_status") != "approved":
         raise HTTPException(
             status_code=409,
             detail={"code": "registration_required", "message": "The source thread has no approved registered NIR model"},
@@ -161,6 +161,15 @@ async def attach_model(
             body.thread_id,
             sync_callback=sync,
         )
+    except ModelError as exc:
+        _raise_model_error(exc)
+
+
+@router.get("/{model_id}/versions/{version}/report")
+@require_permission("threads", "read")
+async def model_report(model_id: str, version: str, request: Request, service: ModelService = Depends(get_model_service)) -> dict:
+    try:
+        return await service.get_report(_owner(request), model_id, version)
     except ModelError as exc:
         _raise_model_error(exc)
 

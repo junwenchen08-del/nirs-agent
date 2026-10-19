@@ -1,4 +1,4 @@
-"""Explicitly save immutable thread uploads in the NIR dataset library.
+"""Explicitly save immutable local or thread uploads in the NIR dataset library.
 
 Only the gateway should call ``save_from_thread_upload`` after checking that
 the authenticated owner owns the existing source thread. This service repeats
@@ -21,6 +21,7 @@ from collections.abc import Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -169,6 +170,40 @@ def _size_of_regular_files(root: Path) -> int:
     return total
 
 
+def _copy_local_upload(source: BinaryIO, stage: Path, limit: int, expected_size: int) -> tuple[str, int]:
+    """Read the multipart spool in bounded chunks; never accept a host path."""
+    try:
+        source.seek(0)
+        digest = hashlib.sha256()
+        size = 0
+        with stage.open("wb") as output:
+            while chunk := source.read(_COPY_CHUNK_SIZE):
+                size += len(chunk)
+                if size > limit:
+                    raise DatasetError("file_too_large", "文件超过数据集上传大小限制。")
+                digest.update(chunk)
+                output.write(chunk)
+            output.flush()
+            os.fsync(output.fileno())
+        if size != expected_size:
+            raise DatasetError("source_changed", "文件内容不完整，请重新上传。")
+        return digest.hexdigest(), size
+    except OSError as exc:
+        raise DatasetError("storage_error", "无法保存上传文件，请重试。") from exc
+
+
+async def _finish_storage_copy(work: Callable[[], tuple[str, int]]) -> tuple[str, int]:
+    # A cancelled request must wait for its worker before unlinking the stage.
+    task = asyncio.create_task(asyncio.to_thread(work))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        try:
+            await task
+        finally:
+            raise
+
+
 def _public(row: NIRDatasetRow) -> dict:
     created_at = row.created_at
     if created_at is not None and created_at.tzinfo is None:
@@ -187,6 +222,8 @@ def _public(row: NIRDatasetRow) -> dict:
 
 
 def _public_profile(row: NIRDatasetProfileRow) -> dict:
+    from ..dataset_partitions import partition_summary
+
     created_at = row.created_at
     confirmed_at = row.confirmed_at
     if created_at is not None and created_at.tzinfo is None:
@@ -204,6 +241,7 @@ def _public_profile(row: NIRDatasetProfileRow) -> dict:
         "mapping_sha256": row.mapping_sha256,
         "confirmed_at": confirmed_at.isoformat() if confirmed_at else None,
         "created_at": created_at.isoformat() if created_at else None,
+        "partition": partition_summary(row) if row.profile_status == "split" else None,
     }
 
 
@@ -382,6 +420,35 @@ def _hash_regular_file(path: Path) -> str | None:
         return None
 
 
+@contextmanager
+def _workspace_attachment(source: Path, profile: NIRDatasetProfileRow | None, root: Path, digest: str, size: int):
+    settings = profile.mapping_json.get("workspace") if profile else None
+    parsing = profile.mapping_json.get("library_parse") if profile else None
+    if not settings and not parsing:
+        yield source, digest, size
+        return
+    from .workspace import WorkspaceError, read_workbook, write_workspace_csv
+
+    stage = _create_stage(root / ".staging", ".csv")
+    try:
+        if (settings or parsing).get("source_sha256") != digest:
+            raise DatasetError("source_hash_mismatch", "保存设置与原文件不匹配。")
+        try:
+            book = read_workbook(source, _public_profile(profile))
+            if settings:
+                write_workspace_csv(book, settings, stage)
+            else:
+                from .workspace import validate_settings
+
+                inferred = validate_settings(book, book.usages, [float(book.coordinates.min()), float(book.coordinates.max())])
+                write_workspace_csv(book, inferred, stage, parsing_only=not any(book.usages))
+        except (ValueError, TypeError, OSError, KeyError) as exc:
+            raise DatasetError("workspace_unavailable", str(exc) if isinstance(exc, WorkspaceError) else "无法生成保存版本。") from exc
+        yield stage, _hash_regular_file(stage), stage.stat().st_size
+    finally:
+        stage.unlink(missing_ok=True)
+
+
 def _attach_local_file(source: Path, destination: Path, expected_sha256: str, size_limit: int) -> bool:
     """Atomically attach without overwriting an existing upload; return created."""
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -456,18 +523,18 @@ class DatasetService:
     async def _admit(self, session: AsyncSession, owner: str, additional: int, *, staged: bool) -> None:
         current = await self._used_dataset_bytes(session, owner)
         if current + additional > self.policy.max_user_dataset_bytes:
-            raise DatasetError("quota_exceeded", "Dataset library quota would be exceeded")
+            raise DatasetError("quota_exceeded", "数据集库容量不足，请先清理不再使用的数据集。")
         user_root = self.paths.user_dir(owner)
         # This is a write-admission ceiling, not a hard limit on existing
         # uploads/sandbox writes. The source thread copy remains counted.
         thread_bytes = await asyncio.to_thread(_size_of_regular_files, user_root / "threads")
         model_bytes = await asyncio.to_thread(_size_of_regular_files, user_root / "nir-models")
         if current + model_bytes + thread_bytes + additional > self.policy.max_total_bytes_for_library_writes:
-            raise DatasetError("library_write_limit", "NIR library write-admission limit would be exceeded")
+            raise DatasetError("library_write_limit", "可用保存空间不足，请先清理不再使用的文件。")
         free = await asyncio.to_thread(lambda: shutil.disk_usage(user_root).free)
         required = self.policy.min_free_disk_bytes + (0 if staged else additional)
         if free < required:
-            raise DatasetError("insufficient_free_space", "Not enough free disk space for library save")
+            raise DatasetError("insufficient_free_space", "磁盘空间不足，暂时无法保存数据集。")
 
     async def save_from_thread_upload(
         self,
@@ -494,52 +561,84 @@ class DatasetService:
         if source_thread is None:
             raise DatasetError("thread_not_owned", "Source thread not found")
         source = _source_path(self.paths, owner, thread_id, virtual_path)
+        return await self._save_upload(owner, source, source.name, clean_name)
+
+    async def save_from_local_upload(self, owner: str, original_filename: str, source: BinaryIO, size: int, name: str | None = None) -> dict:
+        """Save an authenticated multipart file directly, without a thread/run."""
+        self._enabled()
+        try:
+            filename = normalize_filename(original_filename)
+        except (ValueError, TypeError) as exc:
+            raise DatasetError("invalid_filename", "请选择 CSV、TXT 或 MAT 文件。") from exc
+        if filename != original_filename or any(ord(char) < 32 or char == ":" for char in filename) or Path(filename).suffix.lower() not in _ALLOWED_EXTENSIONS:
+            raise DatasetError("invalid_filename", "请选择 CSV、TXT 或 MAT 文件，文件名不能包含路径。")
+        clean_name = filename if name is None else name.strip()
+        if not clean_name or len(clean_name) > 256:
+            raise DatasetError("invalid_name", "数据集名称需填写 1–256 个字符。")
+        if size <= 0:
+            raise DatasetError("empty_file", "文件为空，请选择包含数据的文件。")
+        if size > self.policy.max_dataset_file_size:
+            raise DatasetError("file_too_large", f"文件过大，最多可上传 {self.policy.max_dataset_file_size / 1024**2:g} MB。")
+        return await self._save_upload(owner, source, filename, clean_name, upload_size=size)
+
+    async def _save_upload(self, owner: str, source: Path | BinaryIO, original_filename: str, clean_name: str, *, upload_size: int | None = None) -> dict:
+        suffix = Path(original_filename).suffix.lower()
         root = self.paths.user_nir_datasets_dir(owner)
         async with _owner_admission_lock(root):
             stage_root = root / ".staging"
             cutoff = datetime.now(UTC).timestamp() - self.policy.staging_ttl_hours * 3600
             await asyncio.to_thread(_clean_staging, stage_root, cutoff)
-            stage = await asyncio.to_thread(_create_stage, stage_root, source.suffix.lower())
+            stage = await asyncio.to_thread(_create_stage, stage_root, suffix)
             final_dir: Path | None = None
             filename: str | None = None
             final_created = False
             committed = False
             try:
-                try:
-                    source_info = await asyncio.to_thread(source.lstat)
-                except FileNotFoundError as exc:
-                    raise DatasetError("source_not_found", "Uploaded source file was not found") from exc
-                if not stat.S_ISREG(source_info.st_mode):
-                    raise DatasetError("invalid_source", "Upload is not a regular file")
-                initial_size = source_info.st_size
+                if isinstance(source, Path):
+                    try:
+                        source_info = await asyncio.to_thread(source.lstat)
+                    except FileNotFoundError as exc:
+                        raise DatasetError("source_not_found", "Uploaded source file was not found") from exc
+                    if not stat.S_ISREG(source_info.st_mode):
+                        raise DatasetError("invalid_source", "Upload is not a regular file")
+                    initial_size = source_info.st_size
+                else:
+                    initial_size = upload_size
+                assert initial_size is not None
                 if initial_size > self.policy.max_dataset_file_size:
                     raise DatasetError("file_too_large", "Upload exceeds the dataset file limit")
                 async with self.session_factory() as session:
                     await self._admit(session, owner, initial_size, staged=False)
-                digest, size = await asyncio.to_thread(_copy_upload, source, stage, self.policy.max_dataset_file_size)
+
+                def copy() -> tuple[str, int]:
+                    if isinstance(source, Path):
+                        return _copy_upload(source, stage, self.policy.max_dataset_file_size)
+                    return _copy_local_upload(source, stage, self.policy.max_dataset_file_size, initial_size)
+
+                digest, size = await _finish_storage_copy(copy)
                 async with self.session_factory() as session:
                     existing = await session.scalar(select(NIRDatasetRow).where(NIRDatasetRow.owner_user_id == owner, NIRDatasetRow.sha256 == digest, NIRDatasetRow.status != "deleted"))
                     if existing is not None:
                         if existing.status == "archived":
-                            raise DatasetError("dataset_archived", "Identical dataset is archived; restore it explicitly")
+                            raise DatasetError("dataset_archived", "相同数据集已归档，请先恢复该数据集。")
                         if existing.status != "ready":
-                            raise DatasetError("dataset_unavailable", "Identical dataset requires repair before reuse")
+                            raise DatasetError("dataset_unavailable", "相同数据集暂不可用，请修复后重试。")
                         await self._verify_row(session, owner, existing)
                         return {**_public(existing), "reused_existing": True}
                     await self._admit(session, owner, size, staged=True)
                     asset_id = f"ds_{uuid4().hex}"
                     final_dir = self.paths.user_nir_dataset_dir(owner, asset_id)
-                    filename = f"source{source.suffix.lower()}"
+                    filename = f"source{suffix}"
                     await asyncio.to_thread(_publish_stage, stage, final_dir, filename=filename, digest=digest, size=size)
                     final_created = True
                     row = NIRDatasetRow(
                         id=asset_id,
                         owner_user_id=owner,
                         name=clean_name,
-                        original_filename=source.name,
+                        original_filename=original_filename,
                         sha256=digest,
                         size_bytes=size,
-                        media_type={".csv": "text/csv", ".txt": "text/plain", ".mat": "application/octet-stream"}[source.suffix.lower()],
+                        media_type={".csv": "text/csv", ".txt": "text/plain", ".mat": "application/octet-stream"}[suffix],
                         storage_relpath=f"{asset_id}/{filename}",
                         status="ready",
                         metadata_json={},
@@ -632,6 +731,266 @@ class DatasetService:
             rows = (await session.scalars(select(NIRDatasetRow).where(NIRDatasetRow.owner_user_id == owner, NIRDatasetRow.status != "deleted").order_by(NIRDatasetRow.created_at.desc()).limit(100))).all()
             return [_public(row) for row in rows]
 
+    async def preview_dataset(self, owner: str, dataset_id: str, *, profile_id: str | None = None) -> dict:
+        """Owner-only aggregate preview; preserve source, profiles and workflows."""
+        from .preview import build_preview
+
+        self._enabled()
+        try:
+            self.paths.user_nir_dataset_dir(owner, dataset_id)
+        except ValueError as exc:
+            raise DatasetError("dataset_not_found", "Dataset not found") from exc
+        async with self.session_factory() as session:
+            row = await session.scalar(select(NIRDatasetRow).where(NIRDatasetRow.id == dataset_id, NIRDatasetRow.owner_user_id == owner, NIRDatasetRow.status.in_({"ready", "archived"})))
+            if row is None:
+                raise DatasetError("dataset_not_found", "Dataset not found")
+            await self._verify_row(session, owner, row)
+            profile = await session.scalar(
+                select(NIRDatasetProfileRow)
+                .where(
+                    NIRDatasetProfileRow.dataset_id == dataset_id,
+                    NIRDatasetProfileRow.owner_user_id == owner,
+                    NIRDatasetProfileRow.profile_status.in_({"confirmed", "superseded", "split"} if profile_id else {"confirmed"}),
+                    *([NIRDatasetProfileRow.id == profile_id] if profile_id else []),
+                )
+                .order_by(NIRDatasetProfileRow.profile_version.desc())
+                .limit(1)
+            )
+            if profile_id and profile is None:
+                raise DatasetError("profile_not_found", "训练时的数据解析版本已不可用。")
+            if profile and _validated_mapping(profile.mapping_json)[1] != profile.mapping_sha256:
+                raise DatasetError("profile_unavailable", "保存版本的校验失败。")
+            path = self.paths.user_nir_dataset_dir(owner, row.id) / PurePosixPath(row.storage_relpath).name
+            result = await asyncio.to_thread(build_preview, path, _public_profile(profile) if profile else None)
+            # A changed or replaced file must never be presented as this dataset.
+            await self._verify_row(session, owner, row)
+            return {"dataset_id": row.id, "source_sha256": row.sha256, "profile_id": profile.id if profile else None, **result}
+
+    async def _parsing_source(self, session, owner: str, dataset_id: str):
+        self._enabled()
+        try:
+            self.paths.user_nir_dataset_dir(owner, dataset_id)
+        except ValueError as exc:
+            raise DatasetError("dataset_not_found", "数据集不存在。") from exc
+        row = await session.scalar(select(NIRDatasetRow).where(NIRDatasetRow.id == dataset_id, NIRDatasetRow.owner_user_id == owner, NIRDatasetRow.status.in_({"ready", "archived"})))
+        if row is None:
+            raise DatasetError("dataset_not_found", "数据集不存在。")
+        await self._verify_row(session, owner, row)
+        current = await session.scalar(
+            select(NIRDatasetProfileRow)
+            .where(NIRDatasetProfileRow.dataset_id == dataset_id, NIRDatasetProfileRow.owner_user_id == owner, NIRDatasetProfileRow.profile_status == "confirmed")
+            .order_by(NIRDatasetProfileRow.profile_version.desc())
+            .limit(1)
+        )
+        if current:
+            _mapping, digest = _validated_mapping(current.mapping_json)
+            if digest != current.mapping_sha256:
+                raise DatasetError("profile_unavailable", "保存设置的校验失败。")
+        path = self.paths.user_nir_dataset_dir(owner, row.id) / PurePosixPath(row.storage_relpath).name
+        return row, current, path
+
+    async def get_parsing(self, owner: str, dataset_id: str) -> dict:
+        from .parsing import describe_file
+
+        async with self.session_factory() as session:
+            row, current, path = await self._parsing_source(session, owner, dataset_id)
+            try:
+                result = await asyncio.to_thread(describe_file, path)
+            except (ValueError, TypeError, OSError, RuntimeError, KeyError) as exc:
+                raise DatasetError("parsing_unavailable", "无法识别此文件的可选结构，请检查格式或使用高级设置。") from exc
+            await self._verify_row(session, owner, row)
+            return {
+                "dataset_id": row.id,
+                "source_sha256": row.sha256,
+                "profile_id": current.id if current else None,
+                "task_type": current.task_type if current else "inspection",
+                "current": (current.mapping_json.get("library_parse") or {}).get("selection") if current else None,
+                **result,
+            }
+
+    async def _resolve_parsing(self, session, owner, dataset_id, source_sha256, profile_id, selection, task_type):
+        from .parsing import resolve_selection
+        from .workspace import read_workbook
+
+        row, current, path = await self._parsing_source(session, owner, dataset_id)
+        if row.sha256 != source_sha256 or (current.id if current else None) != profile_id:
+            raise DatasetError("workspace_conflict", "数据或解析设置已更新，请重新识别后再保存。当前选择仍保留。")
+        try:
+            mapping = await asyncio.to_thread(resolve_selection, path, selection, task_type)
+            mapping["library_parse"]["source_sha256"] = row.sha256
+            if current and (current.mapping_json.get("library_parse") or {}).get("selection") == selection and current.mapping_json.get("workspace"):
+                mapping["workspace"] = current.mapping_json["workspace"]
+            book = await asyncio.to_thread(read_workbook, path, {"mapping": mapping, "task_type": task_type})
+        except (ValueError, TypeError, KeyError, IndexError, OSError, RuntimeError) as exc:
+            from .workspace import WorkspaceError
+
+            message = str(exc) if isinstance(exc, (ValueError, WorkspaceError)) else "所选结构无法解析，请调整数据组、光谱列或目标值。"
+            # Native reader errors can include host paths. Keep only our own
+            # non-path-disclosing validation messages at the HTTP boundary.
+            if str(path) in message:
+                message = "文件结构无法读取，请检查格式。"
+            raise DatasetError("invalid_parsing", message) from exc
+        await self._verify_row(session, owner, row)
+        return row, current, path, mapping, book
+
+    async def preview_parsing(self, owner, dataset_id, *, source_sha256, profile_id, selection, task_type):
+        from .preview import build_preview
+
+        async with self.session_factory() as session:
+            row, _current, path, mapping, book = await self._resolve_parsing(session, owner, dataset_id, source_sha256, profile_id, selection, task_type)
+            result = await asyncio.to_thread(build_preview, path, {"mapping": mapping, "task_type": task_type})
+            await self._verify_row(session, owner, row)
+            if result["status"] != "ready":
+                raise DatasetError("invalid_parsing", result["message"])
+            return {
+                "dataset_id": row.id,
+                "source_sha256": row.sha256,
+                "samples": [{"name": name[:200], "values": [value[:200] if isinstance(value, str) else value for value in values]} for name, values in zip(book.names[:5], book.values[:5], strict=True)],
+                **result,
+            }
+
+    async def save_parsing(self, owner, dataset_id, *, source_sha256, profile_id, selection, task_type):
+        async with _owner_admission_lock(self.paths.user_nir_datasets_dir(owner)):
+            async with self.session_factory() as session:
+                row, current, _path, mapping, _book = await self._resolve_parsing(session, owner, dataset_id, source_sha256, profile_id, selection, task_type)
+                if row.status != "ready":
+                    raise DatasetError("dataset_archived", "此数据集当前不可修改。")
+                mapping, digest = _validated_mapping(mapping)
+                latest = await session.scalar(select(func.max(NIRDatasetProfileRow.profile_version)).where(NIRDatasetProfileRow.dataset_id == dataset_id, NIRDatasetProfileRow.owner_user_id == owner))
+                if current:
+                    current.profile_status = "superseded"
+                profile = NIRDatasetProfileRow(
+                    id=f"dsp_{uuid4().hex}",
+                    owner_user_id=owner,
+                    dataset_id=dataset_id,
+                    profile_version=int(latest or 0) + 1,
+                    profile_status="confirmed",
+                    task_type=task_type,
+                    schema_status="confirmed_mapping",
+                    mapping_json=mapping,
+                    mapping_sha256=digest,
+                    confirmed_by=owner,
+                    confirmed_at=datetime.now(UTC),
+                )
+                session.add(profile)
+                await session.commit()
+                return _public_profile(profile)
+
+    async def _workspace_source(self, session, owner: str, dataset_id: str, profile_id: str | None = None):
+        from .workspace import WorkspaceError, read_workbook
+
+        self._enabled()
+        try:
+            self.paths.user_nir_dataset_dir(owner, dataset_id)
+        except ValueError as exc:
+            raise DatasetError("dataset_not_found", "数据集不存在。") from exc
+        row = await session.scalar(select(NIRDatasetRow).where(NIRDatasetRow.id == dataset_id, NIRDatasetRow.owner_user_id == owner, NIRDatasetRow.status.in_({"ready", "archived"})))
+        if row is None:
+            raise DatasetError("dataset_not_found", "数据集不存在。")
+        await self._verify_row(session, owner, row)
+        profile = await session.scalar(
+            select(NIRDatasetProfileRow)
+            .where(
+                NIRDatasetProfileRow.dataset_id == dataset_id,
+                NIRDatasetProfileRow.owner_user_id == owner,
+                NIRDatasetProfileRow.profile_status.in_({"confirmed", "superseded", "split"} if profile_id else {"confirmed"}),
+                *([NIRDatasetProfileRow.id == profile_id] if profile_id else []),
+            )
+            .order_by(NIRDatasetProfileRow.profile_version.desc())
+            .limit(1)
+        )
+        if profile_id and profile is None:
+            raise DatasetError("profile_not_found", "保存的数据版本已不可用。")
+        if profile:
+            _mapping, digest = _validated_mapping(profile.mapping_json)
+            if digest != profile.mapping_sha256:
+                raise DatasetError("profile_unavailable", "保存设置的校验失败。")
+            settings = profile.mapping_json.get("workspace")
+            if settings and settings.get("source_sha256") != row.sha256:
+                raise DatasetError("source_hash_mismatch", "保存设置与原文件不匹配。")
+        path = self.paths.user_nir_dataset_dir(owner, row.id) / PurePosixPath(row.storage_relpath).name
+        try:
+            book = await asyncio.to_thread(read_workbook, path, _public_profile(profile) if profile else None)
+        except (ValueError, TypeError, KeyError, IndexError, OSError, RuntimeError) as exc:
+            message = str(exc) if isinstance(exc, WorkspaceError) else "无法读取样本表格，请先确认数据概览中的解析设置。"
+            raise DatasetError("workspace_unavailable", message) from exc
+        await self._verify_row(session, owner, row)
+        return row, profile, book
+
+    async def get_workspace(
+        self,
+        owner: str,
+        dataset_id: str,
+        *,
+        view="summary",
+        offset=0,
+        limit=50,
+        query="",
+        indices=None,
+        profile_id=None,
+    ) -> dict:
+        from .workspace import WorkspaceError, workbook_rows, workbook_spectra, workbook_summary
+
+        async with self.session_factory() as session:
+            row, profile, book = await self._workspace_source(session, owner, dataset_id, profile_id=profile_id)
+            try:
+                if view == "rows":
+                    result = workbook_rows(book, offset, limit, query)
+                elif view == "spectra":
+                    result = workbook_spectra(book, indices)
+                else:
+                    result = workbook_summary(book, _public_profile(profile) if profile else None)
+            except WorkspaceError as exc:
+                raise DatasetError("invalid_workspace", str(exc)) from exc
+            from ..dataset_partitions import partition_summary
+
+            return {
+                "dataset_id": row.id,
+                "source_sha256": row.sha256,
+                "profile_id": profile.id if profile else None,
+                "read_only": bool(profile_id),
+                "partition": partition_summary(profile) if profile and profile.profile_status == "split" else None,
+                **result,
+            }
+
+    async def save_workspace(self, owner: str, dataset_id: str, *, source_sha256: str, profile_id: str | None, usages: list[int], band_range: list[float]) -> dict:
+        from .workspace import WorkspaceError, validate_settings, workbook_summary
+
+        self._enabled()
+        async with _owner_admission_lock(self.paths.user_nir_datasets_dir(owner)):
+            async with self.session_factory() as session:
+                row, current, book = await self._workspace_source(session, owner, dataset_id)
+                if row.status != "ready":
+                    raise DatasetError("dataset_archived", "此数据集当前不可编辑。")
+                if row.sha256 != source_sha256 or (current.id if current else None) != profile_id:
+                    raise DatasetError("workspace_conflict", "数据或解析设置已更新，请重新载入后再保存。你的未保存修改仍保留在当前页面。")
+                try:
+                    settings = validate_settings(book, usages, band_range)
+                except WorkspaceError as exc:
+                    raise DatasetError("invalid_workspace", str(exc)) from exc
+                settings["source_sha256"] = row.sha256
+                mapping, digest = _validated_mapping({**book.mapping, "workspace": settings})
+                latest = await session.scalar(select(func.max(NIRDatasetProfileRow.profile_version)).where(NIRDatasetProfileRow.dataset_id == dataset_id, NIRDatasetProfileRow.owner_user_id == owner))
+                if current:
+                    current.profile_status = "superseded"
+                profile = NIRDatasetProfileRow(
+                    id=f"dsp_{uuid4().hex}",
+                    owner_user_id=owner,
+                    dataset_id=dataset_id,
+                    profile_version=int(latest or 0) + 1,
+                    profile_status="confirmed",
+                    task_type=current.task_type if current else "inspection",
+                    schema_status="confirmed_mapping",
+                    mapping_json=mapping,
+                    mapping_sha256=digest,
+                    confirmed_by=owner,
+                    confirmed_at=datetime.now(UTC),
+                )
+                session.add(profile)
+                await session.commit()
+                book.usages = settings["usages"]
+                return {"dataset_id": row.id, "source_sha256": row.sha256, **workbook_summary(book, _public_profile(profile))}
+
     async def get_usage(self, owner: str) -> dict:
         """Return owner-only capacity numbers; admission limit is not a hard quota."""
         self._enabled()
@@ -699,6 +1058,8 @@ class DatasetService:
         if schema_status not in _PROFILE_SCHEMA_STATUSES:
             raise DatasetError("invalid_profile", "Unsupported profile schema status")
         clean_mapping, mapping_digest = _validated_mapping(mapping)
+        if {"partition", "model_input"}.intersection(clean_mapping):
+            raise DatasetError("invalid_profile", "建模划分由系统保存，不能通过解析设置创建。")
         root = self.paths.user_nir_datasets_dir(owner)
         async with _owner_admission_lock(root):
             async with self.session_factory() as session:
@@ -821,6 +1182,7 @@ class DatasetService:
         desired_filename: str | None = None,
         run_id: str | None = None,
         prepare_workflow: bool = False,
+        apply_workspace: bool = False,
         sync_callback: Callable[[str, Path], Awaitable[None]] | None = None,
     ) -> dict:
         """Copy a verified asset into an owned thread and record one attachment."""
@@ -857,6 +1219,15 @@ class DatasetService:
                 await self._verify_row(session, owner, dataset)
 
                 profile: NIRDatasetProfileRow | None = None
+                if profile_id is None and apply_workspace:
+                    latest = await session.scalar(
+                        select(NIRDatasetProfileRow)
+                        .where(NIRDatasetProfileRow.dataset_id == dataset_id, NIRDatasetProfileRow.owner_user_id == owner, NIRDatasetProfileRow.profile_status == "confirmed")
+                        .order_by(NIRDatasetProfileRow.profile_version.desc())
+                        .limit(1)
+                    )
+                    if latest and (latest.mapping_json.get("workspace") or latest.mapping_json.get("library_parse")):
+                        profile_id = latest.id
                 if profile_id is not None:
                     profile = await session.scalar(
                         select(NIRDatasetProfileRow).where(
@@ -867,7 +1238,7 @@ class DatasetService:
                     )
                     if profile is None:
                         raise DatasetError("profile_not_found", "Profile not found")
-                    if profile.profile_status != "confirmed":
+                    if profile.profile_status not in {"confirmed", "split"}:
                         raise DatasetError("profile_unconfirmed", "Only a confirmed Profile can be attached for reuse")
                     _mapping, profile_digest = _validated_mapping(profile.mapping_json)
                     if profile_digest != profile.mapping_sha256:
@@ -875,88 +1246,90 @@ class DatasetService:
 
                 relative = PurePosixPath(dataset.storage_relpath)
                 source = self.paths.user_nir_dataset_dir(owner, dataset_id) / relative.name
-                suffix = source.suffix.lower()
-                if desired_filename is None:
-                    filename = f"dataset-{dataset_id}{suffix}"
-                else:
-                    try:
-                        filename = normalize_filename(desired_filename)
-                    except ValueError as exc:
-                        raise DatasetError("invalid_filename", "Attachment filename is invalid") from exc
-                    if filename != desired_filename or Path(filename).suffix.lower() != suffix:
-                        raise DatasetError("invalid_filename", "Attachment filename must be a basename with the original extension")
-
-                existing = await session.scalar(
-                    select(NIRDatasetUseRow).where(
-                        NIRDatasetUseRow.owner_user_id == owner,
-                        NIRDatasetUseRow.thread_id == thread_id,
-                        NIRDatasetUseRow.idempotency_key_sha256 == key_digest,
-                    )
-                )
-                if existing is not None:
-                    if existing.dataset_id != dataset_id or existing.profile_id != profile_id or existing.attachment_filename != filename or existing.source_sha256 != dataset.sha256:
-                        raise DatasetError("idempotency_conflict", "Idempotency key was already used for another attachment")
-                    destination = self.paths.sandbox_uploads_dir(thread_id, user_id=owner) / filename
-                    if existing.status == "attached" and await asyncio.to_thread(_hash_regular_file, destination) == dataset.sha256:
-                        return _public_use(existing, reused_existing=True)
-                    use = existing
-                    use.status = "preparing"
-                    if clean_run_id is not None:
-                        use.run_id = clean_run_id
-                    if prepare_workflow and use.workflow_project_id is None:
-                        use.workflow_project_id = f"nir-{uuid4().hex[:12]}"
-                    use.updated_at = datetime.now(UTC)
-                else:
-                    use = NIRDatasetUseRow(
-                        id=f"use_{uuid4().hex}",
-                        owner_user_id=owner,
-                        dataset_id=dataset_id,
-                        profile_id=profile_id,
-                        thread_id=thread_id,
-                        run_id=clean_run_id,
-                        workflow_project_id=f"nir-{uuid4().hex[:12]}" if prepare_workflow else None,
-                        use_kind="attach",
-                        idempotency_key_sha256=key_digest,
-                        attachment_filename=filename,
-                        source_sha256=dataset.sha256,
-                        status="preparing",
-                    )
-                    session.add(use)
-                await session.commit()
-
-                destination = self.paths.sandbox_uploads_dir(thread_id, user_id=owner) / filename
-                created = False
-                sync_completed = sync_callback is None
-                try:
-                    created = await asyncio.to_thread(_attach_local_file, source, destination, dataset.sha256, self.policy.max_dataset_file_size)
-                    virtual_path = f"/mnt/user-data/uploads/{filename}"
-                    if sync_callback is not None:
-                        await sync_callback(virtual_path, destination)
-                        sync_completed = True
-                    use.status = "attached"
-                    use.updated_at = datetime.now(UTC)
-                    await session.commit()
-                    return _public_use(use, reused_existing=not created)
-                except Exception as exc:
-                    if created:
+                with _workspace_attachment(source, profile, root, dataset.sha256, dataset.size_bytes) as (attachment_source, attachment_digest, attachment_size):
+                    await self._verify_row(session, owner, dataset)
+                    suffix = attachment_source.suffix.lower()
+                    if desired_filename is None:
+                        filename = f"dataset-{dataset_id}{suffix}" if not profile or not (profile.mapping_json.get("workspace") or profile.mapping_json.get("library_parse")) else f"dataset-{dataset_id}-v{profile.profile_version}.csv"
+                    else:
                         try:
-                            await asyncio.to_thread(destination.unlink, missing_ok=True)
-                        except OSError:
-                            logger.exception("Failed to compensate a failed NIR dataset attachment")
+                            filename = normalize_filename(desired_filename)
+                        except ValueError as exc:
+                            raise DatasetError("invalid_filename", "Attachment filename is invalid") from exc
+                        if filename != desired_filename or Path(filename).suffix.lower() != suffix:
+                            raise DatasetError("invalid_filename", "Attachment filename must be a basename with the original extension")
+
+                    existing = await session.scalar(
+                        select(NIRDatasetUseRow).where(
+                            NIRDatasetUseRow.owner_user_id == owner,
+                            NIRDatasetUseRow.thread_id == thread_id,
+                            NIRDatasetUseRow.idempotency_key_sha256 == key_digest,
+                        )
+                    )
+                    if existing is not None:
+                        if existing.dataset_id != dataset_id or existing.profile_id != profile_id or existing.attachment_filename != filename or existing.source_sha256 != dataset.sha256:
+                            raise DatasetError("idempotency_conflict", "Idempotency key was already used for another attachment")
+                        destination = self.paths.sandbox_uploads_dir(thread_id, user_id=owner) / filename
+                        if existing.status == "attached" and await asyncio.to_thread(_hash_regular_file, destination) == attachment_digest:
+                            return {**_public_use(existing, reused_existing=True), "attachment_size_bytes": attachment_size, "workspace_version": profile.profile_version if profile and profile.mapping_json.get("workspace") else None}
+                        use = existing
+                        use.status = "preparing"
+                        if clean_run_id is not None:
+                            use.run_id = clean_run_id
+                        if prepare_workflow and use.workflow_project_id is None:
+                            use.workflow_project_id = f"nir-{uuid4().hex[:12]}"
+                        use.updated_at = datetime.now(UTC)
+                    else:
+                        use = NIRDatasetUseRow(
+                            id=f"use_{uuid4().hex}",
+                            owner_user_id=owner,
+                            dataset_id=dataset_id,
+                            profile_id=profile_id,
+                            thread_id=thread_id,
+                            run_id=clean_run_id,
+                            workflow_project_id=f"nir-{uuid4().hex[:12]}" if prepare_workflow else None,
+                            use_kind="attach",
+                            idempotency_key_sha256=key_digest,
+                            attachment_filename=filename,
+                            source_sha256=dataset.sha256,
+                            status="preparing",
+                        )
+                        session.add(use)
+                    await session.commit()
+
+                    destination = self.paths.sandbox_uploads_dir(thread_id, user_id=owner) / filename
+                    created = False
+                    sync_completed = sync_callback is None
                     try:
-                        await session.rollback()
-                        failed_use = await session.get(NIRDatasetUseRow, use.id)
-                        if failed_use is not None:
-                            failed_use.status = "failed"
-                            failed_use.updated_at = datetime.now(UTC)
+                        created = await asyncio.to_thread(_attach_local_file, attachment_source, destination, attachment_digest, self.policy.max_dataset_file_size)
+                        virtual_path = f"/mnt/user-data/uploads/{filename}"
+                        if sync_callback is not None:
+                            await sync_callback(virtual_path, destination)
+                            sync_completed = True
+                        use.status = "attached"
+                        use.updated_at = datetime.now(UTC)
                         await session.commit()
-                    except Exception:
-                        logger.exception("Failed to record a failed NIR dataset attachment")
-                    if isinstance(exc, DatasetError):
-                        raise
-                    if sync_callback is not None and not sync_completed:
-                        raise DatasetError("sandbox_sync_failed", "Could not synchronize the dataset into the target sandbox") from exc
-                    raise DatasetError("storage_error", "Could not attach the dataset") from exc
+                        return {**_public_use(use, reused_existing=not created), "attachment_size_bytes": attachment_size, "workspace_version": profile.profile_version if profile and profile.mapping_json.get("workspace") else None}
+                    except Exception as exc:
+                        if created:
+                            try:
+                                await asyncio.to_thread(destination.unlink, missing_ok=True)
+                            except OSError:
+                                logger.exception("Failed to compensate a failed NIR dataset attachment")
+                        try:
+                            await session.rollback()
+                            failed_use = await session.get(NIRDatasetUseRow, use.id)
+                            if failed_use is not None:
+                                failed_use.status = "failed"
+                                failed_use.updated_at = datetime.now(UTC)
+                            await session.commit()
+                        except Exception:
+                            logger.exception("Failed to record a failed NIR dataset attachment")
+                        if isinstance(exc, DatasetError):
+                            raise
+                        if sync_callback is not None and not sync_completed:
+                            raise DatasetError("sandbox_sync_failed", "Could not synchronize the dataset into the target sandbox") from exc
+                        raise DatasetError("storage_error", "Could not attach the dataset") from exc
 
     async def list_uses(self, owner: str, dataset_id: str) -> list[dict]:
         self._enabled()

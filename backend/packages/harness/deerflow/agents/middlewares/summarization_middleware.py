@@ -8,7 +8,7 @@ from typing import Protocol, override, runtime_checkable
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import SummarizationMiddleware
-from langchain_core.messages import AnyMessage, HumanMessage, RemoveMessage, get_buffer_string, trim_messages
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage, get_buffer_string, trim_messages
 from langgraph.config import get_config
 from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
@@ -244,10 +244,29 @@ class DeerFlowSummarizationMiddleware(SummarizationMiddleware):
         return self.summary_prompt.format(messages=formatted_messages).rstrip()
 
     def before_model(self, state: AgentState, runtime: Runtime) -> dict | None:
+        if self._governed_nir_context(state, runtime):
+            return None
         return self._maybe_summarize(state, runtime)
 
     async def abefore_model(self, state: AgentState, runtime: Runtime) -> dict | None:
+        if self._governed_nir_context(state, runtime):
+            return None
         return await self._amaybe_summarize(state, runtime)
+
+    @staticmethod
+    def _governed_nir_context(state: AgentState, runtime: Runtime) -> bool:
+        # Autonomous NIR already rebuilds bounded context from persisted evidence
+        # and compacts its provider messages. A separate summary model would run
+        # outside that session's admission ledger and could rewrite constraints.
+        # Keep ordinary/legacy conversation summarization unchanged.
+        from deerflow.community.nir.web_entry import unified_entry, web_request
+
+        context = getattr(runtime, "context", None)
+        attempted_start = unified_entry(context) and any(
+            isinstance(message, AIMessage) and any(call.get("name") == "nir_workflow" and call.get("args", {}).get("action") == "start" and call["args"].get("task_type") in {"calibration", "analysis"} for call in message.tool_calls)
+            for message in state.get("messages", [])
+        )
+        return bool(web_request(context)) or bool(attempted_start) or (state.get("nir_workflow") or {}).get("decision_strategy") == "llm_autonomous"
 
     def _maybe_summarize(self, state: AgentState, runtime: Runtime) -> dict | None:
         messages = state["messages"]

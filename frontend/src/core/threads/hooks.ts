@@ -12,19 +12,23 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
-
 import { getAPIClient } from "../api";
 import { fetch } from "../api/fetcher";
 import { getBackendBaseURL } from "../config";
 import { useI18n } from "../i18n/hooks";
 import { isHiddenFromUIMessage } from "../messages/utils";
 import type { FileInMessage } from "../messages/utils";
+import { mountedModelContext } from "../nir-library/mounted-model";
 import type { LocalSettings } from "../settings";
 import { useUpdateSubtask } from "../tasks/context";
 import { messageToStep } from "../tasks/steps";
 import type { UploadedFileInfo } from "../uploads";
 import { promptInputFilePartToFile, uploadFiles } from "../uploads";
+import { summarizeDatasetSaves } from "../uploads/dataset-library";
+import {
+  mountedDatasetFiles,
+  type ThreadInputMessage,
+} from "../uploads/mounted-dataset";
 
 import { fetchThreadTokenUsage } from "./api";
 import {
@@ -1156,7 +1160,7 @@ export function useThreadStream({
   const sendMessage = useCallback(
     async (
       threadId: string,
-      message: PromptInputMessage,
+      message: ThreadInputMessage,
       extraContext?: Record<string, unknown>,
       options?: SendMessageOptions,
     ) => {
@@ -1165,7 +1169,18 @@ export function useThreadStream({
       }
       sendInFlightRef.current = true;
 
-      const text = message.text.trim();
+      const modelContext = mountedModelContext(
+        message.mountedModel,
+        threadId,
+        t.inputBox.modelSelectionContext,
+      );
+      const text = [message.text.trim(), modelContext]
+        .filter(Boolean)
+        .join("\n\n");
+      const mountedFiles = mountedDatasetFiles(
+        message.mountedDataset,
+        threadId,
+      );
 
       // Capture the current human message count before showing optimistic
       // messages so we can wait for the server's copy of the user input.
@@ -1177,13 +1192,14 @@ export function useThreadStream({
       );
 
       // Build optimistic files list with uploading status
-      const optimisticFiles: FileInMessage[] = (message.files ?? []).map(
-        (f) => ({
+      const optimisticFiles: FileInMessage[] = [
+        ...mountedFiles,
+        ...(message.files ?? []).map((f) => ({
           filename: f.filename ?? "",
           size: 0,
           status: "uploading" as const,
-        }),
-      );
+        })),
+      ];
 
       const hideFromUI = options?.additionalKwargs?.hide_from_ui === true;
       const optimisticAdditionalKwargs = {
@@ -1201,7 +1217,7 @@ export function useThreadStream({
         });
       }
 
-      if (optimisticFiles.length > 0 && !hideFromUI) {
+      if ((message.files?.length ?? 0) > 0 && !hideFromUI) {
         // Mock AI message while files are being uploaded
         newOptimistic.push({
           type: "ai",
@@ -1246,16 +1262,32 @@ export function useThreadStream({
             if (files.length > 0) {
               const uploadResponse = await uploadFiles(threadId, files);
               uploadedFileInfo = uploadResponse.files;
+              const library = summarizeDatasetSaves(uploadedFileInfo);
+              if (library.saved || library.reused) {
+                toast.success(
+                  t.uploads.datasetsSaved(library.saved, library.reused),
+                );
+              }
+              for (const failure of library.failures) {
+                toast.warning(
+                  t.uploads.datasetSaveFailed(
+                    failure.filename,
+                    failure.errorCode,
+                  ),
+                  { duration: 10_000 },
+                );
+              }
 
               // Update optimistic human message with uploaded status + paths
-              const uploadedFiles: FileInMessage[] = uploadedFileInfo.map(
-                (info) => ({
+              const uploadedFiles: FileInMessage[] = [
+                ...mountedFiles,
+                ...uploadedFileInfo.map((info) => ({
                   filename: info.filename,
                   size: info.size,
                   path: info.virtual_path,
                   status: "uploaded" as const,
-                }),
-              );
+                })),
+              ];
               setOptimisticMessages((messages) => {
                 if (messages.length > 1 && messages[0]) {
                   const humanMessage: Message = messages[0];
@@ -1286,14 +1318,15 @@ export function useThreadStream({
         }
 
         // Build files metadata for submission (included in additional_kwargs)
-        const filesForSubmit: FileInMessage[] = uploadedFileInfo.map(
-          (info) => ({
+        const filesForSubmit: FileInMessage[] = [
+          ...mountedFiles,
+          ...uploadedFileInfo.map((info) => ({
             filename: info.filename,
             size: info.size,
             path: info.virtual_path,
             status: "uploaded" as const,
-          }),
-        );
+          })),
+        ];
 
         await thread.submit(
           {
@@ -1357,7 +1390,8 @@ export function useThreadStream({
     },
     [
       thread,
-      t.uploads.uploadingFiles,
+      t.uploads,
+      t.inputBox.modelSelectionContext,
       context,
       queryClient,
       humanMessageCount,

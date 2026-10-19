@@ -48,12 +48,11 @@ async def model_library(tmp_path: Path):
         await engine.dispose()
 
 
-def _registered_package(paths: Paths, *, owner: str = "alice", thread_id: str = "source-thread", model_id: str = "tablet_assay") -> tuple[str, dict]:
+def _registered_package(paths: Paths, *, owner: str = "alice", thread_id: str = "source-thread", model_id: str = "tablet_assay", training_hash: str = "a" * 64, extra_metrics=None) -> tuple[str, dict]:
     output = paths.sandbox_outputs_dir(thread_id, user_id=owner)
     output.mkdir(parents=True, exist_ok=True)
     model_path = output / "candidate.pkl"
     metrics_path = output / "candidate.metrics.json"
-    training_hash = "a" * 64
     metrics = {
         "method": "pls",
         "training_data_hash": training_hash,
@@ -76,6 +75,7 @@ def _registered_package(paths: Paths, *, owner: str = "alice", thread_id: str = 
         "RMSEP": 0.32,
         "RPD": 3.1,
     }
+    metrics.update(extra_metrics or {})
     _write_trusted_model_artifact({"format": "nir_model_artifact", "model": {"kind": "synthetic"}}, str(model_path))
     metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
     _bind_model_metrics(str(model_path), str(metrics_path), training_data_hash=training_hash)
@@ -153,6 +153,20 @@ async def test_promote_is_verified_owner_scoped_and_idempotent(model_library) ->
         str(stored / "metrics.json"),
         expected_model_sha256=first["artifact_sha256"],
     )
+
+
+@pytest.mark.asyncio
+async def test_completed_approved_registration_can_be_saved_later(model_library) -> None:
+    service, paths = model_library
+    version, workflow = _registered_package(paths)
+    workflow["stage"] = "completed"
+    saved = await service.promote_registered("alice", "source-thread", "tablet_assay", version, workflow=workflow)
+    assert saved["status"] == "ready"
+    assert len(await service.list_models("alice")) == 1
+    workflow["approval_status"] = "rejected"
+    with pytest.raises(ModelError) as exc:
+        await service.promote_registered("alice", "source-thread", "tablet_assay", version, workflow=workflow)
+    assert exc.value.code == "registration_required"
 
 
 @pytest.mark.asyncio

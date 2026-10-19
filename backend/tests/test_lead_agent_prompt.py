@@ -24,6 +24,22 @@ def test_build_self_update_section_empty_for_default_agent():
     assert prompt_module._build_self_update_section(None) == ""
 
 
+def test_default_prompt_uses_chemagent_identity_without_upstream_promotion(monkeypatch):
+    monkeypatch.setattr(prompt_module, "get_skills_prompt_section", lambda *args, **kwargs: "")
+    monkeypatch.setattr(prompt_module, "get_deferred_tools_prompt_section", lambda **kwargs: "")
+    monkeypatch.setattr(prompt_module, "_build_acp_section", lambda **kwargs: "")
+    monkeypatch.setattr(prompt_module, "_build_custom_mounts_section", lambda **kwargs: "")
+    monkeypatch.setattr(prompt_module, "get_agent_soul", lambda agent_name=None: "")
+
+    prompt = prompt_module.apply_prompt_template()
+
+    assert "You are ChemAgent," in prompt
+    assert "DeerFlow" not in prompt
+    assert "bytedance/deer-flow" not in prompt
+    assert "deer-flow.dev" not in prompt
+    assert "You are custom-analysis," in prompt_module.apply_prompt_template(agent_name="custom-analysis")
+
+
 def test_build_self_update_section_present_for_custom_agent():
     section = prompt_module._build_self_update_section("my-agent")
 

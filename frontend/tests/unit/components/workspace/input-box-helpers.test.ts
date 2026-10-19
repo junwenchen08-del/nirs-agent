@@ -63,6 +63,61 @@ describe("parseGoalCommand", () => {
 });
 
 describe("getInputSubmitAction", () => {
+  it("opens /models before message submission even with new data attached", () => {
+    for (const fileCount of [0, 1]) {
+      expect(
+        getInputSubmitAction({ text: " /MODELS ", fileCount, status: "ready" }),
+      ).toEqual({ kind: "models" });
+    }
+    expect(
+      getInputSubmitAction({
+        text: "/models explain",
+        fileCount: 0,
+        status: "ready",
+      }),
+    ).toEqual({ kind: "message" });
+    expect(
+      getInputSubmitAction({
+        text: "/models-extra",
+        fileCount: 0,
+        status: "ready",
+      }),
+    ).toEqual({ kind: "message" });
+  });
+  it("opens the dataset picker without sending a chat message", () => {
+    expect(
+      getInputSubmitAction({
+        text: "/datasets ",
+        fileCount: 0,
+        status: "ready",
+      }),
+    ).toEqual({ kind: "datasets" });
+    expect(
+      getInputSubmitAction({
+        text: "/DATASETS",
+        fileCount: 0,
+        status: "streaming",
+      }),
+    ).toEqual({ kind: "datasets" });
+  });
+
+  it("does not intercept other text or attachments as a dataset command", () => {
+    expect(
+      getInputSubmitAction({
+        text: "/datasets please",
+        fileCount: 0,
+        status: "ready",
+      }),
+    ).toEqual({ kind: "message" });
+    expect(
+      getInputSubmitAction({
+        text: "/datasets",
+        fileCount: 1,
+        status: "ready",
+      }),
+    ).toEqual({ kind: "message" });
+  });
+
   it("handles /goal commands before the streaming stop shortcut", () => {
     expect(
       getInputSubmitAction({

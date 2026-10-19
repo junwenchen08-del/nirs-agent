@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 import {
   Sidebar,
   SidebarHeader,
@@ -18,7 +20,16 @@ import { WorkspaceNavMenu } from "./workspace-nav-menu";
 export function WorkspaceSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
-  const { open: isSidebarOpen } = useSidebar();
+  const { open: isSidebarOpen, setOpen } = useSidebar();
+  useEffect(() => {
+    if (
+      !document.cookie
+        .split(";")
+        .some((cookie) => cookie.trim().startsWith("sidebar_state=")) &&
+      window.matchMedia("(max-width: 1023px)").matches
+    )
+      setOpen(false);
+  }, [setOpen]);
   return (
     <>
       <Sidebar variant="sidebar" collapsible="icon" {...props}>

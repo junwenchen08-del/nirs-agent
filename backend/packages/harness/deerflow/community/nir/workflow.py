@@ -15,11 +15,13 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.types import Command
 
 from deerflow.agents.thread_state import NIRClarificationQuestion, NIRWorkflowState
+from deerflow.community.nir.decision_facts import model_result_facts, selection_decision_facts
+from deerflow.community.nir.user_wait import latest_user_message
 from deerflow.tools.types import Runtime
 from deerflow.utils.messages import get_original_user_content_text
 
@@ -77,6 +79,24 @@ _VALIDATION_GOAL_ALIASES = {
     "部署": "production",
 }
 _AGENT_VIEW_FIELDS = (
+    "autonomous_rounds",
+    "max_decisions",
+    "max_fits",
+    "autonomous_delivery",
+    "delivery_policy",
+    "workflow_start_call_id",
+    "active_decision_id",
+    "retained_experiment_id",
+    "stop_source",
+    "decision_strategy",
+    "model_constraint",
+    "pipeline_constraint",
+    "decision_context_id",
+    "initial_decision_id",
+    "initial_execution",
+    "latest_execution",
+    "search_protocol",
+    "search_session_id",
     "project_id",
     "task_type",
     "stage",
@@ -94,10 +114,12 @@ _AGENT_VIEW_FIELDS = (
     "dataset_profile_id",
     "dataset_sha256",
     "dataset_attachment_id",
+    "dataset_partition",
     "model_path",
     "metrics_path",
     "audit_evidence",
     "attempt_evidence",
+    "prediction_evidence",
     "attempts",
     "reflection",
     "retry_plan",
@@ -109,6 +131,8 @@ _AGENT_VIEW_FIELDS = (
     "clarification_questions",
     "approval_status",
     "next_action",
+    "user_question",
+    "runtime_termination",
 )
 _AGENT_OBSERVATION_FIELDS = ("name", "status", "code", "requested_method", "stage_after")
 _HIGH_ASSURANCE_GOAL_MARKERS = (
@@ -193,6 +217,10 @@ _APPROVAL_PATTERNS = (
     r"批准",
     r"同意(?:采用|使用|注册)",
     r"确认(?:采用|使用|注册)",
+    # Accept the exact plain-Chinese reply advertised in the result message.
+    # An affirmative statement is required; quoted instructions/questions do
+    # not become consent just because they mention saving to the library.
+    r"^\s*(?:我)?(?:同意|确认)(?:将|把)?(?:本次|这个|当前|该)?(?:模型)?(?:保存到|存入|加入|登记到)模型库\s*[。！!]*\s*$",
     r"注册(?:这个|该)?模型",
     r"\bapprove(?:d)?\b",
     r"\bproceed\s+with\s+(?:the\s+)?registration\b",
@@ -200,6 +228,7 @@ _APPROVAL_PATTERNS = (
 _APPROVAL_DENIAL_PATTERNS = (
     r"(?:不|未|尚未|暂不|不要|拒绝|取消)\s*(?:批准|同意|确认|采用|使用|注册)",
     r"(?:不同意|不确认|不采用|不使用|不注册)",
+    r"(?:不|未|尚未|暂不|不要|拒绝|取消|稍后再)\s*(?:保存|存入|加入|登记|入库)",
     r"\b(?:do\s+not|don't|not|never|decline|reject|cancel)\b.{0,40}\b(?:approve(?:d)?|agree|proceed|register|registration)\b",
     r"\bwithout\s+(?:my\s+)?approval\b",
 )
@@ -646,6 +675,16 @@ def start_workflow(
     grouping_column: str | None = None,
     reference_method: str | None = None,
     max_attempts: int = 3,
+    search_protocol: str = "legacy",
+    decision_strategy: str = "legacy",
+    autonomous_rounds: bool = False,
+    max_decisions: int = 20,
+    max_fits: int = 200,
+    autonomous_delivery: bool = False,
+    budget_profile: str = "development",
+    task_budget: str | None = None,
+    model_constraint: str | None = None,
+    pipeline_constraint: str | None = None,
 ) -> NIRWorkflowState:
     """Create a new NIR workflow and determine its first executable stage."""
     normalized_task = task_type.strip().lower()
@@ -653,6 +692,29 @@ def start_workflow(
         raise NIRWorkflowError(f"Unsupported task_type {task_type!r}; expected one of {sorted(_SUPPORTED_TASK_TYPES)}")
     if not 1 <= max_attempts <= 10:
         raise NIRWorkflowError("max_attempts must be between 1 and 10")
+    if search_protocol not in {"legacy", "sealed_holdout"}:
+        raise NIRWorkflowError("Unsupported search_protocol")
+    if decision_strategy not in {"legacy", "llm_autonomous"} or (decision_strategy == "llm_autonomous" and search_protocol != "sealed_holdout"):
+        raise NIRWorkflowError("llm_autonomous decision strategy requires sealed_holdout")
+    if autonomous_rounds and decision_strategy != "llm_autonomous" or not 1 <= max_decisions <= 24 or not 1 <= max_fits <= 200:
+        raise NIRWorkflowError("Invalid multi-round decision or fit budget")
+    delivery_policy = None
+    if autonomous_delivery:
+        from .decision_budget import resolve_policy
+
+        if decision_strategy != "llm_autonomous" or not autonomous_rounds:
+            raise NIRWorkflowError("autonomous_delivery requires llm_autonomous, sealed_holdout and autonomous_rounds")
+        delivery_policy = resolve_policy(budget_profile, json.loads(task_budget) if task_budget else None)
+        if (max_attempts, max_fits, max_decisions) != (3, 200, 20):
+            raise NIRWorkflowError("Use task_budget for phase-4 budgets; legacy budget arguments cannot silently override it")
+        max_attempts, max_fits, max_decisions = (delivery_policy[key] for key in ("max_experiments", "max_fits", "max_decisions"))
+    if model_constraint is not None and model_constraint not in {"pls", "ridge", "svr", "et"}:
+        raise NIRWorkflowError("Unsupported initial model_constraint")
+    if pipeline_constraint is not None:
+        parsed_constraint = json.loads(pipeline_constraint)
+        pipeline_constraint = json.dumps(normalize_retry_pipeline_steps(parsed_constraint) if parsed_constraint != [] else [], ensure_ascii=False, sort_keys=True)
+    if search_protocol == "sealed_holdout" and (normalized_task not in {"analysis", "calibration"} or grouping_column or validation_goal not in {"exploratory", "internal_holdout"}):
+        raise NIRWorkflowError("sealed_holdout currently supports single-target regression with internal holdout; grouped partitions use the programmatic service")
     binding_values = (dataset_id, dataset_profile_id, dataset_sha256, dataset_attachment_id)
     if any(value is not None for value in binding_values):
         if not all((data_path, dataset_id, dataset_sha256, dataset_attachment_id)):
@@ -679,6 +741,15 @@ def start_workflow(
     state: NIRWorkflowState = {
         "project_id": project_id or f"nir-{uuid.uuid4().hex[:12]}",
         "task_type": normalized_task,
+        "search_protocol": search_protocol,
+        "decision_strategy": decision_strategy,
+        "autonomous_rounds": autonomous_rounds,
+        "max_decisions": max_decisions,
+        "max_fits": max_fits,
+        "autonomous_delivery": autonomous_delivery,
+        "delivery_policy": delivery_policy,
+        "model_constraint": model_constraint,
+        "pipeline_constraint": pipeline_constraint,
         "stage": "intake",
         "revision": 1,
         "domain": normalized_requirements.get("domain"),
@@ -698,6 +769,7 @@ def start_workflow(
         "metrics_path": None,
         "audit_evidence": None,
         "attempt_evidence": None,
+        "prediction_evidence": None,
         "attempts": [],
         "reflection": None,
         "reflections": [],
@@ -941,12 +1013,14 @@ def transition_workflow(
             "grade": grade,
             "tool_name": evidence.get("tool_name"),
             "method": evidence.get("method"),
+            "selected_method": model_result_facts(evidence["result_facts"]).get("method") if isinstance(evidence.get("result_facts"), Mapping) else None,
             "pipeline_steps": evidence.get("pipeline_steps") or [],
             "model_args": evidence.get("model_args") or {},
             "execution_signature": evidence.get("execution_signature"),
             "protocol": evidence.get("protocol"),
             "validation_scope": evidence.get("validation_scope"),
             "metrics_summary": evidence.get("metrics_summary") or {},
+            "decision_facts": selection_decision_facts(evidence.get("result_facts")),
             "model_path": model_path,
             "metrics_path": metrics_path,
             "retry_plan_id": active_retry_plan.get("plan_id") if isinstance(active_retry_plan, Mapping) else None,
@@ -1184,7 +1258,7 @@ def transition_workflow(
         )
 
     if action == "approve":
-        if state["stage"] != "review" or state["approval_status"] != "pending":
+        if not (state["stage"] == "review" and state["approval_status"] == "pending") and not registration_can_be_retried(state):
             raise NIRWorkflowError("approve requires a pending review")
         return _with_update(
             state,
@@ -1252,19 +1326,57 @@ def registration_is_approved(state: dict | None) -> bool:
     return bool(state and state.get("approval_status") == "approved" and state.get("stage") in {"approved", "registered"} and isinstance(state.get("attempt_evidence"), dict))
 
 
+def registration_can_be_retried(state: dict | None) -> bool:
+    """A fresh user approval may retry only a completed, unregistered model."""
+    return bool(
+        state
+        and state.get("stage") == "completed"
+        and state.get("task_type") in {"calibration", "analysis", "classification", "multi_modeling"}
+        and state.get("approval_status") == "approved"
+        and not state.get("registered_model")
+        and isinstance(state.get("attempt_evidence"), dict)
+        and state["attempt_evidence"].get("model_path")
+        and state["attempt_evidence"].get("metrics_path")
+    )
+
+
 def _latest_user_explicitly_approved(runtime: Runtime) -> bool:
     messages = (runtime.state or {}).get("messages") or []
-    for message in reversed(messages):
-        if not isinstance(message, HumanMessage):
-            continue
-        if message.additional_kwargs.get("hide_from_ui"):
-            continue
-        text = get_original_user_content_text(message.content, message.additional_kwargs)
-        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APPROVAL_DENIAL_PATTERNS):
-            return False
-        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APPROVAL_PATTERNS):
-            return True
-    return False
+    message = latest_user_message(messages)
+    if message is None:
+        return False
+    text = get_original_user_content_text(message.content, message.additional_kwargs)
+    text = re.sub(r"<uploaded_files>.*?</uploaded_files>", "", text, flags=re.S)
+    if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APPROVAL_DENIAL_PATTERNS):
+        return False
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _APPROVAL_PATTERNS)
+
+
+def require_user_approval(runtime: Runtime, workflow: dict) -> None:
+    """Validate consent identically for explicit approval and direct save retry."""
+    if not _latest_user_explicitly_approved(runtime):
+        raise NIRWorkflowError("approve requires explicit authorization in the latest user message")
+    if not registration_can_be_retried(workflow):
+        return
+    messages = (runtime.state or {}).get("messages") or []
+    reply = latest_user_message(messages)
+    prior = next((event for event in reversed(workflow.get("history") or []) if event.get("action") == "approve"), {})
+    same_reply = reply.id and prior.get("user_message_id") == reply.id
+    after_reply = messages[next(index for index, message in enumerate(messages) if message is reply) + 1 :]
+    finished = any(isinstance(message, AIMessage) and not message.tool_calls for message in after_reply)
+    completed = any(isinstance(message, ToolMessage) and message.name == "nir_workflow" and '"stage": "completed"' in str(message.content) for message in after_reply)
+    if same_reply or finished or completed:
+        raise NIRWorkflowError("重新保存需要你再次回复“同意保存到模型库”。")
+
+
+def approve_registration_retry(runtime: Runtime, workflow: dict) -> dict:
+    """Record real consent for the same finalized model without another LLM step."""
+    if not registration_can_be_retried(workflow):
+        raise NIRWorkflowError("No completed unregistered model is available")
+    require_user_approval(runtime, workflow)
+    approved = transition_workflow(workflow, action="approve", notes="最新真实用户明确同意，重试保存同一份已完成模型。")
+    approved["history"][-1]["user_message_id"] = latest_user_message(runtime.state["messages"]).id
+    return approved
 
 
 def _runtime_identifier(runtime: Runtime, key: str) -> str | None:
@@ -1297,6 +1409,16 @@ def nir_workflow_tool(
     grouping_column: str | None = None,
     reference_method: str | None = None,
     max_attempts: int = 3,
+    search_protocol: str = "legacy",
+    decision_strategy: str = "legacy",
+    autonomous_rounds: bool = False,
+    max_decisions: int = 20,
+    max_fits: int = 200,
+    autonomous_delivery: bool = False,
+    budget_profile: str = "development",
+    task_budget: str | None = None,
+    model_constraint: str | None = None,
+    pipeline_constraint: str | None = None,
     audit_passed: bool | None = None,
     attempt_passed: bool | None = None,
     grade: str | None = None,
@@ -1317,6 +1439,21 @@ def nir_workflow_tool(
     middleware automatically records successful modeling attempts, knowledge
     retrieval, and model registration. A passed model enters ``review`` and
     cannot be registered until the user is recorded with ``approve``.
+
+    A finalized model below the measured quality threshold may still be saved
+    with explicit user approval, retaining its failed assessment. A completed,
+    previously approved but unregistered workflow can retry ``approve`` after
+    a fresh genuine save reply, using the same artifact without retraining.
+
+    For autonomous delivery, start with task_type=calibration or analysis,
+    validation_goal=internal_holdout, search_protocol=sealed_holdout,
+    decision_strategy=llm_autonomous, autonomous_rounds=true and
+    autonomous_delivery=true. Supply data_path/analyte/unit/domain and the
+    requested task_budget as a JSON STRING. Omit unused arguments. In particular,
+    omit legacy max_attempts/max_fits/max_decisions, dataset lineage without an
+    attachment, grouping_column, and pipeline/model constraints unless the user
+    actually requires them. Then call nir_prepare_search directly; do not run
+    legacy record_audit/plan_ready/record_attempt in this mode.
 
     Args:
         action: Workflow action: start, status, set_requirements, record_audit,
@@ -1342,6 +1479,16 @@ def nir_workflow_tool(
         grouping_column: Batch/season/origin grouping column, or ``none``.
         reference_method: Laboratory reference method or an explicit ``unknown``.
         max_attempts: Retry budget for a new workflow (1-10).
+        search_protocol: legacy compatibility or sealed_holdout for the phase-1 safe regression path.
+        decision_strategy: legacy or llm_autonomous decisions; autonomous requires sealed_holdout.
+        autonomous_rounds: Enable feedback-based action decisions; false preserves the single-execution mode.
+        max_decisions: Cumulative accepted high-level actions, including STOP (1..24).
+        max_fits: Cumulative sealed model fits across all experiments (1..200).
+        autonomous_delivery: Opt in to phase-4 budget governance and final delivery; requires autonomous_rounds.
+        budget_profile: development or autonomous, resolved against server NIR_AUTONOMOUS limits.
+        task_budget: Optional JSON string of phase-4 resource allowances under server ceilings.
+        model_constraint: Optional explicit user hard requirement, not the LLM selected family.
+        pipeline_constraint: Optional explicit user hard preprocessing JSON array, including Raw [].
         audit_passed: Required by record_audit.
         attempt_passed: Required by record_attempt when used outside middleware.
         grade: Optional quality grade for a manually recorded attempt.
@@ -1367,6 +1514,23 @@ def nir_workflow_tool(
                 return Command(update={"messages": [ToolMessage(content=content, tool_call_id=runtime.tool_call_id)]})
             updated = current
         elif normalized_action == "start":
+            from .web_entry import completed_intake_workflow, persist_unified_workflow, unified_entry, validate_unified_start, web_request
+
+            web = web_request(getattr(runtime, "context", None))
+            handoff = completed_intake_workflow(current)
+            if unified_entry(getattr(runtime, "context", None)) and current and not handoff and task_type in {"calibration", "analysis"}:
+                raise NIRWorkflowError("This thread already owns a workflow; resume it or start the new regression task in a fresh conversation. Its historical mode and records remain unchanged")
+            unified = unified_entry(getattr(runtime, "context", None)) and (not current or handoff) and task_type in {"calibration", "analysis"}
+            if unified:
+                search_protocol, decision_strategy = "sealed_holdout", "llm_autonomous"
+                autonomous_rounds, autonomous_delivery = True, True
+                budget_profile, task_budget = "unified", None
+                if validation_goal is None:
+                    validation_goal = "internal_holdout"
+            if web:
+                search_protocol, decision_strategy = web["search_protocol"], web["decision_strategy"]
+                autonomous_rounds, autonomous_delivery = True, True
+                budget_profile, task_budget = web["budget_profile"], web["task_budget"]
             if current and current.get("stage") not in {"completed", "blocked"}:
                 raise NIRWorkflowError("An active NIR workflow already exists; complete or reject it before starting another")
             if not task_type:
@@ -1389,14 +1553,29 @@ def nir_workflow_tool(
                 grouping_column=grouping_column,
                 reference_method=reference_method,
                 max_attempts=max_attempts,
+                search_protocol=search_protocol,
+                decision_strategy=decision_strategy,
+                autonomous_rounds=autonomous_rounds,
+                max_decisions=max_decisions,
+                max_fits=max_fits,
+                autonomous_delivery=autonomous_delivery,
+                budget_profile=budget_profile,
+                task_budget=task_budget,
+                model_constraint=model_constraint,
+                pipeline_constraint=pipeline_constraint,
             )
             if current:
                 updated["revision"] = int(current.get("revision", 0)) + 1
+            if autonomous_delivery:
+                updated["workflow_start_call_id"] = runtime.tool_call_id
+            if unified:
+                validate_unified_start(runtime, updated)
+                persist_unified_workflow(runtime, updated, starting=True, previous=current)
         else:
             if current is None:
                 raise NIRWorkflowError("No active NIR workflow; call action='start' first")
-            if normalized_action == "approve" and not _latest_user_explicitly_approved(runtime):
-                raise NIRWorkflowError("approve requires explicit authorization in the latest user message")
+            if normalized_action == "approve":
+                require_user_approval(runtime, current)
             updated = transition_workflow(
                 current,
                 action=normalized_action,
@@ -1424,17 +1603,22 @@ def nir_workflow_tool(
                 expected_improvement=expected_improvement,
                 notes=notes,
             )
+            if normalized_action == "approve":
+                updated["history"][-1]["user_message_id"] = latest_user_message((runtime.state or {}).get("messages") or []).id
         if updated is not current:
             updated = attach_workflow_runtime(
                 updated,
                 run_id=_runtime_identifier(runtime, "run_id"),
                 trace_id=_runtime_identifier(runtime, "deerflow_trace_id"),
             )
+            from .web_entry import persist_unified_workflow
+
+            persist_unified_workflow(runtime, updated)
         update: dict[str, Any] = {"messages": [ToolMessage(content=_tool_payload(updated), tool_call_id=runtime.tool_call_id)]}
         if updated is not current:
             update["nir_workflow"] = updated
         return Command(update=update)
-    except NIRWorkflowError as exc:
+    except (NIRWorkflowError, ValueError) as exc:
         content = json.dumps(
             {"status": "error", "error": str(exc)},
             ensure_ascii=False,

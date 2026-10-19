@@ -96,6 +96,19 @@ export interface Translations {
     followupConfirmReplace: string;
     suggestionPlaceholderRequired: string;
     goalCommandDescription: string;
+    datasetCommandDescription: string;
+    datasetPickerDescription: string;
+    datasetAttached: string;
+    datasetAttaching: string;
+    datasetAttachFailed: string;
+    datasetClearSelection: string;
+    modelCommandDescription: string;
+    modelPickerDescription: string;
+    modelAttached: string;
+    modelAttaching: string;
+    modelAttachFailed: string;
+    modelClearSelection: string;
+    modelSelectionContext: string;
     goalLabel: string;
     goalContinuing: string;
     goalContinuationTooltip: string;
@@ -127,59 +140,20 @@ export interface Translations {
     newChat: string;
     chats: string;
     demoChats: string;
-    agents: string;
-    agentsDisabledTooltip: string;
     channels: string;
-    evaluations: string;
     nirDatasets: string;
     nirModels: string;
-  };
-
-  // Agents
-  agents: {
-    title: string;
-    description: string;
-    newAgent: string;
-    emptyTitle: string;
-    emptyDescription: string;
-    featureDisabledTitle: string;
-    featureDisabledDescription: string;
-    chat: string;
-    delete: string;
-    deleteConfirm: string;
-    deleteSuccess: string;
-    newChat: string;
-    createPageTitle: string;
-    createPageSubtitle: string;
-    nameStepTitle: string;
-    nameStepHint: string;
-    nameStepPlaceholder: string;
-    nameStepContinue: string;
-    nameStepInvalidError: string;
-    nameStepAlreadyExistsError: string;
-    nameStepNetworkError: string;
-    nameStepCheckError: string;
-    nameStepCheckErrorWithDetail: string;
-    nameStepApiDisabledError: string;
-    nameStepBootstrapMessage: string;
-    save: string;
-    saving: string;
-    saveRequested: string;
-    saveHint: string;
-    saveCommandMessage: string;
-    agentCreatedPendingRefresh: string;
-    more: string;
-    agentCreated: string;
-    startChatting: string;
-    backToGallery: string;
+    methods: string;
   };
 
   // Breadcrumb
   breadcrumb: {
     workspace: string;
+    backToCurrentChat: string;
     chats: string;
-    evaluations: string;
     nirLibrary: string;
+    nirProcess: string;
+    methods: string;
   };
 
   // Workspace
@@ -261,45 +235,6 @@ export interface Translations {
     statuses: Record<string, string>;
   };
 
-  nirEvaluations: {
-    eyebrow: string;
-    title: string;
-    description: string;
-    scenarios: string;
-    deterministic: string;
-    mappingTitle: string;
-    mappingDescription: string;
-    threadId: string;
-    threadPlaceholder: string;
-    scenario: string;
-    selectScenario: string;
-    remove: string;
-    addCase: string;
-    run: string;
-    running: string;
-    loadError: string;
-    runError: string;
-    duplicateScenario: string;
-    recentTrend: string;
-    trendDescription: string;
-    noHistory: string;
-    older: string;
-    latest: string;
-    passRate: string;
-    averageScore: string;
-    policyViolations: string;
-    tokens: string;
-    duration: string;
-    results: string;
-    passed: string;
-    failed: string;
-    trace: string;
-    noTraceId: string;
-    exportEvidence: string;
-    clearResult: string;
-    noResults: string;
-  };
-
   // Conversation
   conversation: {
     noMessages: string;
@@ -370,6 +305,8 @@ export interface Translations {
 
   // Uploads
   uploads: {
+    datasetsSaved: (saved: number, reused: number) => string;
+    datasetSaveFailed: (filename: string, errorCode: string) => string;
     uploading: string;
     uploadingFiles: string;
     limitsHint: (
@@ -430,6 +367,8 @@ export interface Translations {
     open: string;
     description: string;
     currentStage: string;
+    progress: string;
+    milestones: Record<string, string>;
     task: string;
     attempt: (current: number, maximum: number) => string;
     method: string;
@@ -442,6 +381,10 @@ export interface Translations {
     profile: string;
     hash: string;
     nextAction: string;
+    nextActions: Record<string, string>;
+    resultFiles: string;
+    qualityPassed: string;
+    qualityFailed: string;
     revision: string;
     notAvailable: string;
     stages: Record<string, string>;
@@ -694,6 +637,22 @@ export interface Translations {
     };
   };
 
+  blog: {
+    title: string;
+    allPosts: string;
+    recentPosts: string;
+    tags: string;
+    language: string;
+    taggedPosts: (title: string, count: number) => string;
+  };
+  setup: {
+    createAdminDescription: string;
+    completeTitle: string;
+    completeDescription: string;
+    creatingAccount: string;
+    completingSetup: string;
+    completeSetup: string;
+  };
   // Login / Auth
   login: {
     signInTitle: string;
@@ -716,6 +675,9 @@ export interface Translations {
     backToHome: string;
     networkError: string;
     authFailed: string;
+    signingIn: string;
+    redirecting: string;
+    redirectingToLogin: string;
     errors: {
       sso_failed: string;
       sso_cancelled: string;

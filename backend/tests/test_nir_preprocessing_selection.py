@@ -46,7 +46,9 @@ def test_analyze_profiles_calibration_only_and_persists_selection(tmp_path: Path
     assert payload["status"] == "ok"
     selection = payload["preprocessing_selection"]
     assert selection["calibration_samples"] == 42
-    assert selection["candidates"][0]["candidate_id"] == "raw"
+    assert any(item["candidate_id"] == "raw" for item in selection["candidates"])
+    assert selection["candidates"][0]["candidate_id"] != "raw"
+    assert selection["method_knowledge"]["mode"] == "retrieval_guided"
     assert selection["candidate_count"] <= 8
     assert selection["selection_rule"] == "rmsecv_1pct"
     assert len(result) < 12_000

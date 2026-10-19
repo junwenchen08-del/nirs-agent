@@ -5,6 +5,7 @@ import { GatewayOfflineFallback } from "@/components/workspace/gateway-offline-f
 import { AuthProvider } from "@/core/auth/AuthProvider";
 import { getServerSideUser } from "@/core/auth/server";
 import { assertNever } from "@/core/auth/types";
+import { getI18n } from "@/core/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ export default async function AuthLayout({
   children: ReactNode;
 }) {
   const result = await getServerSideUser();
+  const { t } = await getI18n();
 
   switch (result.tag) {
     case "authenticated":
@@ -32,7 +34,7 @@ export default async function AuthLayout({
         <GatewayOfflineFallback renderBanner>
           <div className="flex h-screen flex-col items-center justify-center gap-4">
             <p className="text-muted-foreground">
-              Service temporarily unavailable.
+              {t.workspace.gatewayUnavailable}
             </p>
           </div>
         </GatewayOfflineFallback>

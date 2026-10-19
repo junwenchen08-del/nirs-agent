@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -11,16 +12,22 @@ from typing import Any, override
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware, hook_config
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
 from deerflow.agents.thread_state import NIRWorkflowState
+from deerflow.community.nir.decision_facts import model_result_facts
+from deerflow.community.nir.model_autosave import failed_model_save, save_registered_model
+from deerflow.community.nir.prediction_evidence import prediction_result_evidence
+from deerflow.community.nir.process import bind_execution, finish_execution, reset_execution, start_execution
 from deerflow.community.nir.response_grounding import (
     render_grounded_nir_response,
     required_nir_workflow_action,
     validate_nir_response,
 )
+from deerflow.community.nir.user_wait import begin_user_wait, question_for_user, resume_user_wait, waiting_for_user, waiting_message
 from deerflow.community.nir.workflow import (
     NIRWorkflowError,
     block_workflow_after_continuation_failure,
@@ -80,6 +87,14 @@ _DATASET_READ_STAGES = frozenset({"clarification", "data_audit", "planning", "ex
 _ALL_NIR_TASKS = frozenset({*_DATA_TASKS, "knowledge"})
 
 _TOOL_POLICIES: dict[str, _ToolPolicy] = {
+    "nir_decision_context": _ToolPolicy(frozenset({"execution", "decision_review", "budget_exhausted"}), frozenset({"analysis", "calibration"})),
+    "nir_submit_decision": _ToolPolicy(frozenset({"execution", "decision_review", "budget_exhausted", "awaiting_final_confirmation", "frozen", "review"}), frozenset({"analysis", "calibration"})),
+    "nir_decision_history": _ToolPolicy(frozenset({"execution", "decision_review", "initial_result", "awaiting_final_confirmation", "budget_exhausted"}), frozenset({"analysis", "calibration"})),
+    "nir_execute_decision": _ToolPolicy(frozenset({"execution", "initial_result"}), frozenset({"analysis", "calibration"})),
+    "nir_prepare_search": _ToolPolicy(frozenset({"data_audit", "planning", "execution"}), frozenset({"analysis", "calibration"})),
+    "nir_search_model": _ToolPolicy(frozenset({"execution"}), frozenset({"analysis", "calibration"})),
+    "nir_freeze_search": _ToolPolicy(frozenset({"execution", "awaiting_final_confirmation", "frozen"}), frozenset({"analysis", "calibration"})),
+    "nir_finalize_search": _ToolPolicy(frozenset({"frozen", "review"}), frozenset({"analysis", "calibration"})),
     "nir_load_data": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
     "nir_inspect": _ToolPolicy(frozenset({"data_audit"}), _DATA_TASKS),
     "nir_preprocess": _ToolPolicy(frozenset({"execution"}), _EXECUTION_TASKS),
@@ -95,6 +110,7 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_predict": _ToolPolicy(frozenset({"execution"}), frozenset({"prediction"})),
     "nir_reflect": _ToolPolicy(frozenset({"evaluation"}), _MODEL_TASKS),
     "nir_search_knowledge": _ToolPolicy(frozenset({"execution", "knowledge"}), frozenset({"knowledge", *_MODEL_TASKS})),
+    "nir_search_method_knowledge": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
     "nir_register_model": _ToolPolicy(frozenset({"approved"}), _MODEL_TASKS),
     "nir_dataset_list": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
     "nir_dataset_get": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
@@ -104,7 +120,7 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
     "nir_model_list": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
     "nir_model_get": _ToolPolicy(_DATASET_READ_STAGES, _ALL_NIR_TASKS),
     "nir_model_attach": _ToolPolicy(frozenset({"clarification"}), frozenset({"prediction"})),
-    "nir_model_promote": _ToolPolicy(frozenset({"registered"}), _MODEL_TASKS),
+    "nir_model_promote": _ToolPolicy(frozenset({"registered", "completed"}), _MODEL_TASKS),
     **{
         name: _ToolPolicy(
             frozenset({"planning", "execution", "evaluation", "knowledge", "approved"}),
@@ -123,7 +139,7 @@ _TOOL_POLICIES: dict[str, _ToolPolicy] = {
 _OBSERVED_NIR_TOOLS = frozenset({*_TOOL_POLICIES, "nir_workflow"})
 
 _MODELING_TOOLS = frozenset({"nir_train_auto_split_model", "nir_train_model", "nir_train_classifier", "nir_train_partitioned_model", "nir_train_multi_model", "nir_analyze", "nir_analyze_collection", "nir_compare"})
-_PREPROCESSING_DECISION_TOOLS = frozenset({*_MODELING_TOOLS, "nir_preprocess"})
+_PREPROCESSING_DECISION_TOOLS = frozenset({*_MODELING_TOOLS, "nir_preprocess", "nir_search_model"})
 _CHEMOTOOLS_CATALOG_TOOL = "chemotools_list_capabilities"
 _INTERNAL_HOLDOUT_TOOLS = _MODELING_TOOLS
 _EXTERNAL_VALIDATION_TOOLS = frozenset({"nir_train_partitioned_model"})
@@ -701,6 +717,94 @@ def _authorize(request: ToolCallRequest) -> ToolMessage | None:
     workflow = _state_from_request(request).get("nir_workflow")
     args = request.tool_call.get("args")
     args = args if isinstance(args, Mapping) else {}
+    if waiting_for_user(workflow):
+        own_question = tool_name == "ask_clarification" and request.tool_call.get("id") == workflow["user_question"].get("tool_call_id")
+        if own_question:
+            return None
+        if not own_question and not (tool_name == "nir_workflow" and args.get("action") == "status"):
+            return _denied_message(request, code="nir_waiting_for_user", error="正在等待你的回复，确认前不会继续建模。", workflow=workflow)
+    # Honor the user's explicit strategy request before a workflow exists.
+    # This rejects a downgrade; it does not invent a modeling decision.
+    from deerflow.community.nir.web_entry import web_request
+
+    web = web_request(getattr(getattr(request, "runtime", None), "context", None))
+    from deerflow.community.nir.web_entry import completed_intake_workflow, unified_entry
+
+    unified = unified_entry(getattr(getattr(request, "runtime", None), "context", None))
+    if unified and (not workflow or completed_intake_workflow(workflow)) and tool_name in (_MODELING_TOOLS | _CHEMOTOOLS_EXECUTION_TOOLS | {"nir_search_model", "nir_preprocess"}):
+        return _denied_message(request, code="nir_unified_start_required", error="Interpret the task and start the owned NIR workflow before any modeling. Ordinary questions do not start training.", workflow=workflow)
+    if (
+        web
+        and isinstance(workflow, Mapping)
+        and not all(
+            workflow.get(key) == value
+            for key, value in {
+                "search_protocol": "sealed_holdout",
+                "decision_strategy": "llm_autonomous",
+                "autonomous_rounds": True,
+                "autonomous_delivery": True,
+            }.items()
+        )
+    ):
+        if not (tool_name == "nir_workflow" and args.get("action") == "status"):
+            return _denied_message(
+                request, code="nir_web_mode_conflict", error="This chat already has a workflow with different mode settings. Use a fresh chat; existing sessions cannot be upgraded or reset by a web mode selection.", workflow=workflow
+            )
+    if (web or not unified and _delivery_requested(_latest_user_text(request))) and not (isinstance(workflow, Mapping) and workflow.get("search_protocol") == "sealed_holdout"):
+        required = {"search_protocol": "sealed_holdout", "decision_strategy": "llm_autonomous", "autonomous_rounds": True, "autonomous_delivery": True}
+        allowed_read = tool_name in _CHEMOTOOLS_READ_TOOLS or tool_name in {"nir_search_method_knowledge", "nir_list_preprocessing_methods", "nir_describe_preprocessing_method"}
+        starting = tool_name == "nir_workflow" and args.get("action") == "start" and all(args.get(key) == value for key, value in required.items())
+        if starting and web:
+            starting = args.get("budget_profile", web["budget_profile"]) == web["budget_profile"] and args.get("task_budget", web["task_budget"]) == web["task_budget"]
+        if not starting and not allowed_read and not (tool_name == "nir_workflow" and args.get("action") == "status"):
+            return _denied_message(
+                request,
+                code="nir_delivery_mode_required",
+                error="The user requested autonomous delivery. Start with all required mode flags; do not fall back to legacy.",
+                workflow=workflow,
+                details={"required_start_fields": required, "validation_goal": "internal_holdout", "budget_arguments": "task_budget JSON only"},
+            )
+    if isinstance(workflow, Mapping) and workflow.get("search_protocol") == "sealed_holdout":
+        if (workflow.get("delivery_policy") or {}).get("automatic_delivery"):
+            if tool_name == "nir_prepare_search" and workflow.get("search_session_id"):
+                return _denied_message(request, code="nir_prepare_already_bound", error="Preparation is already persisted. Continue with the current session; no new partition or budget is allowed.", workflow=workflow)
+            if tool_name == "nir_decision_context" and workflow.get("decision_context_id"):
+                return _denied_message(
+                    request, code="nir_context_already_available", error="The unchanged context is already available. Submit against its context_id/revision/hash or read detailed history; do not request it again.", workflow=workflow
+                )
+        allowed = {
+            "nir_prepare_search",
+            "nir_search_model",
+            "nir_freeze_search",
+            "nir_finalize_search",
+            "nir_search_method_knowledge",
+            "nir_describe_preprocessing_method",
+            "nir_list_preprocessing_methods",
+            "chemotools_health",
+            "chemotools_list_capabilities",
+            "chemotools_describe_capability",
+        }
+        workflow_read = tool_name == "nir_workflow" and args.get("action") == "status"
+        if workflow.get("decision_strategy") == "llm_autonomous":
+            allowed -= {"nir_search_model", "nir_freeze_search", "nir_finalize_search"}
+            allowed |= {"nir_decision_context", "nir_submit_decision", "nir_execute_decision", "nir_decision_history"}
+            if workflow.get("autonomous_delivery"):
+                if workflow.get("stage") not in {"blocked", "completed", "registered"}:
+                    allowed |= {"ask_clarification"}
+                if not (workflow.get("delivery_policy") or {}).get("automatic_delivery"):
+                    allowed |= {"nir_freeze_search", "nir_finalize_search"}
+                if not workflow.get("search_session_id") and workflow.get("stage") in {"intake", "clarification"}:
+                    workflow_read = tool_name == "nir_workflow" and args.get("action") in {"status", "set_requirements"}
+                    allowed |= {"ask_clarification"}
+                if workflow.get("stage") in {"review", "approved", "registered"}:
+                    workflow_read = tool_name == "nir_workflow" and args.get("action") in {"status", "approve", "reject", "complete"}
+                    allowed |= {"nir_register_model"}
+                from deerflow.community.nir.workflow import registration_can_be_retried
+
+                if registration_can_be_retried(workflow):
+                    workflow_read = tool_name == "nir_workflow" and args.get("action") in {"status", "approve"}
+        if tool_name not in allowed and not workflow_read:
+            return _denied_message(request, code="nir_sealed_search_tool_denied", error="The sealed regression protocol permits only governed search/finalization and data-free catalog tools.", workflow=workflow)
     if dataset_binding_denial := _deny_invalid_dataset_start_binding(request):
         return dataset_binding_denial
     if isinstance(workflow, Mapping) and tool_name in {"read_file", "read_file_tool"}:
@@ -827,6 +931,27 @@ def _success_payload(result: ToolMessage | Command) -> dict[str, Any] | None:
     return payload
 
 
+def _bind_registration_retry(request: ToolCallRequest) -> ToolCallRequest:
+    """A direct save call may consume real fresh consent for the exact artifact."""
+    if request.tool_call.get("name") != "nir_register_model":
+        return request
+    from deerflow.community.nir.workflow import approve_registration_retry, registration_can_be_retried
+
+    state = _state_from_request(request)
+    workflow = state.get("nir_workflow")
+    if not registration_can_be_retried(workflow):
+        return request
+    args = request.tool_call.get("args") or {}
+    if any(args.get(key) != workflow["attempt_evidence"].get(key) for key in ("model_path", "metrics_path")):
+        return request
+    try:
+        approved = approve_registration_retry(request.runtime, workflow)
+    except NIRWorkflowError:
+        return request
+    updated = {**state, "nir_workflow": approved}
+    return replace(request, state=updated, runtime=replace(request.runtime, state=updated))
+
+
 def _bind_reflection_request(request: ToolCallRequest) -> ToolCallRequest:
     """Bind reflection inputs to durable attempts instead of model-authored history."""
 
@@ -913,20 +1038,7 @@ def _model_attempt_update(
             {key: component.get(key) for key in ("name", "R2_val", "RPD", "RMSEP", "grade", "passed") if component.get(key) is not None} for component in result["per_component"][:20] if isinstance(component, Mapping)
         ]
         metrics_summary["component_count"] = len(result["per_component"])
-    result_fact_keys = (
-        "task_kind",
-        "label_name",
-        "classes",
-        "class_distribution",
-        "preprocessing",
-        "wavelength_selection",
-        "wavelength_selection_decision",
-        "model_selection_decision",
-        "candidate_results",
-        "model_candidates",
-        "method",
-    )
-    result_facts = {key: result.get(key) for key in result_fact_keys if result.get(key) is not None}
+    result_facts = model_result_facts(result)
     try:
         pipeline_steps, model_args, execution_signature = _request_execution_signature(request)
     except NIRWorkflowError:
@@ -1056,11 +1168,19 @@ def _next_workflow(
             notes="Knowledge retrieval completed successfully.",
         )
     if tool_name == "nir_register_model" and payload.get("status") == "registered":
-        return transition_workflow(
+        registered = transition_workflow(
             workflow,
             action="registered",
             notes=f"Registered model {payload.get('model_id', '')}".strip(),
         )
+        registered["registered_model"] = {
+            "model_id": payload.get("model_id"),
+            "version": payload.get("version"),
+            **({"quality_status": "below_threshold_user_approved"} if payload.get("quality_status") == "below_threshold_user_approved" else {}),
+        }
+        return registered
+    if tool_name == "nir_model_promote" and payload.get("library_status") == "ready":
+        return {**workflow, "model_library": {"status": "saved", "model_id": payload.get("model_id"), "version": payload.get("version")}}
     return None
 
 
@@ -1106,6 +1226,17 @@ def _record_observation(request: ToolCallRequest, result: ToolMessage | Command)
         except (TypeError, ValueError):
             pass
     status = "error" if message is not None and (message.status == "error" or payload.get("status") == "error") else "success"
+    if tool_name == "nir_predict" and current.get("task_type") == "prediction":
+        workflow = {
+            **workflow,
+            "prediction_evidence": prediction_result_evidence(
+                current,
+                request.tool_call.get("args") or {},
+                payload,
+                call_id=request.tool_call.get("id"),
+                failed=status == "error",
+            ),
+        }
     if payload.get("code") == _RETRY_PLAN_MISMATCH_EXHAUSTED_CODE:
         details = payload.get("details")
         plan_id = details.get("plan_id") if isinstance(details, Mapping) else None
@@ -1143,11 +1274,47 @@ def _advance(request: ToolCallRequest, result: ToolMessage | Command) -> ToolMes
     return _attach_workflow_update(result, updated) if updated is not None else result
 
 
+def _registration_save_context(request: ToolCallRequest, result: ToolMessage | Command) -> tuple[dict, dict] | None:
+    if request.tool_call.get("name") != "nir_register_model" or not isinstance(result, Command) or not isinstance(result.update, Mapping):
+        return None
+    workflow, payload = result.update.get("nir_workflow"), _success_payload(result)
+    if not isinstance(workflow, dict) or workflow.get("stage") != "registered" or payload is None or payload.get("status") != "registered":
+        return None
+    return workflow, payload
+
+
+def _with_model_library_save(result: Command, workflow: dict, payload: dict, outcome: dict) -> Command:
+    message = _tool_message(result)
+    if message is None:
+        return result
+    updated_message = message.model_copy(update={"content": json.dumps({**payload, "model_library": outcome}, ensure_ascii=False)})
+    return replace(
+        result,
+        update={
+            **result.update,
+            "nir_workflow": {**workflow, "model_library": outcome},
+            "messages": [updated_message if item is message else item for item in result.update.get("messages", [])],
+        },
+    )
+
+
 def _workflow_completion_reminder(
     required_action: str,
     workflow: Mapping[str, Any],
 ) -> str:
     instructions = {
+        "read_decision_context": "Read nir_decision_context for persisted experiment feedback and remaining cumulative budget. Independently compare next actions, including STOP; quality and knowledge rank do not dictate your choice.",
+        "read_final_selection_context": "Search budget is exhausted. Read nir_decision_context for existing Cal/Val results and choose a successful retained experiment using RETAIN, zero fits. Stop source remains budget.",
+        "submit_final_selection": "Submit phase=final_selection/action=RETAIN with successful retained_experiment_id, stop_evidence, null execution plan, expected_fits=0 and concise evidence. Never automatically select the lowest RMSE.",
+        "freeze_selected_model": "Call nir_freeze_search with exactly the retained_experiment_id in the accepted terminal decision. No refit or new parameter search.",
+        "submit_decision": "Submit your selected action with alternatives, reasons for rejecting them, uncertainty, hypotheses, concrete configuration and fit estimate. STOP must name your chosen successful retained experiment.",
+        "execute_decision": "Execute only the accepted decision_id, then read a fresh decision context for the next LLM action. Never read Test or call legacy training.",
+        "read_initial_context": "Call nir_decision_context; choose your initial plan from Cal features, actual capabilities and sourced method evidence.",
+        "submit_initial_decision": "Submit your structured initial alternatives and selected pipeline using nir_submit_decision. Do not call direct search or legacy fitting.",
+        "execute_initial_decision": "Call nir_execute_decision with the accepted decision_id, return its Cal CV/Val evidence, then wait. No subsequent loop is enabled.",
+        "prepare_sealed_search": "Call nir_prepare_search to ingest the bound source and seal Test. Do not use legacy inspection/modeling tools.",
+        "search_or_freeze": "Use nir_search_model on explicit pipelines or nir_freeze_search with a selected successful experiment. Search metrics only describe Cal/Val.",
+        "finalize_search": "Call nir_finalize_search once for the frozen model; never reopen search after Test evaluation.",
         "inspect_data": ("Call nir_inspect or the required structured NIR audit tool before forming a conclusion."),
         "prepare_analysis_plan": ("Record the analysis plan with nir_workflow(action='plan_ready') and execute it before reporting results."),
         "execute_nir_tools": ("Execute the authorized NIR tool for the current plan before reporting results."),
@@ -1168,8 +1335,591 @@ def _workflow_completion_reminder(
     )
 
 
+def _delivery_requested(text):
+    return bool(re.search(r"\bautonomous_delivery\s*[=:]\s*true\b", text, re.I))
+
+
+def _user_task_message(message):
+    return isinstance(message, HumanMessage) and not any(message.additional_kwargs.get(key) for key in ("slash_skill_activation", "durable_context_data", "dynamic_context_reminder"))
+
+
 class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
     """Enforce NIR workflow policy and persist deterministic tool outcomes."""
+
+    @staticmethod
+    def _restore_unified_binding(state, runtime):
+        from types import SimpleNamespace
+
+        from deerflow.community.nir.process import runtime_store
+        from deerflow.community.nir.web_entry import stored_workflow
+
+        config = getattr(runtime, "config", None)
+        if not config:
+            from langgraph.config import get_config
+
+            try:
+                config = get_config()
+            except RuntimeError:
+                return None
+        stored = stored_workflow(runtime_store(SimpleNamespace(config=config, context=runtime.context)))
+        if stored:
+            if stored.get("search_session_id"):
+                from deerflow.community.nir.dataset_session import SearchSessionStore
+
+                service_runtime = SimpleNamespace(config=config, context=runtime.context, state={**state, "nir_workflow": stored})
+                search = SearchSessionStore(runtime_store(service_runtime))
+                with search.process._connection() as db:
+                    session = search._session(db, stored["search_session_id"])
+                auto = session.get("automatic_delivery") or {}
+                if auto.get("workflow"):
+                    stored = auto["workflow"] if auto["workflow"].get("revision", 0) > stored.get("revision", 0) else stored
+                if not waiting_for_user(stored) and auto.get("status") in {"queued", "failed"} and not auto.get("lease") and session["stage"] in {"stopped", "frozen", "finalized"}:
+                    from deerflow.community.nir.automatic_delivery import complete_terminal_delivery
+                    from deerflow.community.nir.web_entry import persist_unified_workflow
+
+                    pending = {**stored, "retained_experiment_id": session["retained_experiment_id"], "stop_decision_id": session["stop_decision_id"], "stop_source": session["stop_source"]}
+                    try:
+                        _, stored = complete_terminal_delivery(service_runtime, search, pending)
+                        persist_unified_workflow(service_runtime, stored)
+                    except Exception:
+                        logger.warning("Unable to resume deterministic terminal publication; state remains durable", exc_info=True)
+            current = state.get("nir_workflow") or {}
+            if not current or current.get("revision", 0) < stored.get("revision", 0) or any(current.get(key) != stored.get(key) for key in ("project_id", "search_protocol", "decision_strategy", "delivery_policy", "search_session_id")):
+                return {"nir_workflow": stored}
+        return None
+
+    @staticmethod
+    def _deterministic_delivery_response(request):
+        workflow = request.state.get("nir_workflow") or {}
+        if not (workflow.get("delivery_policy") or {}).get("automatic_delivery") or workflow.get("stage") != "review":
+            return None
+        # A separate human approval/rejection is still handled by the original
+        # tools. Only the same run's completed terminal submission is narrated.
+        last = next((message for message in reversed(request.messages) if isinstance(message, (HumanMessage, ToolMessage))), None)
+        if not isinstance(last, ToolMessage) or last.name != "nir_submit_decision":
+            return None
+        try:
+            value = json.loads(last.content)
+        except (ValueError, TypeError):
+            return None
+        if (value.get("automatic_delivery") or {}).get("status") != "delivered":
+            return None
+        paths = value["automatic_delivery"]
+        text = render_grounded_nir_response(workflow, include_downloads=False) + "\n\n报告已生成，可在下方查看或下载。"
+        text += "\n\n" + " · ".join(f"[{label}]({paths[key]})" for label, key in (("模型文件", "model"), ("查看报告", "report_html"), ("下载全部文件", "bundle")))
+        return ModelResponse(result=[AIMessage(content=text, additional_kwargs={"nir_deterministic_delivery": True, "nir_delivery_session_id": workflow["search_session_id"]})])
+
+    @staticmethod
+    def _persist_question(state, runtime, workflow):
+        from types import SimpleNamespace
+
+        from deerflow.community.nir.web_entry import persist_unified_workflow
+
+        config = getattr(runtime, "config", None)
+        if not config:
+            from langgraph.config import get_config
+
+            try:
+                config = get_config()
+            except RuntimeError:
+                return
+        persist_unified_workflow(SimpleNamespace(state=state, context=getattr(runtime, "context", None), config=config), workflow)
+
+    def before_agent(self, state, runtime):
+        restored = self._restore_unified_binding(state, runtime)
+        workflow = (restored or {}).get("nir_workflow") or state.get("nir_workflow") or {}
+        resumed = resume_user_wait(workflow, state.get("messages") or [])
+        if resumed:
+            self._persist_question(state, runtime, resumed)
+            return {**(restored or {}), "nir_workflow": resumed}
+        return restored
+
+    async def abefore_agent(self, state, runtime):
+        return await asyncio.to_thread(self.before_agent, state, runtime)
+
+    @staticmethod
+    def _with_unified_intake(request):
+        from deerflow.community.nir.web_entry import completed_intake_workflow, unified_entry
+
+        workflow = request.state.get("nir_workflow")
+        if not unified_entry(getattr(getattr(request, "runtime", None), "context", None)) or (workflow and not completed_intake_workflow(workflow)):
+            return request
+        from langchain_core.messages import SystemMessage
+
+        instruction = (
+            "\nFor a new NIR single-target regression execution request, interpret the actual user requirement and uploaded data, then call nir_workflow(action=start, task_type=calibration). "
+            "The trusted server supplies the scientific protocol and resource policy; omit all mode/budget arguments. "
+            "Owned numeric MAT uploads are supported; a completed non-modeling inspection may start regression in this thread with its evidence archived. "
+            "An omitted validation_goal means internal_holdout; explicit external validation cannot use this protocol. "
+            "If using an attached dataset, copy every lineage field from the successful nir_dataset_attach result exactly. "
+            "Conceptual questions (e.g. what is SNV), comparisons or unclear execution intent remain ordinary QA; ask clarification when data/target are missing. "
+            "Do not train from keyword matches, invent target units, or use legacy/raw/MCP fits for this task. Other task types keep their existing tools."
+        )
+        tools = []
+        hidden = {"search_protocol", "decision_strategy", "autonomous_rounds", "autonomous_delivery", "max_attempts", "max_fits", "max_decisions", "budget_profile", "task_budget"}
+        for item in request.tools:
+            if getattr(item, "name", None) == "nir_workflow":
+                schema = {"type": "object", "properties": {key: value for key, value in item.args.items() if key not in hidden}, "required": ["action"], "additionalProperties": False}
+                item = item.model_copy(update={"args_schema": schema})
+            tools.append(item)
+        original = message_content_to_text(request.system_message.content) if request.system_message else ""
+        from deerflow.community.nir.web_entry import unified_policy
+
+        settings = dict(request.model_settings)
+        output_cap = unified_policy()["max_output_tokens"]
+        settings["max_tokens"] = min(settings.get("max_tokens") or getattr(request.model, "max_tokens", None) or output_cap, output_cap)
+        return request.override(tools=tools, model_settings=settings, system_message=SystemMessage(content=original + instruction))
+
+    @staticmethod
+    def _with_delivery_contract(request):
+        workflow = request.state.get("nir_workflow") or {}
+        from deerflow.community.nir.web_entry import web_request
+
+        runtime_context = getattr(getattr(request, "runtime", None), "context", None)
+        web = web_request(runtime_context)
+        from deerflow.community.nir.web_entry import unified_entry
+
+        if not workflow and not web and unified_entry(runtime_context):
+            return request
+        requested = any(_user_task_message(message) and _delivery_requested(get_original_user_content_text(message.content, message.additional_kwargs)) for message in request.messages)
+        if unified_entry(runtime_context):
+            requested = False  # Task intent comes from the actual start call.
+        if not workflow.get("autonomous_delivery") and not requested and not web:
+            return request
+        from deerflow.community.nir.decision_schema import bound_tool_schema, proposal_schema
+
+        context = None
+        for message in reversed(request.messages):
+            if isinstance(message, ToolMessage) and message.name == "nir_decision_context":
+                try:
+                    value = json.loads(message.content)
+                    if value.get("context_id") == workflow.get("decision_context_id"):
+                        if not value.get("proposal_schema") and value.get("proposal_schema_source") == "nir_submit_decision.current_tool_schema":
+                            value = {**value, "proposal_schema": proposal_schema(value["phase"])}
+                        if value.get("proposal_schema"):
+                            context = value
+                            break
+                except (TypeError, ValueError):
+                    pass
+        stage = workflow.get("stage")
+        if not workflow.get("autonomous_delivery"):
+            names = {"nir_workflow"}
+        elif waiting_for_user(workflow) or stage == "blocked":
+            names = {"nir_workflow"}
+        elif not workflow.get("search_session_id") and workflow.get("missing_inputs"):
+            names = {"nir_workflow", "ask_clarification"}
+        elif not workflow.get("search_session_id"):
+            names = {"nir_prepare_search"}
+        elif stage == "awaiting_final_confirmation":
+            names = {"nir_freeze_search"}
+        elif stage == "frozen":
+            names = {"nir_finalize_search"}
+        elif stage in {"review", "registered", "completed", "blocked"}:
+            names = {"nir_workflow"}
+            if stage == "completed":
+                from deerflow.community.nir.workflow import registration_can_be_retried, require_user_approval
+
+                if registration_can_be_retried(workflow):
+                    from types import SimpleNamespace
+
+                    try:
+                        require_user_approval(SimpleNamespace(state={**request.state, "messages": request.messages}), workflow)
+                    except NIRWorkflowError:
+                        pass
+                    else:
+                        names.add("nir_register_model")
+        elif stage == "approved":
+            names = {"nir_workflow", "nir_register_model"}
+        elif workflow.get("active_decision_id"):
+            names = {"nir_execute_decision"}
+        elif context:
+            names = {"nir_submit_decision", "nir_decision_history"}
+        else:
+            names = {"nir_decision_context"}
+        if workflow.get("autonomous_delivery") and not waiting_for_user(workflow) and stage not in {"blocked", "completed", "registered"}:
+            names.add("ask_clarification")
+        tools = []
+        for item in request.tools:
+            name = getattr(item, "name", None)
+            if name not in names:
+                continue
+            schema = None
+            if name == "nir_submit_decision" and context:
+                schema = bound_tool_schema(context)
+            elif name == "nir_workflow" and workflow.get("autonomous_delivery"):
+                if not workflow.get("search_session_id") and workflow.get("missing_inputs"):
+                    fields = {"action", "data_path", "domain", "analyte", "unit", "validation_goal"}
+                    properties = {key: value for key, value in item.args.items() if key in fields}
+                    properties["action"] = {"type": "string", "enum": ["status", "set_requirements"]}
+                    schema = {"type": "object", "properties": properties, "required": ["action"], "additionalProperties": False}
+                else:
+                    actions = ["status", "approve", "reject"] if stage == "review" else ["status", "complete"] if stage in {"approved", "registered"} else ["status"]
+                    from deerflow.community.nir.workflow import registration_can_be_retried
+
+                    if registration_can_be_retried(workflow):
+                        actions = ["status", "approve"]
+                    schema = {"type": "object", "properties": {"action": {"type": "string", "enum": actions}, "notes": {"type": "string"}}, "required": ["action"], "additionalProperties": False}
+            elif name == "nir_workflow" and not workflow.get("autonomous_delivery"):
+                allowed = {
+                    "action",
+                    "task_type",
+                    "data_path",
+                    "analyte",
+                    "unit",
+                    "domain",
+                    "validation_goal",
+                    "search_protocol",
+                    "decision_strategy",
+                    "autonomous_rounds",
+                    "autonomous_delivery",
+                    "budget_profile",
+                    "task_budget",
+                    "model_constraint",
+                    "pipeline_constraint",
+                }
+                properties = {key: value for key, value in item.args.items() if key in allowed}
+                constants = {
+                    "action": "start",
+                    "task_type": "calibration",
+                    "validation_goal": "internal_holdout",
+                    "search_protocol": "sealed_holdout",
+                    "decision_strategy": "llm_autonomous",
+                    "autonomous_rounds": True,
+                    "autonomous_delivery": True,
+                }
+                for key, value in constants.items():
+                    properties[key] = {"const": value, "type": "boolean" if isinstance(value, bool) else "string"}
+                if web:
+                    for key in ("budget_profile", "task_budget"):
+                        properties[key] = {"const": web[key], "type": "string"}
+                schema = {"type": "object", "properties": properties, "required": [*constants, "data_path", "analyte", "unit", "domain"], "additionalProperties": False}
+            tools.append(item.model_copy(update={"args_schema": schema}) if schema else item)
+        messages = request.messages
+        if context and any(item.name == "nir_submit_decision" for item in tools):
+            from deerflow.community.nir.decision_provider import context_message_view
+
+            messages = list(messages)
+            for index, message in enumerate(messages):
+                if isinstance(message, ToolMessage) and message.name == "nir_decision_context":
+                    try:
+                        if json.loads(message.content).get("context_id") == context["context_id"]:
+                            messages[index] = context_message_view(message, context)
+                    except (TypeError, ValueError):
+                        pass
+        from deerflow.community.nir.decision_provider import autonomous_skill_message_view
+
+        messages = [autonomous_skill_message_view(message) for message in messages]
+        return request.override(tools=tools, messages=messages)
+
+    @staticmethod
+    def _with_delivery_state(request):
+        workflow = request.state.get("nir_workflow") or {}
+        if not workflow.get("autonomous_delivery"):
+            return request
+        from langchain_core.messages import SystemMessage
+
+        view = {key: workflow.get(key) for key in ("stage", "search_session_id", "decision_context_id", "active_decision_id", "retained_experiment_id", "stop_source", "user_question")}
+        view["required_workflow_action"] = required_nir_workflow_action(workflow)
+        from deerflow.community.nir.workflow import registration_can_be_retried
+
+        view["registration_retry_available"] = registration_can_be_retried(workflow)
+        instruction = (
+            "\n<current_sealed_workflow>" + json.dumps(view) + "</current_sealed_workflow>\n"
+            "This is the current authoritative process state. Do not repeat preparation after a session is bound. "
+            "Use the current context to submit your own decision; this state does not select a model or optimization action."
+            " Write user-facing answers for ordinary Chinese-speaking users: begin with whether the task finished, the result and one useful next step. "
+            "Default to a short Chinese answer. Explain R² as 越接近 1 越好 and RMSE as 越小越好, rounding displayed metrics to four decimal places. "
+            "For internal holdout results, explain: 本次测试使用从这份数据中单独留出的样本，尚未用另外采集的数据验证。 "
+            "Keep protocol names, hashes, internal stages, evidence/quality gates, freezing, raw tool names and experiment ledgers in the report; show technical details only when the user asks. "
+            "Say saved to the model library only after the trusted model_library outcome confirms saved; approval and registration alone do not confirm library storage."
+            " Measured quality thresholds do not prevent library storage when the latest genuine user reply explicitly agrees to save. "
+            "After that consent, approve and register the exact finalized artifact, preserving failed quality assessments and reporting 未达质量门槛，已由用户确认保存. "
+            "Scientific validity, artifact integrity, ownership and validation protocol checks remain mandatory. "
+            "If registration_retry_available is true, a fresh explicit save reply permits nir_workflow(action='approve') and retrying registration of the existing artifact; never retrain or reopen Test to save it."
+            " You may instead call nir_register_model directly with the exact current evidence paths: the runtime records that same fresh genuine approval before registration."
+            " Ask the user only when their input is necessary, using ask_clarification. Once you ask a question or offer a choice, wait for their reply; never ask and execute a choice in the same turn. "
+            "A new reply does not approve registration or select a model automatically. If the reply does not answer the pending question, clarify again rather than choose for the user."
+        )
+        if (workflow.get("delivery_policy") or {}).get("automatic_delivery"):
+            instruction += (
+                " Cumulative tokens are statistics only. After your legal STOP/RETAIN and named successful experiment, the server automatically freezes, evaluates Test once and publishes deterministic reports. "
+                "Do not call freeze/finalize or request more model narration for delivery."
+            )
+        original = message_content_to_text(request.system_message.content) if request.system_message else ""
+        return request.override(system_message=SystemMessage(content=original + instruction))
+
+    @staticmethod
+    def _prepare_budget_call(request):
+        workflow = request.state.get("nir_workflow") or {}
+        from deerflow.community.nir.web_entry import web_request
+
+        web = web_request(getattr(getattr(request, "runtime", None), "context", None))
+        from deerflow.community.nir.web_entry import unified_entry
+
+        attempted_unified = unified_entry(getattr(getattr(request, "runtime", None), "context", None)) and any(
+            isinstance(message, AIMessage) and any(call["name"] == "nir_workflow" and call["args"].get("action") == "start" and call["args"].get("task_type") in {"calibration", "analysis"} for call in message.tool_calls)
+            for message in request.messages
+        )
+        requested = any(_user_task_message(message) and _delivery_requested(get_original_user_content_text(message.content, message.additional_kwargs)) for message in request.messages)
+        if unified_entry(getattr(getattr(request, "runtime", None), "context", None)):
+            requested = False
+        if not workflow.get("autonomous_delivery") and not requested and not web and not attempted_unified:
+            return request, None
+        from types import SimpleNamespace
+
+        from langgraph.config import get_config
+
+        from deerflow.community.nir.dataset_session import SearchSessionStore
+        from deerflow.community.nir.decision_budget import reserve_call
+        from deerflow.community.nir.process import runtime_store
+
+        search = SearchSessionStore(runtime_store(SimpleNamespace(config=get_config(), context=request.runtime.context)))
+        sid = workflow.get("search_session_id")
+        if sid:
+            with search.process._connection() as db:
+                session = search._session(db, sid)
+            if session.get("export"):
+                return request, None  # Existing approval dialogue uses normal runtime limits.
+        # Conservative byte-based admission estimate includes tool schemas. It is
+        # explicitly not an exact tokenizer or a guarantee about provider billing.
+        estimate = NIRWorkflowMiddleware._admission_estimate(request)
+        if not sid:
+            from deerflow.community.nir.decision_budget import PROFILES, SERVER_DEFAULTS, reserve_intake_call
+
+            policy = workflow.get("delivery_policy") or (web or {}).get("delivery_policy")
+            if not policy and attempted_unified:
+                from deerflow.community.nir.web_entry import unified_policy
+
+                policy = unified_policy()
+            if not policy:
+                import os
+
+                policy = {key: min(value, int(os.environ.get("NIR_AUTONOMOUS_" + key.upper(), SERVER_DEFAULTS[key]))) for key, value in PROFILES["development"].items()}
+            try:
+                initial_receipts = None
+                if policy.get("profile") == "unified":
+                    with search.process._connection() as db:
+                        initial_receipts = [json.loads(row[0]) for row in db.execute("SELECT payload FROM model_issued_calls WHERE tool='__model_response__'")]
+                    run_id = (request.runtime.context or {}).get("run_id")
+                    initial_receipts = [receipt for receipt in initial_receipts if receipt.get("agent_run_id") == run_id and not receipt.get("intake_lease_id") and not receipt.get("session_id")]
+                lease = reserve_intake_call(search.process, policy, estimate, initial_receipts=initial_receipts)
+            except ValueError as exc:
+                return request, ModelResponse(
+                    result=[
+                        AIMessage(
+                            content="任务准备阶段的资源或安全额度已关闭；未训练模型、未使用 Test。原因：" + str(exc),
+                            additional_kwargs={"nir_program_termination": {"stage": "blocked", "stop_source": "budget" if "budget:" in str(exc) else "safety", "reason": str(exc)}},
+                        )
+                    ]
+                )
+            settings = dict(request.model_settings)
+            settings["max_tokens"] = min(settings.get("max_tokens") or getattr(request.model, "max_tokens", None) or policy["max_output_tokens"], policy["max_output_tokens"])
+            return request.override(model_settings=settings), (search.process, lease)
+        try:
+            lease = reserve_call(search, sid, estimate, defer_finalization=True)
+            if lease is None:
+                # Admission closed search after the old feedback was displayed.
+                # Rebuild the provider's state/tools before spending a final call;
+                # do not allow an old TUNE/EXPLORE to consume the RETAIN reserve.
+                updated = {**workflow, "stage": "budget_exhausted", "stop_source": "budget", "decision_context_id": None, "active_decision_id": None, "next_action": "read_final_selection_context"}
+                request = request.override(state={**request.state, "nir_workflow": updated})
+                request = NIRWorkflowMiddleware._compact_decision_messages(request)
+                request = NIRWorkflowMiddleware._with_delivery_state(request)
+                from deerflow.community.nir.decision_tools import nir_decision_context_tool
+
+                request = request.override(tools=[nir_decision_context_tool])
+                estimate = NIRWorkflowMiddleware._admission_estimate(request)
+                lease = reserve_call(search, sid, estimate)
+        except ValueError as exc:
+            with search.process._connection() as db:
+                current = search._session(db, sid)
+            return request, ModelResponse(
+                result=[
+                    AIMessage(
+                        content="资源或安全约束已关闭当前建模流程；没有自动选择模型或重新使用 Test。原因：" + str(exc),
+                        additional_kwargs={"nir_program_termination": {"stage": current["stage"], "stop_source": current.get("stop_source", "safety"), "reason": str(exc)}},
+                    )
+                ]
+            )
+        settings = dict(request.model_settings)
+        settings["max_tokens"] = min(settings.get("max_tokens") or getattr(request.model, "max_tokens", None) or session["delivery_policy"]["max_output_tokens"], session["delivery_policy"]["max_output_tokens"])
+        return request.override(model_settings=settings), (search, sid, lease)
+
+    @staticmethod
+    def _finish_budget_call(binding, response, seconds, *, failed=False, failure_reason=None):
+        if binding is None:
+            return
+        from deerflow.community.nir.decision_budget import finish_call, finish_intake_call
+
+        messages = getattr(response, "result", [response]) if response else []
+        usage = next((message.usage_metadata for message in messages if isinstance(message, AIMessage) and message.usage_metadata), None)
+        finish = finish_intake_call if len(binding) == 2 else finish_call
+        finish(*binding, usage, seconds, failed=failed, **({"failure_reason": failure_reason} if len(binding) == 3 else {}))
+
+    @staticmethod
+    def _capture_model_calls(request, response, elapsed_seconds=None):
+        workflow = request.state.get("nir_workflow") or {}
+        response_messages = getattr(response, "result", [response])
+        start_call = next(
+            (call for message in response_messages if isinstance(message, AIMessage) for call in message.tool_calls if call["name"] == "nir_workflow" and call["args"].get("action") == "start"),
+            None,
+        )
+        if workflow.get("decision_strategy") != "llm_autonomous" and not start_call:
+            return
+        from types import SimpleNamespace
+
+        from langgraph.config import get_config
+
+        from deerflow.community.nir.decision_origin import record_model_response
+        from deerflow.community.nir.process import runtime_store
+
+        config = get_config()
+        runtime = SimpleNamespace(state=request.state, context=request.runtime.context, config=config)
+        context = request.runtime.context
+        process = runtime_store(runtime)
+        if process is None:
+            return
+        from deerflow.community.nir.decision_budget import INTAKE_ID
+
+        with process._connection() as db:
+            row = db.execute("SELECT payload FROM model_issued_calls WHERE id=?", (INTAKE_ID,)).fetchone()
+        intake_lease = (json.loads(row[0])["budget"].get("inflight") or {}) if row else {}
+        record_model_response(
+            process,
+            request.model,
+            response_messages,
+            run_id=context.get("run_id") if isinstance(context, dict) else config.get("metadata", {}).get("run_id"),
+            session_id=workflow.get("search_session_id"),
+            elapsed_seconds=elapsed_seconds,
+            project_id=workflow.get("project_id") if workflow.get("autonomous_delivery") else None,
+            workflow_start_call_id=workflow.get("workflow_start_call_id") or (start_call["id"] if start_call else None),
+            estimated_tokens=NIRWorkflowMiddleware._admission_estimate(request),
+            request_profile=NIRWorkflowMiddleware._request_cost_profile(request),
+            intake_lease_id=intake_lease.get("id"),
+        )
+
+    @override
+    def wrap_model_call(self, request: ModelRequest, handler):
+        workflow = request.state.get("nir_workflow") or {}
+        if waiting_for_user(workflow):
+            return ModelResponse(result=[AIMessage(content=waiting_message(workflow), id="nir-waiting:" + str(workflow["user_question"]["message_id"]), additional_kwargs={"nir_waiting_for_user": True})])
+        if workflow.get("runtime_termination"):
+            return ModelResponse(result=[AIMessage(content=render_grounded_nir_response(workflow), additional_kwargs={"nir_runtime_stopped": True})])
+        completed = self._deterministic_delivery_response(request)
+        if completed is not None:
+            return completed
+        request = self._with_unified_intake(request)
+        request = self._without_autonomous_memory(request)
+        request = self._compact_decision_messages(request)
+        request = self._with_delivery_state(request)
+        request = self._with_delivery_contract(request)
+        request, binding = self._prepare_budget_call(request)
+        if isinstance(binding, ModelResponse):
+            return binding
+        import time
+
+        started = time.monotonic()
+        try:
+            response = handler(request)
+        except BaseException as exc:
+            self._finish_budget_call(binding, None, time.monotonic() - started, failed=True, failure_reason={"exception_type": type(exc).__name__, "http_status": getattr(exc, "status_code", None)})
+            raise
+        self._capture_model_calls(request, response, time.monotonic() - started)
+        self._finish_budget_call(binding, response, time.monotonic() - started)
+        return response
+
+    @override
+    async def awrap_model_call(self, request: ModelRequest, handler):
+        workflow = request.state.get("nir_workflow") or {}
+        if waiting_for_user(workflow):
+            return ModelResponse(result=[AIMessage(content=waiting_message(workflow), id="nir-waiting:" + str(workflow["user_question"]["message_id"]), additional_kwargs={"nir_waiting_for_user": True})])
+        if workflow.get("runtime_termination"):
+            return ModelResponse(result=[AIMessage(content=render_grounded_nir_response(workflow), additional_kwargs={"nir_runtime_stopped": True})])
+        completed = self._deterministic_delivery_response(request)
+        if completed is not None:
+            return completed
+        request = self._with_unified_intake(request)
+        request = self._without_autonomous_memory(request)
+        request = self._compact_decision_messages(request)
+        request = self._with_delivery_state(request)
+        request = self._with_delivery_contract(request)
+        request, binding = await asyncio.to_thread(self._prepare_budget_call, request)
+        if isinstance(binding, ModelResponse):
+            return binding
+        import time
+
+        started = time.monotonic()
+        try:
+            response = await handler(request)
+        except BaseException as exc:
+            await asyncio.shield(asyncio.to_thread(self._finish_budget_call, binding, None, time.monotonic() - started, failed=True, failure_reason={"exception_type": type(exc).__name__, "http_status": getattr(exc, "status_code", None)}))
+            raise
+        await asyncio.to_thread(self._capture_model_calls, request, response, time.monotonic() - started)
+        await asyncio.to_thread(self._finish_budget_call, binding, response, time.monotonic() - started)
+        return response
+
+    @staticmethod
+    def _compact_decision_messages(request):
+        if not (request.state.get("nir_workflow") or {}).get("autonomous_rounds"):
+            return request
+        from deerflow.community.nir.decision_provider import malformed_call_message_view
+
+        messages = malformed_call_message_view(request.messages)
+        # Prune only complete governed call/response pairs preceding the newest
+        # successful context. The checkpoint, immutable decisions and receipts
+        # remain untouched. Never manufacture a history summary.
+        context_indexes = []
+        for index, message in enumerate(messages):
+            if isinstance(message, ToolMessage) and message.name == "nir_decision_context":
+                try:
+                    if json.loads(message.content).get("context_id"):
+                        context_indexes.append(index)
+                except (TypeError, ValueError):
+                    pass
+        wf = request.state.get("nir_workflow") or {}
+        closing = wf.get("autonomous_delivery") and (
+            wf.get("stage") in {"awaiting_final_confirmation", "frozen", "review", "approved", "registered", "completed"} or wf.get("stage") == "budget_exhausted" and not wf.get("decision_context_id")
+        )
+        if not context_indexes and not closing:
+            return request.override(messages=messages) if messages is not request.messages else request
+        boundary = len(messages) if closing else context_indexes[-1]
+        newest_call = None if closing else messages[boundary].tool_call_id
+        governed = {"nir_prepare_search", "nir_decision_context", "nir_submit_decision", "nir_execute_decision", "nir_decision_history"}
+        if (request.state.get("nir_workflow") or {}).get("autonomous_delivery"):
+            governed.remove("nir_prepare_search")  # Keep the immutable session-binding receipt.
+        terminal_calls = set()
+        if closing:
+            for message in messages:
+                if isinstance(message, ToolMessage) and message.name == "nir_submit_decision":
+                    try:
+                        if json.loads(message.content).get("action") in {"STOP", "RETAIN"}:
+                            terminal_calls.add(message.tool_call_id)
+                    except (TypeError, ValueError):
+                        pass
+        completed = {message.tool_call_id for message in messages[:boundary] if isinstance(message, ToolMessage)}
+        removable = set()
+        discarded = set()
+        for index, message in enumerate(messages[:boundary]):
+            if isinstance(message, AIMessage) and message.tool_calls and all(call["name"] in governed and call["id"] in completed and call["id"] != newest_call and call["id"] not in terminal_calls for call in message.tool_calls):
+                discarded.add(index)
+                removable.update(call["id"] for call in message.tool_calls)
+        retained = [message for index, message in enumerate(messages) if index not in discarded and not (isinstance(message, ToolMessage) and message.tool_call_id in removable)]
+        return request.override(messages=retained)
+
+    @staticmethod
+    def _without_autonomous_memory(request):
+        from deerflow.community.nir.web_entry import web_request
+
+        active = (request.state.get("nir_workflow") or {}).get("decision_strategy") == "llm_autonomous"
+        active = active or bool(web_request(getattr(getattr(request, "runtime", None), "context", None)))
+        requested = any(
+            _user_task_message(message) and re.search(r"llm_autonomous|LLM.{0,15}自主|自主.{0,12}(?:首轮|初始)|autonomous initial", get_original_user_content_text(message.content, message.additional_kwargs), re.I)
+            for message in request.messages
+        )
+        if active or requested:
+            messages = [message for message in request.messages if not (message.additional_kwargs.get("dynamic_context_reminder") and "<memory>" in message_content_to_text(message.content))]
+            return request.override(messages=messages)
+        return request
 
     @override
     def wrap_tool_call(
@@ -1177,11 +1927,32 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
+        request = _bind_registration_retry(request)
         denied = _authorize(request)
         if denied is not None:
             return _record_observation(request, denied)
         bound_request = _bind_reflection_request(request)
-        return _record_observation(bound_request, _advance(bound_request, handler(bound_request)))
+        execution = self._start_process(bound_request)
+        token = bind_execution(execution)
+        try:
+            result = _record_observation(bound_request, _advance(bound_request, handler(bound_request)))
+            context = _registration_save_context(bound_request, result)
+            if context is not None:
+                workflow, payload = context
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    outcome = asyncio.run(save_registered_model(bound_request.runtime, workflow, payload))
+                else:
+                    outcome = failed_model_save("async_runtime_required")
+                result = _with_model_library_save(result, workflow, payload, outcome)
+            self._finish_process(bound_request, execution, result)
+            return result
+        except BaseException as exc:
+            self._finish_process(bound_request, execution, None, status="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed" if isinstance(exc, Exception) else "interrupted")
+            raise
+        finally:
+            reset_execution(token)
 
     @override
     async def awrap_tool_call(
@@ -1189,27 +1960,125 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        request = _bind_registration_retry(request)
         denied = _authorize(request)
         if denied is not None:
             return _record_observation(request, denied)
         bound_request = _bind_reflection_request(request)
-        return _record_observation(
-            bound_request,
-            _advance(bound_request, await handler(bound_request)),
-        )
+        execution = await asyncio.to_thread(self._start_process, bound_request)
+        token = bind_execution(execution)
+        try:
+            result = _record_observation(bound_request, _advance(bound_request, await handler(bound_request)))
+            context = _registration_save_context(bound_request, result)
+            if context is not None:
+                workflow, payload = context
+                outcome = await save_registered_model(bound_request.runtime, workflow, payload)
+                result = _with_model_library_save(result, workflow, payload, outcome)
+            await asyncio.to_thread(self._finish_process, bound_request, execution, result)
+            return result
+        except BaseException as exc:
+            status = "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed" if isinstance(exc, Exception) else "interrupted"
+            await asyncio.shield(asyncio.to_thread(self._finish_process, bound_request, execution, None, status=status))
+            raise
+        finally:
+            reset_execution(token)
 
-    def _guard_final_response(self, state: AgentState) -> dict | None:
+    @staticmethod
+    def _start_process(request):
+        try:
+            return start_execution(request.runtime, str(request.tool_call.get("name")), str(request.tool_call.get("id")))
+        except Exception:
+            logger.exception("Unable to record NIR process start")
+            return None
+
+    @staticmethod
+    def _finish_process(request, execution, result, *, status=None):
+        payload = _success_payload(result) if result is not None else None
+        workflow = _state_from_request(request).get("nir_workflow") or {}
+        if isinstance(result, Command) and isinstance(result.update, Mapping):
+            workflow = result.update.get("nir_workflow") or workflow
+        from deerflow.community.nir.web_entry import persist_unified_workflow
+
+        persist_unified_workflow(request.runtime, workflow)
+        finish_execution(request.runtime, execution, str(request.tool_call.get("name")), str(request.tool_call.get("id")), payload, workflow, status or ("succeeded" if payload else "failed"))
+
+    def _guard_final_response(self, state: AgentState, runtime=None) -> dict | None:
         messages = state.get("messages") or []
         if not messages or not isinstance(messages[-1], AIMessage):
             return None
         message = messages[-1]
-        if message.tool_calls:
-            return None
+        termination = message.additional_kwargs.get("nir_program_termination")
+        if termination and isinstance(state.get("nir_workflow"), dict):
+            workflow = state["nir_workflow"]
+            stopped = {
+                **workflow,
+                "stage": "blocked",
+                "next_action": "report_safety_termination",
+                "stop_source": termination["stop_source"],
+                "runtime_termination": {"source": termination["stop_source"], "reason": termination.get("reason")},
+                "revision": workflow["revision"] + 1,
+            }
+            self._persist_question(state, runtime, stopped)
+            return {"nir_workflow": stopped, "messages": [message.model_copy(update={"content": render_grounded_nir_response(stopped)})], "jump_to": "end"}
         workflow = state.get("nir_workflow")
         if not isinstance(workflow, dict):
             return None
+        if waiting_for_user(workflow):
+            return {"jump_to": "end"}
+        termination = message.additional_kwargs.get("agent_termination") or {}
+        if workflow.get("autonomous_delivery") and workflow.get("stage") not in {"blocked", "completed"} and not message.invalid_tool_calls:
+            ask = next((call for call in message.tool_calls or termination.get("tool_calls", []) if call["name"] == "ask_clarification"), None)
+            text = message_content_to_text(message.content)
+            if termination.get("reason"):
+                text = text.replace(termination["reason"], "").strip()
+            question = str(ask["args"].get("question") or "").strip() if ask else question_for_user(text)
+            if question:
+                paused = begin_user_wait(workflow, messages, question, str(message.id), tool_call_id=ask["id"] if ask else None)
+                if not validate_nir_response(waiting_message(paused), paused).passed:
+                    paused["user_question"]["question"] = (
+                        "是否将本次已完成的模型保存到模型库？\n\n请回复“同意保存到模型库”或“暂不保存”。" if workflow.get("stage") == "review" and workflow.get("approval_status") == "pending" else "请告诉我你希望下一步如何处理。"
+                    )
+                    paused["user_question"]["sanitized_display"] = True
+                if ask and not validate_nir_response(question + "\n" + str(ask["args"].get("options") or []), paused).passed:
+                    paused["user_question"]["sanitized_display"] = True
+                self._persist_question(state, runtime, paused)
+                additional = {key: value for key, value in message.additional_kwargs.items() if key != "tool_calls"}
+                additional["nir_waiting_for_user"] = True
+                replacement = message.model_copy(update={"content": "" if ask else waiting_message(paused), "tool_calls": [ask] if ask else [], "additional_kwargs": additional})
+                return {"nir_workflow": paused, "messages": [replacement], **({} if ask else {"jump_to": "end"})}
+        if termination and workflow.get("autonomous_delivery"):
+            # A runtime stop is authoritative. Never send it through the
+            # unfinished-workflow retry path or choose a model on its behalf.
+            reason = str(termination["source"]) + "_limit"
+            stopped = {**workflow, "stage": "blocked", "next_action": "report_safety_termination", "revision": workflow["revision"] + 1, "runtime_termination": termination, "stop_source": workflow.get("stop_source") or "tool_failure"}
+            if workflow.get("search_session_id") and runtime is not None:
+                from types import SimpleNamespace
+
+                from langgraph.config import get_config
+
+                from deerflow.community.nir.decision_budget import close_incomplete_workflow
+                from deerflow.community.nir.search_tools import _service
+
+                config = getattr(runtime, "config", None) or get_config()
+                trusted = SimpleNamespace(state=state, context=getattr(runtime, "context", None), config=config)
+                session = close_incomplete_workflow(_service(trusted), workflow["search_session_id"], invalid_json=False, reason=reason)
+                stopped["stop_source"] = session.get("stop_source")
+            self._persist_question(state, runtime, stopped)
+            replacement = message.model_copy(update={"content": render_grounded_nir_response(stopped), "tool_calls": [], "additional_kwargs": {**message.additional_kwargs, "nir_runtime_stopped": True}})
+            return {"nir_workflow": stopped, "messages": [replacement], "jump_to": "end"}
+        if message.tool_calls:
+            return None
         required_action = required_nir_workflow_action(workflow)
         if required_action:
+            invalid_calls = message.invalid_tool_calls if workflow.get("decision_strategy") == "llm_autonomous" else []
+            syntax_errors = []
+            for call in invalid_calls:
+                try:
+                    json.loads(call.get("args") or "")
+                except (ValueError, TypeError) as exc:
+                    syntax_errors.append(f"{call.get('name') or 'tool'}: {str(exc)[:200]}")
+                else:
+                    syntax_errors.append("Invalid tool envelope; arguments must be a JSON object under proposal.")
             violation = f"workflow_incomplete:{required_action}"
             guarded_workflow = record_response_guard(
                 workflow,
@@ -1223,10 +2092,18 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
                     content=_workflow_completion_reminder(
                         required_action,
                         workflow,
+                    )
+                    + (
+                        " Your attempted tool call was NOT executed because its JSON could not be parsed: " + "; ".join(syntax_errors[:3]) + ". Resubmit valid JSON to the current tool schema; do not narrate a promise to resubmit. "
+                        "Use concise observations and comparisons, omit optional defaults, keep expected_outcome at proposal root, "
+                        "and close all objects. The output cap is unchanged; keep scientific reasons brief. "
+                        if syntax_errors
+                        else ""
                     ),
                     additional_kwargs={
                         "hide_from_ui": True,
                         "nir_required_action": required_action,
+                        **({"nir_invalid_tool_call": True} if invalid_calls else {}),
                     },
                 )
                 logger.warning(
@@ -1239,7 +2116,9 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
                     },
                 )
                 return {
-                    "messages": [reminder],
+                    # Retain the raw provider output for audit and repair, but
+                    # do not show an unfinished draft as a final chat answer.
+                    "messages": [message.model_copy(update={"additional_kwargs": {**message.additional_kwargs, "hide_from_ui": True, "nir_unfinished_response": True}}), reminder],
                     "nir_workflow": guarded_workflow,
                     "jump_to": "model",
                 }
@@ -1248,6 +2127,19 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
                 guarded_workflow,
                 required_action=required_action,
             )
+            if workflow.get("autonomous_delivery") and workflow.get("search_session_id") and runtime is not None:
+                from types import SimpleNamespace
+
+                from langgraph.config import get_config
+
+                from deerflow.community.nir.decision_budget import close_incomplete_workflow
+                from deerflow.community.nir.search_tools import _service
+                from deerflow.community.nir.web_entry import persist_unified_workflow
+
+                trusted = SimpleNamespace(state=state, context=getattr(runtime, "context", None), config=get_config())
+                session = close_incomplete_workflow(_service(trusted), workflow["search_session_id"], invalid_json=bool(invalid_calls))
+                blocked_workflow.update(stop_source=session.get("stop_source"), continuation_failure={"required_action": required_action, "invalid_json": bool(invalid_calls), "reason": "workflow_continuation_limit"})
+                persist_unified_workflow(trusted, blocked_workflow)
             additional_kwargs = dict(message.additional_kwargs or {})
             additional_kwargs["nir_response_grounding"] = {
                 "passed": False,
@@ -1306,12 +2198,22 @@ class NIRWorkflowMiddleware(AgentMiddleware[AgentState]):
             "nir_workflow": guarded_workflow,
         }
 
-    @hook_config(can_jump_to=["model"])
+    @hook_config(can_jump_to=["model", "end"])
     @override
     def after_model(self, state: AgentState, runtime: Runtime) -> dict | None:  # noqa: ARG002
-        return self._guard_final_response(state)
+        return self._guard_final_response(state, runtime)
 
-    @hook_config(can_jump_to=["model"])
+    @hook_config(can_jump_to=["model", "end"])
     @override
     async def aafter_model(self, state: AgentState, runtime: Runtime) -> dict | None:  # noqa: ARG002
-        return self._guard_final_response(state)
+        return self._guard_final_response(state, runtime)
+
+    @staticmethod
+    def _admission_estimate(request):
+        return NIRWorkflowMiddleware._request_cost_profile(request)["input_utf8_bytes"]
+
+    @staticmethod
+    def _request_cost_profile(request):
+        from deerflow.community.nir.decision_provider import request_cost_profile
+
+        return request_cost_profile(request)

@@ -1,0 +1,204 @@
+{
+  "evidence_kind": "paired_local_input_size_reference_not_provider_usage",
+  "provider_calls": 0,
+  "test_evaluations": 0,
+  "contexts_source": "persisted offline real Corn Cal/Val Fake decision reference",
+  "skill_source_sha256": "dbadcaf02084f70636c871bb953089e6dc3a9f9a5a9cf94d6d9d319399b7433b",
+  "comparisons": [
+    {
+      "context_id": "ctx_17bec889d5ddc869c00df06a2b59e243",
+      "context_sha256": "fc6a5d65452bd3ffc9d419353be1f644f7487b6fe1593dc34b674f1d9acbb578",
+      "phase": "initial",
+      "round_index": 0,
+      "before": {
+        "schema_version": 1,
+        "measurement": "utf8_bytes_proxy_not_tokenizer",
+        "input_utf8_bytes": 151082,
+        "components_bytes": {
+          "messages": 100542,
+          "system": 35285,
+          "tools": 15218,
+          "serialization_overhead": 37
+        },
+        "message_groups_bytes": {
+          "task_messages": 56992,
+          "decision_context": 43287,
+          "tool_results_and_corrections": 0,
+          "assistant_history": 255
+        },
+        "context_subsets_non_additive": [
+          {
+            "context_id": "ctx_17bec889d5ddc869c00df06a2b59e243",
+            "phase": "initial",
+            "knowledge_bytes": 5310,
+            "history_bytes": 316,
+            "schema_bytes": 12232
+          }
+        ],
+        "tool_count": 2,
+        "message_count": 4,
+        "actual_tokens_source": "provider_usage_metadata_separately_recorded"
+      },
+      "after": {
+        "schema_version": 1,
+        "measurement": "utf8_bytes_proxy_not_tokenizer",
+        "input_utf8_bytes": 88672,
+        "components_bytes": {
+          "messages": 38132,
+          "system": 35285,
+          "tools": 15218,
+          "serialization_overhead": 37
+        },
+        "message_groups_bytes": {
+          "task_messages": 10809,
+          "decision_context": 27060,
+          "tool_results_and_corrections": 0,
+          "assistant_history": 255
+        },
+        "context_subsets_non_additive": [
+          {
+            "context_id": "ctx_17bec889d5ddc869c00df06a2b59e243",
+            "phase": "initial",
+            "knowledge_bytes": 5310,
+            "history_bytes": 316,
+            "schema_bytes": 0
+          }
+        ],
+        "tool_count": 2,
+        "message_count": 4,
+        "actual_tokens_source": "provider_usage_metadata_separately_recorded"
+      },
+      "saved_bytes": 62410
+    },
+    {
+      "context_id": "ctx_ff3613b2d4b50f037267136c35854d82",
+      "context_sha256": "e0a7310043cd2e047dd3e0489d2c86d8a0893ea2c2d49da8d9604071417e1041",
+      "phase": "feedback",
+      "round_index": 1,
+      "before": {
+        "schema_version": 1,
+        "measurement": "utf8_bytes_proxy_not_tokenizer",
+        "input_utf8_bytes": 156756,
+        "components_bytes": {
+          "messages": 105683,
+          "system": 35285,
+          "tools": 15751,
+          "serialization_overhead": 37
+        },
+        "message_groups_bytes": {
+          "task_messages": 56992,
+          "decision_context": 48428,
+          "tool_results_and_corrections": 0,
+          "assistant_history": 255
+        },
+        "context_subsets_non_additive": [
+          {
+            "context_id": "ctx_ff3613b2d4b50f037267136c35854d82",
+            "phase": "feedback",
+            "knowledge_bytes": 5310,
+            "history_bytes": 4968,
+            "schema_bytes": 12663
+          }
+        ],
+        "tool_count": 2,
+        "message_count": 4,
+        "actual_tokens_source": "provider_usage_metadata_separately_recorded"
+      },
+      "after": {
+        "schema_version": 1,
+        "measurement": "utf8_bytes_proxy_not_tokenizer",
+        "input_utf8_bytes": 94437,
+        "components_bytes": {
+          "messages": 43364,
+          "system": 35285,
+          "tools": 15751,
+          "serialization_overhead": 37
+        },
+        "message_groups_bytes": {
+          "task_messages": 10809,
+          "decision_context": 32292,
+          "tool_results_and_corrections": 0,
+          "assistant_history": 255
+        },
+        "context_subsets_non_additive": [
+          {
+            "context_id": "ctx_ff3613b2d4b50f037267136c35854d82",
+            "phase": "feedback",
+            "knowledge_bytes": 5310,
+            "history_bytes": 4968,
+            "schema_bytes": 0
+          }
+        ],
+        "tool_count": 2,
+        "message_count": 4,
+        "actual_tokens_source": "provider_usage_metadata_separately_recorded"
+      },
+      "saved_bytes": 62319
+    },
+    {
+      "context_id": "ctx_3bd092e55f35b57797c18db31e334bf0",
+      "context_sha256": "bb6f794ba049e7d4882dc7bc6529e149ba6c8178ed26b8c34c146ab020f67079",
+      "phase": "feedback",
+      "round_index": 2,
+      "before": {
+        "schema_version": 1,
+        "measurement": "utf8_bytes_proxy_not_tokenizer",
+        "input_utf8_bytes": 162346,
+        "components_bytes": {
+          "messages": 111171,
+          "system": 35285,
+          "tools": 15853,
+          "serialization_overhead": 37
+        },
+        "message_groups_bytes": {
+          "task_messages": 56992,
+          "decision_context": 53916,
+          "tool_results_and_corrections": 0,
+          "assistant_history": 255
+        },
+        "context_subsets_non_additive": [
+          {
+            "context_id": "ctx_3bd092e55f35b57797c18db31e334bf0",
+            "phase": "feedback",
+            "knowledge_bytes": 5310,
+            "history_bytes": 9953,
+            "schema_bytes": 12663
+          }
+        ],
+        "tool_count": 2,
+        "message_count": 4,
+        "actual_tokens_source": "provider_usage_metadata_separately_recorded"
+      },
+      "after": {
+        "schema_version": 1,
+        "measurement": "utf8_bytes_proxy_not_tokenizer",
+        "input_utf8_bytes": 99706,
+        "components_bytes": {
+          "messages": 48531,
+          "system": 35285,
+          "tools": 15853,
+          "serialization_overhead": 37
+        },
+        "message_groups_bytes": {
+          "task_messages": 10809,
+          "decision_context": 37459,
+          "tool_results_and_corrections": 0,
+          "assistant_history": 255
+        },
+        "context_subsets_non_additive": [
+          {
+            "context_id": "ctx_3bd092e55f35b57797c18db31e334bf0",
+            "phase": "feedback",
+            "knowledge_bytes": 5310,
+            "history_bytes": 9953,
+            "schema_bytes": 0
+          }
+        ],
+        "tool_count": 2,
+        "message_count": 4,
+        "actual_tokens_source": "provider_usage_metadata_separately_recorded"
+      },
+      "saved_bytes": 62640
+    }
+  ]
+}

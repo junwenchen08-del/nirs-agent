@@ -1,6 +1,8 @@
-# DeerFlow Frontend
+# ChemAgent Frontend
 
-Like the original DeerFlow 1.0, we would love to give the community a minimalistic and easy-to-use web interface with a more modern and flexible architecture.
+ChemAgent provides the spectroscopy workspace, dataset and model libraries, autonomous round explorer, reports and settings. Public names and project links are defined in `src/core/branding.ts`; localized copy lives in `src/core/i18n/locales/`. Shipped documentation and static orientation content describe ChemAgent only.
+
+On a modeling process page, the **Workspace** breadcrumb returns to that process's original conversation. It works after direct entry or refresh, with a localized return hint; other workspace pages retain their usual workspace link.
 
 ## Tech Stack
 

@@ -1,13 +1,8 @@
 "use client";
 
-import {
-  ActivityIcon,
-  CheckCircle2Icon,
-  DatabaseIcon,
-  FlaskConicalIcon,
-  ShieldCheckIcon,
-} from "lucide-react";
-import { useMemo } from "react";
+import { FlaskConicalIcon } from "lucide-react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 
 import {
   Sheet,
@@ -17,93 +12,33 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { useArtifacts } from "@/components/workspace/artifacts";
 import { useI18n } from "@/core/i18n/hooks";
-import { selectNIRWorkflowView } from "@/core/nir";
+import { selectNIRProcessView } from "@/core/nir";
+import { record, text } from "@/core/nir/autonomous";
 import { cn } from "@/lib/utils";
 
-interface NIRWorkflowPanelProps {
-  workflow: unknown;
-}
+import { AutonomousProcess } from "./autonomous-process";
+import { NIRProcessContent } from "./nir-process-content";
 
-function translated(
-  values: Record<string, string>,
-  key: string | null,
-  fallback: string,
-) {
-  return key ? (values[key] ?? key) : fallback;
-}
-
-function Section({
-  icon: Icon,
-  title,
-  children,
+export function NIRWorkflowPanel({
+  workflow,
+  threadId,
 }: {
-  icon: typeof ActivityIcon;
-  title: string;
-  children: React.ReactNode;
+  workflow: unknown;
+  threadId?: string;
 }) {
-  return (
-    <section className="border-border/70 bg-muted/20 rounded-xl border p-3">
-      <h3 className="text-muted-foreground mb-2 flex items-center gap-2 text-xs font-medium tracking-wide uppercase">
-        <Icon className="size-3.5" />
-        {title}
-      </h3>
-      {children}
-    </section>
-  );
-}
-
-function Definition({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-3 py-1 text-sm">
-      <dt className="text-muted-foreground truncate">{label}</dt>
-      <dd className="truncate text-right font-medium" title={value}>
-        {value}
-      </dd>
-    </div>
-  );
-}
-
-export function NIRWorkflowPanel({ workflow }: NIRWorkflowPanelProps) {
-  const { t } = useI18n();
-  const view = useMemo(() => selectNIRWorkflowView(workflow), [workflow]);
-  if (!view) {
-    return null;
-  }
-
-  const stage = translated(
-    t.nirWorkflow.stages,
-    view.stage,
-    t.nirWorkflow.notAvailable,
-  );
-  const task = translated(
-    t.nirWorkflow.taskTypes,
-    view.taskType,
-    t.nirWorkflow.notAvailable,
-  );
-  const validation = view.validationScope
-    ? translated(
-        t.nirWorkflow.validationScopes,
-        view.validationScope,
-        t.nirWorkflow.notAvailable,
-      )
-    : translated(
-        t.nirWorkflow.validationGoals,
-        view.validationGoal,
-        t.nirWorkflow.notAvailable,
-      );
-  const approval = translated(
-    t.nirWorkflow.approvals,
-    view.approvalStatus,
-    t.nirWorkflow.notAvailable,
-  );
-  const blocked = view.stage === "blocked";
+  const { t, locale } = useI18n();
+  const { artifacts, setOpen: setArtifactsOpen } = useArtifacts();
+  const [open, setOpen] = useState(false);
+  const view = useMemo(() => selectNIRProcessView(workflow), [workflow]);
+  if (!view) return null;
+  const blocked = view.base.stage === "blocked";
   const completed = ["approved", "registered", "completed"].includes(
-    view.stage,
+    view.base.stage,
   );
-
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <button
           type="button"
@@ -125,114 +60,45 @@ export function NIRWorkflowPanel({ workflow }: NIRWorkflowPanelProps) {
           />
         </button>
       </SheetTrigger>
-      <SheetContent className="w-[92vw] gap-0 sm:max-w-md">
+      <SheetContent className="w-[min(480px,100vw)] max-w-none gap-0 sm:max-w-[480px]">
         <SheetHeader className="border-b pr-12">
           <SheetTitle className="flex items-center gap-2">
             <FlaskConicalIcon className="size-5" />
-            {t.nirWorkflow.title}
+            {locale === "zh-CN" ? "建模进展" : "ChemAgent modeling process"}
           </SheetTitle>
           <SheetDescription>{t.nirWorkflow.description}</SheetDescription>
-        </SheetHeader>
-
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-          <Section icon={ActivityIcon} title={t.nirWorkflow.currentStage}>
-            <div className="flex items-center justify-between gap-3">
-              <span
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-sm font-semibold",
-                  blocked
-                    ? "bg-destructive/10 text-destructive"
-                    : completed
-                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                      : "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-                )}
+          {threadId &&
+            process.env.NEXT_PUBLIC_NIR_PROCESS_ENABLED !== "false" && (
+              <Link
+                href={`/workspace/nir/process/${encodeURIComponent(threadId)}`}
+                onClick={() => setOpen(false)}
+                className="bg-primary text-primary-foreground mt-2 inline-flex w-fit rounded-lg px-4 py-2 text-sm"
               >
-                {stage}
-              </span>
-              <span className="text-muted-foreground text-xs">
-                {t.nirWorkflow.attempt(view.attempt, view.maxAttempts)}
-              </span>
-            </div>
-            <dl className="mt-2 divide-y">
-              <Definition label={t.nirWorkflow.task} value={task} />
-              <Definition
-                label={t.nirWorkflow.revision}
-                value={String(view.revision)}
-              />
-              {view.nextAction && (
-                <Definition
-                  label={t.nirWorkflow.nextAction}
-                  value={view.nextAction}
-                />
-              )}
-            </dl>
-          </Section>
-
-          <Section icon={FlaskConicalIcon} title={t.nirWorkflow.method}>
-            <dl className="divide-y">
-              <Definition
-                label={t.nirWorkflow.method}
-                value={view.method ?? t.nirWorkflow.notAvailable}
-              />
-              <Definition
-                label={t.nirWorkflow.preprocessing}
-                value={
-                  view.preprocessing.length > 0
-                    ? view.preprocessing.join(" → ")
-                    : t.nirWorkflow.notAvailable
-                }
-              />
-            </dl>
-          </Section>
-
-          <Section icon={CheckCircle2Icon} title={t.nirWorkflow.metrics}>
-            {view.metrics.length > 0 ? (
-              <dl className="divide-y">
-                {view.metrics.map((metric) => (
-                  <Definition
-                    key={metric.key}
-                    label={t.nirWorkflow.metricLabels[metric.key] ?? metric.key}
-                    value={metric.value}
-                  />
-                ))}
-              </dl>
-            ) : (
-              <p className="text-muted-foreground text-sm">
-                {t.nirWorkflow.notAvailable}
-              </p>
+                {locale === "zh-CN"
+                  ? "查看完整建模过程"
+                  : "Explore full modeling process"}
+              </Link>
             )}
-          </Section>
-
-          <Section icon={ShieldCheckIcon} title={t.nirWorkflow.validation}>
-            <dl className="divide-y">
-              <Definition label={t.nirWorkflow.validation} value={validation} />
-              <Definition label={t.nirWorkflow.approval} value={approval} />
-            </dl>
-          </Section>
-
-          {view.datasetId && (
-            <Section icon={DatabaseIcon} title={t.nirWorkflow.source}>
-              <dl className="divide-y">
-                <Definition
-                  label={t.nirWorkflow.dataset}
-                  value={view.datasetId}
-                />
-                {view.datasetProfileId && (
-                  <Definition
-                    label={t.nirWorkflow.profile}
-                    value={view.datasetProfileId}
-                  />
-                )}
-                {view.datasetHashShort && (
-                  <Definition
-                    label={t.nirWorkflow.hash}
-                    value={`${view.datasetHashShort}…`}
-                  />
-                )}
-              </dl>
-            </Section>
-          )}
-        </div>
+        </SheetHeader>
+        {threadId && record(workflow).decision_strategy === "llm_autonomous" ? (
+          <AutonomousProcess
+            key={view.base.projectId}
+            threadId={threadId}
+            sessionId={text(record(workflow).search_session_id) || undefined}
+            workflow={workflow}
+            compact
+          />
+        ) : (
+          <NIRProcessContent
+            key={view.base.projectId}
+            view={view}
+            hasArtifacts={artifacts.length > 0}
+            onArtifacts={() => {
+              setOpen(false);
+              setArtifactsOpen(true);
+            }}
+          />
+        )}
       </SheetContent>
     </Sheet>
   );

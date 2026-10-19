@@ -65,6 +65,7 @@ from .knowledge import (
     _knowledge_search_mode,
     _search_knowledge_via_http,
     nir_search_knowledge_tool,
+    nir_search_method_knowledge_tool,
 )
 from .model_tools import nir_model_attach_tool, nir_model_get_tool, nir_model_list_tool, nir_model_promote_tool
 from .modeling import (
@@ -121,6 +122,7 @@ __all__ = [
     "nir_compare_tool",
     "nir_register_model_tool",
     "nir_search_knowledge_tool",
+    "nir_search_method_knowledge_tool",
     "nir_workflow_tool",
     # Helpers
     "_resolve",

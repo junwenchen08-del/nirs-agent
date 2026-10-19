@@ -13,6 +13,7 @@ import {
 } from "@/components/ai-elements/reasoning";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/core/i18n/hooks";
+import { messagesForReasoningVisibility } from "@/core/messages/reasoning-visibility";
 import {
   buildTokenDebugSteps,
   type TokenUsageInlineMode,
@@ -42,7 +43,6 @@ import { cn } from "@/lib/utils";
 
 import { ArtifactFileList } from "../artifacts/artifact-file-list";
 import { CopyButton } from "../copy-button";
-import { StreamingIndicator } from "../streaming-indicator";
 import { Tooltip } from "../tooltip";
 
 import { MarkdownContent } from "./markdown-content";
@@ -175,6 +175,7 @@ export function MessageList({
   isHistoryLoading,
   onRegenerateMessage,
   canRegenerate = false,
+  hideRawReasoning = false,
 }: {
   className?: string;
   threadId: string;
@@ -189,6 +190,7 @@ export function MessageList({
     supersededMessageIds: string[],
   ) => void | Promise<void>;
   canRegenerate?: boolean;
+  hideRawReasoning?: boolean;
 }) {
   const { t } = useI18n();
   const [turnStartTime, setTurnStartTime] = useState<number | null>(null);
@@ -200,7 +202,10 @@ export function MessageList({
     }
     prevIsLoading.current = thread.isLoading;
   }, [thread.isLoading]);
-  const messages = thread.messages;
+  const messages = useMemo(
+    () => messagesForReasoningVisibility(thread.messages, hideRawReasoning),
+    [thread.messages, hideRawReasoning],
+  );
   const groupedMessages = getMessageGroups(messages);
   const [regeneratingMessageId, setRegeneratingMessageId] = useState<
     string | null

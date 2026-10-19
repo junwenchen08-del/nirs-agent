@@ -25,10 +25,7 @@ SUBAGENT_TOOLS = [
 
 def _is_host_bash_tool(tool: object) -> bool:
     """Return True if the tool config represents a host-bash execution surface."""
-    group = getattr(tool, "group", None)
     use = getattr(tool, "use", None)
-    if group == "bash":
-        return True
     if use == "deerflow.sandbox.tools:bash_tool":
         return True
     return False

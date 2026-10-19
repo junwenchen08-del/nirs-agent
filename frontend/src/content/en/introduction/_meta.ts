@@ -1,18 +1,8 @@
 import type { MetaRecord } from "nextra";
 
 const meta: MetaRecord = {
-  index: {
-    title: "Introduction",
-  },
-  "why-deerflow": {
-    title: "Why DeerFlow",
-  },
-  "core-concepts": {
-    title: "Core Concepts",
-  },
-  "harness-vs-app": {
-    title: "Harness vs App",
-  },
+  index: { title: "About ChemAgent" },
+  "core-concepts": { title: "Data and evaluation scopes" },
+  "why-chemagent": { title: "Why ChemAgent" },
 };
-
 export default meta;

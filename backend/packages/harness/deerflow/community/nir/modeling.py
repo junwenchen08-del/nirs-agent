@@ -15,6 +15,7 @@ import json
 import os
 import re
 import warnings
+from pathlib import Path
 from typing import Annotated
 
 import numpy as np
@@ -39,6 +40,7 @@ from ._common import (
     _write_trusted_model_artifact,
 )
 from ._knowledge_hint import _build_knowledge_hint
+from ._preprocessing_plan import method_knowledge_summary, pipeline_records, select_preprocessing
 from ._report import _build_report
 from ._resources import budget_for_runtime, check_spectral_data, resource_error
 from ._science_gate import (
@@ -99,7 +101,7 @@ def nir_train_auto_split_model_tool(
     split_strategy: str = "auto",
     group_col: str | None = None,
     spxy_max_samples: int = 500,
-    pipeline_steps: str = '["snv", "autoscale"]',
+    pipeline_steps: str = "auto",
     method: str = "auto",
     max_components: int = 20,
     compare_cars: bool | None = None,
@@ -139,7 +141,9 @@ def nir_train_auto_split_model_tool(
         group_col: Optional explicit batch/domain column for group splitting.
         spxy_max_samples: Largest sample count eligible for automatic SPXY;
             larger ungrouped datasets use target-value stratification.
-        pipeline_steps: JSON preprocessing pipeline fitted on calibration rows.
+        pipeline_steps: ``auto`` (default) retrieves method references from
+            calibration diagnostics and selects a bounded pipeline by CV.
+            A JSON array fixes the pipeline; ``[]`` explicitly uses raw spectra.
         method: ``auto`` (default) for bounded model-family selection, or an
             explicit supported model such as ``pls`` or ``svr``.
         max_components: Maximum PLS latent variables considered on tuning rows.
@@ -179,6 +183,10 @@ def nir_train_auto_split_model_tool(
         budget = budget_for_runtime(runtime)
         real_in = _resolve(runtime, file_path, read_only=True)
         budget.check_file(real_in, stage="auto_split_file_preflight")
+        from .datasets.workspace import load_workspace_export
+
+        if load_workspace_export(real_in) is not None:
+            return _err("保存版本已固定样本用途，请通过 sealed_holdout 流程的 nir_prepare_search 使用该文件，不能重新自动划分。")
         raw = pd.read_csv(real_in)
         if not (0 <= int(y_col) < raw.shape[1]):
             return _err(f"y_col {y_col} is outside the CSV column range 0..{raw.shape[1] - 1}")
@@ -224,7 +232,7 @@ def nir_train_auto_split_model_tool(
             return _err(validation_error)
 
         try:
-            raw_steps = json.loads(pipeline_steps)
+            raw_steps = [] if pipeline_steps == "auto" else json.loads(pipeline_steps)
             if not isinstance(raw_steps, list):
                 return _err("pipeline_steps must be a JSON list")
             steps = [_parse_pipeline_step(value) for value in raw_steps]
@@ -234,7 +242,14 @@ def nir_train_auto_split_model_tool(
         if not is_valid:
             return _err(f"Invalid preprocessing pipeline: {reason}")
 
-        selection_pipe = PreprocessingPipeline(steps).fit(X_cal, wv)
+        preprocessing_selection = None
+        if pipeline_steps == "auto":
+            budget.checkpoint("method_knowledge_preprocessing")
+            selection_pipe, preprocessing_selection = select_preprocessing(X_cal, y_cal, X_tune, y_tune, wv, max_components=max_components)
+            steps = list(selection_pipe.steps)
+            raw_steps = pipeline_records(selection_pipe)
+        else:
+            selection_pipe = PreprocessingPipeline(steps).fit(X_cal, wv)
         X_cal_s = selection_pipe.transform(X_cal, wv)
         X_tune_s = selection_pipe.transform(X_tune, wv)
 
@@ -374,6 +389,7 @@ def nir_train_auto_split_model_tool(
             "n_wavelengths_model": int(len(selected_indices)),
             "preprocessing": final_pipe.description(),
             "preprocessing_steps": raw_steps,
+            "preprocessing_selection": preprocessing_selection,
             "wavelength_selection": selection_meta,
             "wavelength_selection_decision": selection_decision,
             "model_selection_decision": model_selection_decision,
@@ -398,7 +414,7 @@ def nir_train_auto_split_model_tool(
         metrics["RMSEC"] = metrics["train"]["RMSE"]
         metrics["RMSECV"] = metrics["val"]["RMSE"]
         metrics["RMSEP"] = metrics["test"]["RMSE"]
-        quality = evaluate_quality(metrics, domain=domain, n_samples=int(final_train_indices.size))
+        quality = evaluate_quality(metrics, domain=domain, n_samples=int(len(y_cal)), evaluation_scope="validation")
         metrics["quality"] = quality
 
         real_model = _resolve(runtime, model_output, read_only=False)
@@ -408,6 +424,7 @@ def nir_train_auto_split_model_tool(
                 final_model,
                 method=chosen_model["method"],
                 preprocessing_pipeline=final_pipe,
+                preprocessing_selection=preprocessing_selection,
                 preprocessing_desc=final_pipe.description(),
                 wavelength_selection=selection_meta,
                 X_reference=X_final,
@@ -449,7 +466,44 @@ def nir_train_auto_split_model_tool(
         with open(report_path, "w", encoding="utf-8") as handle:
             handle.write("\n".join(report) + "\n")
 
+        from nir_core.models import SpectralData
+
+        from ._report import report_context
+        from .artifacts import _write_plots_and_report
+        from .delivery import delivery_payload
+
+        report_metrics = report_context(runtime, metrics, {"calibration": len(y_cal), "tuning": len(y_tune), "holdout": len(y_test)}, final_fit="校准集＋调参集（选择完成后重新拟合）")
+        out_dir = os.path.dirname(real_model)
+        plot_values = _write_plots_and_report(
+            out_dir=out_dir,
+            spec_data=SpectralData(X=X, y=y, wv=wv),
+            metrics=report_metrics,
+            quality=quality,
+            best_pipe=final_pipe,
+            y_te=y_test,
+            y_pred_te=holdout_prediction,
+            cv_results=cv_results,
+            best_n=best_n,
+            method=chosen_model["method"],
+            model=final_model,
+            X_tr=X_final,
+            y_tr=y[final_train_indices],
+            wv=wv[selected_indices] if wv is not None else None,
+        )
+        os.replace(os.path.join(out_dir, "report.md"), report_path)
+        with open(report_path, "a", encoding="utf-8") as handle:
+            handle.write("\n## 8. 协议原始记录\n\n" + "\n".join(report[2:]) + "\n")
+
         out_virtual = os.path.dirname(model_output)
+        delivery = delivery_payload(
+            report_path,
+            real_model,
+            real_metrics,
+            virtual_dir=out_virtual,
+            figures=[
+                os.path.join(out_dir, name) for name, present in zip(["raw_spectra.png", "predicted_vs_reference.png", "residuals.png", "cv_curve.png", "vip_scores.png", "regression_coefficients.png"], plot_values, strict=True) if present
+            ],
+        )
         candidate_summary = [
             {
                 "method": item["method"],
@@ -459,15 +513,34 @@ def nir_train_auto_split_model_tool(
             }
             for item in candidate_results
         ]
+        from .process import publish_regression
+
+        process_evidence = publish_regression(
+            runtime,
+            tool="nir_train_auto_split_model",
+            call_id=tool_call_id,
+            X=X,
+            y=y,
+            wv=wv,
+            partitions={"calibration": (X_cal, y_cal), "tuning": (X_tune, y_tune), "holdout": (X_test, y_test)},
+            processed_cal=X_cal_s,
+            predictions={"holdout": holdout_prediction, "tuning": tuning_prediction},
+            metrics=metrics,
+            pipeline=raw_steps,
+            model_candidates=model_candidate_results,
+            fitted_model=final_model,
+        )
         return _ok(
             {
                 "status": "ok",
+                "process_evidence": process_evidence,
                 "protocol": "deterministic_auto_split_holdout",
                 "validation_scope": "independent_holdout_not_external",
                 "target": target_name,
                 "split": metrics["split"],
                 "partitions": {name: {"n_samples": value["n_samples"]} for name, value in metrics["partitions"].items()},
                 "preprocessing": final_pipe.description(),
+                "preprocessing_selection": _preprocessing_selection_summary(preprocessing_selection),
                 "wavelength_selection": selection_meta,
                 "wavelength_selection_decision": selection_decision,
                 "model_selection_decision": model_selection_decision,
@@ -491,6 +564,7 @@ def nir_train_auto_split_model_tool(
                     validation_scope="independent_holdout_not_external",
                 ),
                 "report": out_virtual + "/auto_split_report.md",
+                **delivery,
                 "resource_budget": budget.evidence(),
             }
         )
@@ -511,7 +585,7 @@ def nir_train_partitioned_model_tool(
     y_col: int,
     x_cols: str,
     wv_row: int | None = 0,
-    pipeline_steps: str = '["snv", {"method": "derivative1", "params": {"window": 15, "order": 2}}, "autoscale"]',
+    pipeline_steps: str = "auto",
     method: str = "auto",
     domain: str = "default",
     max_components: int = 20,
@@ -549,7 +623,8 @@ def nir_train_partitioned_model_tool(
         x_cols: Spectral-column selector passed to nir_core, for example ``"9:"``.
         wv_row: Wavelength/header row index for mixed text/numeric CSV layouts.
         domain: Application domain used for quality-gate thresholds.
-        pipeline_steps: JSON preprocessing pipeline, fitted on Cal only during selection.
+        pipeline_steps: ``auto`` (default) for method retrieval and Cal-only CV
+            selection, or a JSON array for an explicit pipeline (``[]`` for raw).
         method: ``auto`` (default) or an explicit supported model family.
         max_components: Maximum PLS latent variables considered on Tuning.
         compare_cars: Optional override. None (default) autonomously decides,
@@ -601,6 +676,10 @@ def nir_train_partitioned_model_tool(
         budget = budget_for_runtime(runtime)
         real_in = _resolve(runtime, file_path, read_only=True)
         budget.check_file(real_in, stage="partitioned_file_preflight")
+        from .datasets.workspace import load_workspace_export
+
+        if load_workspace_export(real_in) is not None:
+            return _err("保存版本的用途不是外部验证证据，请通过 sealed_holdout 流程的 nir_prepare_search 保留该划分。")
         raw = pd.read_csv(real_in)
         if split_col not in raw.columns:
             return _err(f"split_col {split_col!r} is not a CSV header; available columns include {list(raw.columns[:12])}")
@@ -628,7 +707,7 @@ def nir_train_partitioned_model_tool(
             return _err("train_label, tuning_label, and test_label must be distinct.")
 
         try:
-            raw_steps = json.loads(pipeline_steps)
+            raw_steps = [] if pipeline_steps == "auto" else json.loads(pipeline_steps)
             steps = [_parse_pipeline_step(value) for value in raw_steps]
         except (TypeError, ValueError) as exc:
             return _err(f"Invalid pipeline_steps JSON: {exc}")
@@ -654,7 +733,14 @@ def nir_train_partitioned_model_tool(
             return _err(validation_error)
 
         # Fit all stateful transforms on Cal only for every tuning decision.
-        selection_pipe = PreprocessingPipeline(steps).fit(X_cal, wv)
+        preprocessing_selection = None
+        if pipeline_steps == "auto":
+            budget.checkpoint("method_knowledge_preprocessing")
+            selection_pipe, preprocessing_selection = select_preprocessing(X_cal, y_cal, X_tune, y_tune, wv, max_components=max_components)
+            steps = list(selection_pipe.steps)
+            raw_steps = pipeline_records(selection_pipe)
+        else:
+            selection_pipe = PreprocessingPipeline(steps).fit(X_cal, wv)
         X_cal_s = selection_pipe.transform(X_cal, wv)
         X_tune_s = selection_pipe.transform(X_tune, wv)
 
@@ -785,6 +871,7 @@ def nir_train_partitioned_model_tool(
             "preprocessing": final_pipe.description(),
             "preprocessing_steps": raw_steps,
             "wavelength_selection": selection_meta,
+            "preprocessing_selection": preprocessing_selection,
             "wavelength_selection_decision": selection_decision,
             "model_selection_decision": model_selection_decision,
             "partitions": {
@@ -805,7 +892,7 @@ def nir_train_partitioned_model_tool(
         metrics["RMSEC"] = metrics["train"]["RMSE"]
         metrics["RMSECV"] = float(chosen_model["RMSE_tuning"])
         metrics["RMSEP"] = metrics["test"]["RMSE"]
-        quality = evaluate_quality(metrics, domain=domain, n_samples=int(final_train_mask.sum()))
+        quality = evaluate_quality(metrics, domain=domain, n_samples=int(len(y_cal)), evaluation_scope="validation")
         metrics["quality"] = quality
 
         real_model = _resolve(runtime, model_output, read_only=False)
@@ -816,6 +903,7 @@ def nir_train_partitioned_model_tool(
                 method=chosen_model["method"],
                 preprocessing_pipeline=final_pipe,
                 preprocessing_desc=final_pipe.description(),
+                preprocessing_selection=preprocessing_selection,
                 wavelength_selection=selection_meta,
                 X_reference=X_final,
             ),
@@ -852,7 +940,44 @@ def nir_train_partitioned_model_tool(
         with open(report_path, "w", encoding="utf-8") as handle:
             handle.write("\n".join(report) + "\n")
 
+        from nir_core.models import SpectralData
+
+        from ._report import report_context
+        from .artifacts import _write_plots_and_report
+        from .delivery import delivery_payload
+
+        report_metrics = report_context(runtime, metrics, {"calibration": len(y_cal), "tuning": len(y_tune), "holdout": len(y_test)}, final_fit="校准集＋调参集（选择完成后重新拟合）")
+        out_dir = os.path.dirname(real_model)
+        plot_values = _write_plots_and_report(
+            out_dir=out_dir,
+            spec_data=SpectralData(X=X, y=y, wv=wv),
+            metrics=report_metrics,
+            quality=quality,
+            best_pipe=final_pipe,
+            y_te=y_test,
+            y_pred_te=y_pred_external,
+            cv_results=cv_results,
+            best_n=best_n,
+            method=chosen_model["method"],
+            model=final_model,
+            X_tr=X_final,
+            y_tr=y[final_train_mask],
+            wv=wv[selected_indices] if wv is not None else None,
+        )
+        os.replace(os.path.join(out_dir, "report.md"), report_path)
+        with open(report_path, "a", encoding="utf-8") as handle:
+            handle.write("\n## 8. 协议原始记录\n\n" + "\n".join(report) + "\n")
+
         out_virtual = os.path.dirname(model_output)
+        delivery = delivery_payload(
+            report_path,
+            real_model,
+            real_metrics,
+            virtual_dir=out_virtual,
+            figures=[
+                os.path.join(out_dir, name) for name, present in zip(["raw_spectra.png", "predicted_vs_reference.png", "residuals.png", "cv_curve.png", "vip_scores.png", "regression_coefficients.png"], plot_values, strict=True) if present
+            ],
+        )
         candidate_summary = [
             {
                 "method": item["method"],
@@ -862,12 +987,31 @@ def nir_train_partitioned_model_tool(
             }
             for item in candidate_results
         ]
+        from .process import publish_regression
+
+        process_evidence = publish_regression(
+            runtime,
+            tool="nir_train_partitioned_model",
+            call_id=tool_call_id,
+            X=X,
+            y=y,
+            wv=wv,
+            partitions={"calibration": (X_cal, y_cal), "tuning": (X_tune, y_tune), "holdout": (X_test, y_test)},
+            processed_cal=X_cal_s,
+            predictions={"holdout": y_pred_external, "tuning": chosen_model["_tuning_prediction"]},
+            metrics=metrics,
+            pipeline=raw_steps,
+            model_candidates=model_candidate_results,
+            fitted_model=final_model,
+        )
         result_payload = {
             "status": "ok",
+            "process_evidence": process_evidence,
             "protocol": protocol,
             "validation_scope": normalized_scope,
             "preprocessing": final_pipe.description(),
             "wavelength_selection": selection_meta,
+            "preprocessing_selection": _preprocessing_selection_summary(preprocessing_selection),
             "wavelength_selection_decision": selection_decision,
             "model_selection_decision": model_selection_decision,
             "method": chosen_model["method"],
@@ -889,6 +1033,7 @@ def nir_train_partitioned_model_tool(
                 validation_scope=normalized_scope,
             ),
             "report": out_virtual + "/partitioned_report.md",
+            **delivery,
             "resource_budget": budget.evidence(),
         }
         result_payload["external" if is_external_validation else "holdout"] = {key: round(float(metrics["test"][key]), 5) for key in ("RMSE", "R2", "RPD", "bias")}
@@ -920,6 +1065,7 @@ def _preprocessing_selection_summary(selection: dict | None) -> dict | None:
                 "candidate_id": candidate_id,
                 "steps": candidate.get("steps", []),
                 "reasons": candidate.get("reasons", []),
+                "evidence_ids": candidate.get("evidence_ids", []),
                 "cv_rmse": evidence.get("cv_rmse"),
                 "val_r2": evidence.get("val_r2"),
                 "error": evidence.get("error"),
@@ -939,6 +1085,7 @@ def _preprocessing_selection_summary(selection: dict | None) -> dict | None:
         "selected_candidate_id": evaluation.get("best_candidate_id"),
         "selected_pipeline": evaluation.get("best"),
         "reason_code": decision.get("reason_code"),
+        "method_knowledge": method_knowledge_summary(recommendation.get("method_knowledge")),
     }
 
 
@@ -973,8 +1120,9 @@ def nir_analyze_tool(
         subset: Optional sub-dataset name inside a MATLAB struct. Leave unset
             for flat files. For multiple subsets prefer
             ``nir_analyze_collection`` so the agent receives one compact result.
-        auto_preprocess: If True, run nested-CV preprocessing selection over
-            the default candidate pipelines and use the winner. If False,
+        auto_preprocess: If True, retrieve official method references using
+            calibration diagnostics and run bounded nested-CV preprocessing
+            selection, retaining raw as a same-batch control. If False,
             use raw spectra directly.
         method: ``auto`` (default) autonomously compares a bounded subset of
             PLS/Ridge/SVR/Extra Trees, or explicitly use ``pls`` / ``pcr`` /
@@ -1013,7 +1161,6 @@ def nir_analyze_tool(
         from nir_core.io.sniffers import detect_format
         from nir_core.model.evaluation import (
             compute_metrics,
-            nested_cv_preprocessing,
             split_dataset,
         )
         from nir_core.utils.metrics import evaluate_quality
@@ -1062,39 +1209,19 @@ def nir_analyze_tool(
         if validation_error := science_gate_error(split_validation):
             return _err(validation_error)
 
+        process_partitions = {"calibration": (X_tr, y_tr), "tuning": (X_val, y_val), "holdout": (X_te, y_te)}
+
         # Preprocessing selection (leakage-safe fit/transform).
         best_pipe = None
         preprocessing_selection = None
         if auto_preprocess:
-            from nir_core.preprocess.recommendation import recommend_preprocessing
-
-            preprocessing_recommendation = recommend_preprocessing(
-                X_tr,
-                data_wv,
-                budget="standard",
-            )
-            best_pipe, selection_results = nested_cv_preprocessing(
-                X_tr,
-                y_tr,
-                X_val,
-                y_val,
-                candidate_pipelines=preprocessing_recommendation.pipelines(),
-                inner_folds=3,
-                max_components=10,
-                random_state=42,
-                wv=data_wv,
-                selection_rule="rmsecv_1pct",
-                candidate_ids=[candidate.candidate_id for candidate in preprocessing_recommendation.candidates],
-            )
-            preprocessing_selection = {
-                "recommendation": preprocessing_recommendation.as_dict(),
-                "evaluation": selection_results,
-            }
-            best_pipe = best_pipe.unfitted_copy().fit(X_tr, data_wv)
+            budget.checkpoint("method_knowledge_preprocessing")
+            best_pipe, preprocessing_selection = select_preprocessing(X_tr, y_tr, X_val, y_val, data_wv)
             X_tr = best_pipe.transform(X_tr, data_wv)
             X_val = best_pipe.transform(X_val, data_wv)
             X_te = best_pipe.transform(X_te, data_wv)
 
+        process_preprocessed = X_tr
         preprocessing_desc = (best_pipe.description() or "raw") if best_pipe else "none"
         requested_model = (method or "auto").strip().lower()
         requested_selection = (wavelength_selection or "auto").strip().lower()
@@ -1220,7 +1347,7 @@ def nir_analyze_tool(
         metrics["R2_val"] = metrics["val"]["R2"]
         metrics["RPD"] = metrics["test"]["RPD"]
         metrics["RMSEP"] = metrics["test"]["RMSE"]
-        quality = evaluate_quality(metrics, domain=domain, n_samples=int(X.shape[0]))
+        quality = evaluate_quality(metrics, domain=domain, n_samples=int(X_tr.shape[0]), evaluation_scope="validation")
         metrics["quality"] = quality
 
         try:
@@ -1268,7 +1395,7 @@ def nir_analyze_tool(
         )
         from nir_core.plotting.spectra import plot_raw_spectra
 
-        raw_b64 = plot_raw_spectra(data, n_highlight=5)
+        raw_b64 = plot_raw_spectra(data, n_highlight=5, wavelength_unit=metrics.get("wavelength_unit"))
         pred_b64 = plot_predicted_vs_reference(y_te, y_pred_te, title="Predicted vs Reference (test set)")
         resid_b64 = plot_residuals(y_te, y_pred_te)
 
@@ -1293,9 +1420,11 @@ def nir_analyze_tool(
                     f.write(base64.b64decode(b64))
 
         # Markdown report (with embedded images).
+        from ._report import report_context
+
         report = _build_report(
             data,
-            metrics,
+            report_context(runtime, metrics, {"calibration": len(y_tr), "tuning": len(y_val), "holdout": len(y_te)}),
             quality,
             best_pipe,
             raw_spectra_b64=raw_b64,
@@ -1306,6 +1435,12 @@ def nir_analyze_tool(
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(report)
 
+        from .delivery import delivery_payload
+
+        delivery = delivery_payload(
+            report_path, model_path, metrics_path, virtual_dir=output_dir, figures=[path for path, present in [(raw_spectra_path, raw_b64), (pred_path, pred_b64), (resid_path, resid_b64), (cv_path, cv_b64)] if present]
+        )
+
         # ★ Knowledge-base hint (same trigger policy as nir_train_model).
         knowledge_hint = _build_knowledge_hint(
             domain=domain,
@@ -1315,9 +1450,27 @@ def nir_analyze_tool(
             diagnostics=metrics.get("diagnostics"),
         )
 
+        from .process import publish_regression
+
+        process_evidence = publish_regression(
+            runtime,
+            tool="nir_analyze",
+            call_id=tool_call_id,
+            X=X,
+            y=y,
+            wv=data_wv,
+            partitions=process_partitions,
+            processed_cal=process_preprocessed,
+            predictions={"holdout": y_pred_te, "tuning": y_pred_val},
+            metrics=metrics,
+            pipeline=pipeline_records(best_pipe) if best_pipe else [],
+            model_candidates=model_candidate_results,
+            fitted_model=model,
+        )
         return _ok(
             {
                 "status": "ok",
+                "process_evidence": process_evidence,
                 "protocol": "automated_analysis_three_way_holdout",
                 "validation_scope": "independent_holdout_not_external",
                 "method": selected_method,
@@ -1338,6 +1491,7 @@ def nir_analyze_tool(
                 "thresholds_used": quality["thresholds_used"],
                 "output_dir": output_dir,
                 "report": output_dir + "/report.md",
+                **delivery,
                 "model": output_dir + "/model.pkl",
                 "metrics": output_dir + "/metrics.json",
                 "evidence": _model_evidence(
@@ -1433,6 +1587,8 @@ def _compact_collection_result(subset: str, payload: dict) -> dict:
         "model",
         "metrics",
         "plots",
+        "report_html",
+        "delivery_bundle",
     )
     return {"subset": subset, **{key: payload.get(key) for key in keys if payload.get(key) is not None}}
 
@@ -1442,7 +1598,7 @@ def _collection_summary_markdown(results: list[dict], failures: list[dict]) -> s
     lines = [
         "# NIR MAT 多子数据集汇总",
         "",
-        "> 完整报告、指标、模型和图表保存在各子目录；本文件仅保留汇总指标。",
+        "> 各子集独立建模，分区不同，不能仅凭最终留出指标跨子集选择或自动注册模型。质量达标不等同于生产批准。",
         "",
         "| 子数据集 | 方法 | 成分数 | R²(验证) | RPD | RMSEP | 等级 | 通过 |",
         "|---|---:|---:|---:|---:|---:|---|---|",
@@ -1452,6 +1608,13 @@ def _collection_summary_markdown(results: list[dict], failures: list[dict]) -> s
         lines.append(
             f"| {subset} | {item.get('method', '-')} | {item.get('n_components', '-')} | {item.get('R2_val', '-')} | {item.get('RPD', '-')} | {item.get('RMSEP', '-')} | {item.get('grade', '-')} | {'是' if item.get('passed') else '否'} |"
         )
+    lines += [
+        "",
+        "## 结果解读",
+        "- R²列为调参集结果；RPD与RMSEP为最终留出集结果，不能混称同一验证集。",
+        "- 运行时primary_subset沿用调参R²汇总规则，作为证据引用入口，不表示跨子集最优或已获注册批准。",
+        "- 完整下载包包含每个成功子集的报告、模型、安全清单、指标与图表；失败子集在下方列出。",
+    ]
     if failures:
         lines.extend(["", "## 未完成的子数据集"])
         for item in failures:
@@ -1547,8 +1710,41 @@ def nir_analyze_collection_tool(
         primary = max(results, key=lambda item: float(item.get("R2_val", float("-inf"))))
         summary_virtual = f"{output_dir.rstrip('/')}/collection_summary.md"
         summary_real = os.path.join(real_output_dir, "collection_summary.md")
+        combined = _collection_summary_markdown(results, failures)
+        package_entries = []
+        collection_figures = []
+        for item in results:
+            # Only paths returned by this run are eligible for the archive.
+            for key in ("report", "report_html", "model", "metrics"):
+                virtual = item.get(key)
+                if not isinstance(virtual, str) or not virtual.startswith(output_dir.rstrip("/") + "/"):
+                    continue
+                relative = virtual[len(output_dir.rstrip("/")) + 1 :]
+                real = Path(real_output_dir) / relative
+                if not real.resolve().is_relative_to(Path(real_output_dir).resolve()):
+                    continue
+                package_entries.append((relative, real))
+                if key == "model":
+                    package_entries.append((relative + ".manifest.json", Path(str(real) + ".manifest.json")))
+                if key == "report" and real.is_file():
+                    child_text = real.read_text(encoding="utf-8")
+                    child_dir = Path(relative).parent.as_posix()
+                    child_text = re.sub(r"(!\[[^\]]*\]\()([A-Za-z0-9_.-]+\.png)(\))", lambda match: match[1] + child_dir + "/" + match[2] + match[3], child_text)
+                    combined += f"\n## 子集：{str(item['subset']).replace(chr(10), ' ')}\n\n" + child_text + "\n"
+            for virtual in (item.get("plots") or {}).values():
+                if isinstance(virtual, str) and virtual.startswith(output_dir.rstrip("/") + "/"):
+                    relative = virtual[len(output_dir.rstrip("/")) + 1 :]
+                    real = Path(real_output_dir) / relative
+                    if real.resolve().is_relative_to(Path(real_output_dir).resolve()):
+                        collection_figures.append(real)
         with open(summary_real, "w", encoding="utf-8") as handle:
-            handle.write(_collection_summary_markdown(results, failures))
+            handle.write(combined)
+
+        from .delivery import build_delivery
+
+        delivery_paths = build_delivery(Path(summary_real), figures=collection_figures, additional=package_entries)
+        report_html = f"{output_dir.rstrip('/')}/{delivery_paths['html'].name}"
+        delivery_bundle = f"{output_dir.rstrip('/')}/{delivery_paths['bundle'].name}"
 
         artifacts: list[str] = [summary_virtual]
         for item in results:
@@ -1576,7 +1772,11 @@ def nir_analyze_collection_tool(
                 "evidence": primary.get("evidence"),
                 "report": summary_virtual,
                 "results": results,
-                "artifacts": list(dict.fromkeys(artifacts)),
+                "report_html": report_html,
+                "delivery_bundle": delivery_bundle,
+                "deliverables": [report_html, delivery_bundle],
+                "artifacts": [report_html, delivery_bundle],
+                "supporting_artifacts": list(dict.fromkeys(artifacts)),
             }
         )
     except ResourceLimitError as exc:
@@ -1695,7 +1895,7 @@ def nir_compare_tool(
         results = []
         summaries = []
         best_idx = 0
-        best_rpd = -1.0
+        best_rmse = float("inf")
 
         for i, methods in enumerate(pipe_list):
             budget.checkpoint(f"compare_pipeline_{i + 1}")
@@ -1708,10 +1908,9 @@ def nir_compare_tool(
                     pipe.fit(X_tr, data.wv)
                     X_tr_p = pipe.transform(X_tr, data.wv)
                     X_val_p = pipe.transform(X_val, data.wv)
-                    X_te_p = pipe.transform(X_te, data.wv)
                     pp_desc = pipe.description()
                 else:
-                    X_tr_p, X_val_p, X_te_p = X_tr, X_val, X_te
+                    X_tr_p, X_val_p = X_tr, X_val
                     pp_desc = "无（原始光谱）"
             except Exception as pp_exc:
                 summaries.append(
@@ -1727,7 +1926,6 @@ def nir_compare_tool(
             model, best_n, cv_results, predict_fn = _train_one_model(method, X_tr_p, y_tr, max_components=20, cv_folds=10, cv_strategy="auto")
             y_pred_tr = predict_fn(model, X_tr_p)
             y_pred_val = predict_fn(model, X_val_p)
-            y_pred_te = predict_fn(model, X_te_p)
 
             m = {
                 "method": method,
@@ -1744,16 +1942,19 @@ def nir_compare_tool(
                 "reproducibility": comparison_reproducibility,
                 "train": compute_metrics(y_tr, y_pred_tr),
                 "val": compute_metrics(y_val, y_pred_val),
-                "test": compute_metrics(y_te, y_pred_te),
                 "preprocessing": pp_desc,
                 "pipeline": methods,
             }
             m["R2_val"] = m["val"]["R2"]
-            m["RPD"] = m["test"]["RPD"]
-            m["RMSEP"] = m["test"]["RMSE"]
+            m["evaluation_scope"] = "validation"
+            m["test_status"] = "not_evaluated"
+            m["train"]["scope"] = "calibration"
+            m["val"]["scope"] = "validation"
+            m["RPD"] = m["val"]["RPD"]
+            m["RMSE_val"] = m["val"]["RMSE"]
             m["RMSEC"] = m["train"]["RMSE"]
             m["RMSECV"] = _extract_rmsecv(cv_results, best_n)
-            m["quality"] = evaluate_quality(m, domain=domain, n_samples=int(X.shape[0]))
+            m["quality"] = evaluate_quality(m, domain=domain, n_samples=len(y_tr), evaluation_scope="validation")
             try:
                 from nir_core.diagnostics import compute_residual_diagnostics
 
@@ -1763,8 +1964,8 @@ def nir_compare_tool(
 
             # Store y_ref/y_pred for gallery plot.
             m_with_arrays = dict(m)
-            m_with_arrays["y_ref"] = y_te
-            m_with_arrays["y_pred"] = y_pred_te
+            m_with_arrays["y_ref"] = y_val
+            m_with_arrays["y_pred"] = y_pred_val
             results.append(
                 ModelResult(
                     method=method,
@@ -1781,7 +1982,8 @@ def nir_compare_tool(
                 "n_components": best_n,
                 "R2_val": round(m["R2_val"], 4),
                 "RPD": round(m["RPD"], 4),
-                "RMSEP": round(m["RMSEP"], 4),
+                "RMSE_val": round(m["RMSE_val"], 4),
+                "evaluation_scope": "validation",
                 "RMSECV": round(m["RMSECV"], 4) if m["RMSECV"] else None,
                 "grade": m["quality"]["grade"],
                 "passed": m["quality"]["passed"],
@@ -1789,11 +1991,11 @@ def nir_compare_tool(
             }
             summaries.append(summary)
 
-            if m["RPD"] > best_rpd:
-                best_rpd = m["RPD"]
+            if m["RMSE_val"] < best_rmse:
+                best_rmse = m["RMSE_val"]
                 best_idx = summary_idx
 
-        if not summaries:
+        if not results:
             return _err("All pipelines failed; no models to compare.")
 
         # Generate gallery HTML.
@@ -1812,12 +2014,12 @@ def nir_compare_tool(
             "",
             "## 对比结果",
             "",
-            "| # | 预处理 | 成分数 | R²(验证) | RPD | RMSEP | 等级 | 通过 |",
+            "| # | 预处理 | 成分数 | R²(验证) | RPD(验证) | RMSE(验证) | 等级 | 通过 |",
             "|---|--------|--------|----------|-----|-------|------|------|",
         ]
         for i, s in enumerate(summaries):
             mark = " ⭐" if i == best_idx else ""
-            md_lines.append(f"| {i + 1} | {s['description']}{mark} | {s.get('n_components', '-')} | {s.get('R2_val', '-')} | {s.get('RPD', '-')} | {s.get('RMSEP', '-')} | {s.get('grade', '-')} | {'是' if s.get('passed') else '否'} |")
+            md_lines.append(f"| {i + 1} | {s['description']}{mark} | {s.get('n_components', '-')} | {s.get('R2_val', '-')} | {s.get('RPD', '-')} | {s.get('RMSE_val', '-')} | {s.get('grade', '-')} | {'是' if s.get('passed') else '否'} |")
         md_lines.extend(
             [
                 "",
@@ -1825,8 +2027,8 @@ def nir_compare_tool(
                 f"- 预处理: {best['description']}",
                 f"- 成分数: {best.get('n_components')}",
                 f"- R²(验证): {best.get('R2_val')}",
-                f"- RPD: {best.get('RPD')}",
-                f"- RMSEP: {best.get('RMSEP')}",
+                f"- RPD(验证): {best.get('RPD')}",
+                f"- RMSE(验证): {best.get('RMSE_val')}",
                 f"- 等级: {best.get('grade')}",
                 "",
             ]

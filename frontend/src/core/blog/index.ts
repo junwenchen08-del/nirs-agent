@@ -3,6 +3,7 @@ import { getPageMap } from "nextra/page-map";
 import { cache } from "react";
 
 import { getLangByLocale, type Locale } from "@/core/i18n/locale";
+import { translations } from "@/core/i18n/translations";
 
 export const BLOG_LANGS = ["zh", "en"] as const;
 const RECENT_POST_LIMIT = 5;
@@ -60,7 +61,7 @@ function isMdxFile(item: PageMapItem): item is BlogMdxFile {
 function normalizeBlogRoute(route: string): string {
   // Posts are sourced from locale-specific content trees but exposed
   // under the single public /blog route.
-  return route.replace(/^\/(en|zh)\/(?:posts|blog)(?=\/|$)/, "/blog");
+  return route.replace(/^\/(?:(?:en|zh)\/)?(?:posts|blog)(?=\/|$)/, "/blog");
 }
 
 export function getBlogRoute(slug: string[]): string {
@@ -235,7 +236,8 @@ export function normalizeTagSlug(tag: string): string {
   return tag.toLowerCase().replace(/\s+/g, "-");
 }
 
-export function formatTagName(tag: string): string {
+export function formatTagName(tag: string, lang: BlogLang = "zh"): string {
+  if (lang === "zh" && tag.toLowerCase() === "spectroscopy") return "光谱分析";
   return tag
     .split("-")
     .filter(Boolean)
@@ -280,6 +282,7 @@ export async function getBlogIndexData(
     tag?: string;
   },
 ): Promise<BlogIndexData> {
+  const copy = translations[preferredLang === "en" ? "en-US" : "zh-CN"].blog;
   const posts = await getAllPosts(preferredLang);
   const tagFilter = filters?.tag;
   const filteredPosts = tagFilter
@@ -309,24 +312,24 @@ export async function getBlogIndexData(
   const pageMap: PageMapItem[] = [
     {
       data: {
-        posts: { title: "All Posts", type: "Page" },
-        recent_posts: { title: "Recent Posts" },
-        tags: { title: "Tags" },
+        posts: { title: copy.allPosts, type: "Page" },
+        recent_posts: { title: copy.recentPosts },
+        tags: { title: copy.tags },
       },
     },
     {
-      name: "All Posts",
+      name: copy.allPosts,
       route: "/blog/posts",
-      title: "All Posts",
+      title: copy.allPosts,
       frontMatter: {
-        title: "All Posts",
+        title: copy.allPosts,
         filePath: "blog/index.mdx",
       },
     } as MdxFile,
     createFolder(
       "recent_posts",
       "/blog/recent-posts",
-      "Recent Posts",
+      copy.recentPosts,
       recentPosts.map(createPostItem),
     ),
   ];
@@ -336,11 +339,11 @@ export async function getBlogIndexData(
       createFolder(
         "tags",
         "/blog/tags",
-        "Tags",
+        copy.tags,
         tags.map((tag) => {
           return {
             name: tag.name,
-            title: `${tag.name} (${tag.count})`,
+            title: `${formatTagName(tag.name, preferredLang)} (${tag.count})`,
             route: `/blog/tags/${normalizeTagSlug(tag.name)}`,
           };
         }),

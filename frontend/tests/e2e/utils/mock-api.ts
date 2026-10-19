@@ -40,12 +40,6 @@ export type MockThread = {
   historyValues?: Record<string, unknown>;
 };
 
-export type MockAgent = {
-  name: string;
-  description?: string;
-  system_prompt?: string;
-};
-
 export type MockSkill = {
   name: string;
   description: string;
@@ -55,8 +49,9 @@ export type MockSkill = {
 };
 
 export type MockAPIOptions = {
+  /** Legacy English interaction tests choose English explicitly. */
+  locale?: "en-US" | "zh-CN" | null;
   threads?: MockThread[];
-  agents?: MockAgent[];
   skills?: MockSkill[];
   uploadLimits?: {
     max_files: number;
@@ -96,7 +91,7 @@ function mockStreamMessages() {
     {
       type: "ai",
       id: "msg-ai-1",
-      content: "Hello from DeerFlow!",
+      content: "Hello from ChemAgent!",
     },
   ];
 }
@@ -112,13 +107,46 @@ function mockStreamMessages() {
  */
 export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
   const routeRegistrations: Promise<unknown>[] = [];
+  if (options?.locale !== null) {
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+    // SSR reads the cookie before init scripts run. Preserve explicit test
+    // choices while making the default consistent with the client fixture.
+    routeRegistrations.push(
+      page
+        .context()
+        .cookies(baseURL)
+        .then(async (cookies) => {
+          if (!cookies.some((cookie) => cookie.name === "locale")) {
+            await page
+              .context()
+              .addCookies([
+                {
+                  name: "locale",
+                  value: options?.locale ?? "en-US",
+                  url: baseURL,
+                },
+              ]);
+          }
+        }),
+    );
+    routeRegistrations.push(
+      page.addInitScript((locale) => {
+        if (
+          !document.cookie
+            .split(";")
+            .some((cookie) => cookie.trim().startsWith("locale="))
+        ) {
+          document.cookie = `locale=${locale}; path=/; SameSite=Lax`;
+        }
+      }, options?.locale ?? "en-US"),
+    );
+  }
   const registerRoute = (...args: Parameters<Page["route"]>) => {
     const registration = page.route(...args);
     routeRegistrations.push(registration);
     return registration;
   };
   let threads = [...(options?.threads ?? [])];
-  const agents = options?.agents ?? [];
   const skills = options?.skills ?? DEFAULT_SKILLS;
   const uploadLimits = options?.uploadLimits ?? {
     max_files: 10,
@@ -637,38 +665,6 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
     return route.fallback();
   });
 
-  // Agents list — sidebar & gallery page
-  void registerRoute("**/api/agents", (route) => {
-    if (route.request().method() === "GET") {
-      return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ agents }),
-      });
-    }
-    return route.fallback();
-  });
-
-  // Individual agent — agent chat page
-  void registerRoute("**/api/agents/*", (route) => {
-    if (route.request().method() === "GET") {
-      const url = route.request().url();
-      const agent = agents.find((a) => url.endsWith(`/api/agents/${a.name}`));
-      if (agent) {
-        return route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(agent),
-        });
-      }
-    }
-    return route.fulfill({
-      status: 404,
-      contentType: "application/json",
-      body: JSON.stringify({ detail: "Agent not found" }),
-    });
-  });
-
   return {
     ready: Promise.all(routeRegistrations).then(() => undefined),
   };
@@ -680,7 +676,7 @@ export function mockLangGraphAPI(page: Page, options?: MockAPIOptions) {
 
 /**
  * Build a minimal SSE stream that the LangGraph SDK can parse.
- * The stream returns a single AI message: "Hello from DeerFlow!".
+ * The stream returns a single AI message: "Hello from ChemAgent!".
  */
 export function handleRunStream(
   route: Route,

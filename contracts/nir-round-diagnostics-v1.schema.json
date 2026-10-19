@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chemagent:nir-round-diagnostics:v1",
+  "title": "Immutable autonomous round diagnostic cache",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "evidence_status",
+    "session_id",
+    "experiment_id",
+    "decision_id",
+    "model_hash",
+    "comparison_group_id",
+    "charts"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "evidence_status": { "const": "available" },
+    "session_id": { "type": "string" },
+    "experiment_id": { "type": "string" },
+    "decision_id": { "type": "string" },
+    "model_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "comparison_group_id": { "type": "string" },
+    "charts": {
+      "type": "object",
+      "required": ["calibration", "calibration_cv", "validation"],
+      "additionalProperties": false,
+      "properties": {
+        "calibration": { "$ref": "#/$defs/points" },
+        "calibration_cv": { "$ref": "#/$defs/points" },
+        "validation": { "$ref": "#/$defs/points" }
+      }
+    }
+  },
+  "$defs": {
+    "values": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2000,
+      "items": { "type": "number" }
+    },
+    "points": {
+      "type": "object",
+      "required": [
+        "scope",
+        "evidence_status",
+        "observed",
+        "predicted",
+        "residual",
+        "sample_ids",
+        "n_total",
+        "n_returned",
+        "sampling"
+      ],
+      "properties": {
+        "scope": { "enum": ["calibration", "calibration_cv", "validation"] },
+        "evidence_status": { "const": "available" },
+        "observed": { "$ref": "#/$defs/values" },
+        "predicted": { "$ref": "#/$defs/values" },
+        "residual": { "$ref": "#/$defs/values" },
+        "sample_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2000,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-f0-9]{16}$" }
+        },
+        "n_total": { "type": "integer", "minimum": 1 },
+        "n_returned": { "type": "integer", "minimum": 1, "maximum": 2000 },
+        "sampling": { "type": "string" },
+        "unit": { "type": ["string", "null"], "maxLength": 50 }
+      }
+    }
+  }
+}

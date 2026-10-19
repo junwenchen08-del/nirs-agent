@@ -107,7 +107,7 @@ def _write_plots_and_report(
 
     pred_b64 = plot_predicted_vs_reference(y_te, y_pred_te)
     resid_b64 = plot_residuals(y_te, y_pred_te)
-    raw_b64 = plot_raw_spectra(spec_data, n_highlight=5)
+    raw_b64 = plot_raw_spectra(spec_data, n_highlight=5, wavelength_unit=metrics.get("wavelength_unit"))
 
     cv_b64 = ""
     if isinstance(cv_results, dict) and cv_results.get("n_components"):
@@ -138,8 +138,8 @@ def _write_plots_and_report(
 
             vip_scores = compute_vip(model, X_tr, y_tr)
             coef = get_regression_coefficients(model)
-            vip_b64 = plot_vip(vip_scores, wv=wv)
-            coef_b64 = plot_regression_coefficients(coef, wv=wv)
+            vip_b64 = plot_vip(vip_scores, wv=wv, wavelength_unit=metrics.get("wavelength_unit"))
+            coef_b64 = plot_regression_coefficients(coef, wv=wv, wavelength_unit=metrics.get("wavelength_unit"))
             for fname, b64 in [("vip_scores.png", vip_b64), ("regression_coefficients.png", coef_b64)]:
                 if b64:
                     with open(os.path.join(out_dir, fname), "wb") as f:
@@ -156,6 +156,7 @@ def _write_plots_and_report(
         predicted_vs_reference_b64=pred_b64,
         residuals_b64=resid_b64,
         cv_curve_b64=cv_b64,
+        extra_plots={**({"vip_scores.png": "PLS变量重要性（VIP）"} if vip_b64 else {}), **({"regression_coefficients.png": "PLS回归系数"} if coef_b64 else {})},
     )
     report_path = os.path.join(out_dir, "report.md")
     with open(report_path, "w", encoding="utf-8") as f:

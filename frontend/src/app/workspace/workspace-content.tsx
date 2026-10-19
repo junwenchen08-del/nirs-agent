@@ -29,7 +29,16 @@ export async function WorkspaceContent({
 
   return (
     <QueryClientProvider>
-      <SidebarProvider className="h-screen" defaultOpen={initialSidebarOpen}>
+      <SidebarProvider
+        className="h-screen"
+        defaultOpen={initialSidebarOpen}
+        style={
+          {
+            "--sidebar-width": "15rem",
+            "--sidebar-width-icon": "4rem",
+          } as React.CSSProperties
+        }
+      >
         <WorkspaceSidebar />
         <SidebarInset className="min-w-0">
           <GatewayOfflineBanner gatewayUnavailable={gatewayUnavailable} />

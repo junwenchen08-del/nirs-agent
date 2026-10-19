@@ -453,8 +453,39 @@ def nir_train_classifier_tool(
         real_input = _resolve(runtime, file_path, read_only=True)
         budget.check_file(real_input, stage="classification_file_preflight")
 
+        from types import SimpleNamespace
+
+        from .datasets.workspace import has_fixed_partitions, load_workspace_export
+
+        workspace = load_workspace_export(real_input)
+        automatic_split = workspace is None or not has_fixed_partitions(workspace)
+
         use_columnwise = label_row is not None or (label_col is None or not str(label_col).strip())
-        if use_columnwise:
+        if workspace is not None:
+            if workspace["targets"].shape[1] != 1:
+                return _err("分类分析需要选择一个类别标签列。")
+            if not automatic_split and np.any(workspace["usage"] == "unassigned"):
+                return _err("还有待分配的样本，请先分配用途或标为不参与。")
+            if group_col or group_row is not None or label_row is not None or x_cols or sample_cols:
+                return _err("保存版本已固定行列与用途，请不要覆盖列选择或分组设置。")
+            keep = workspace["usage"] != "excluded"
+            arrays = {
+                "X": workspace["X"][keep],
+                "y": workspace["targets"][keep, 0],
+                "wv": workspace["wv"],
+                "groups": workspace["groups"][keep] if workspace.get("groups") is not None else None,
+                "headers": [],
+                "label_name": workspace["target_names"][0],
+                "group_name": "_nir_workspace_group" if workspace.get("groups") is not None else None,
+                "layout": "samples_in_rows",
+                "layout_parameters": {"source": "dataset_workspace", "usage_column": "_nir_workspace_usage"},
+            }
+            roles = workspace["usage"][keep]
+            if not automatic_split:
+                split = SimpleNamespace(calibration=np.flatnonzero(roles == "train"), tuning=np.flatnonzero(roles == "validation"), holdout=np.flatnonzero(roles == "test"), strategy="user_named_partitions")
+                if not all(len(indices) for indices in (split.calibration, split.tuning, split.holdout)):
+                    return _err("请分别为训练集、验证集和测试集分配样本。")
+        elif use_columnwise:
             arrays = _classification_arrays_from_columnwise(
                 real_input,
                 label_row=label_row,
@@ -484,13 +515,14 @@ def nir_train_classifier_tool(
         dataset_validation = _classification_dataset_gate(X, y, wv)
         if validation_error := science_gate_error(dataset_validation):
             return _err(validation_error)
-        split = stratified_three_way_split(
-            y,
-            groups=groups,
-            tuning_ratio=float(tuning_ratio),
-            test_ratio=float(test_ratio),
-            random_state=int(random_state),
-        )
+        if automatic_split:
+            split = stratified_three_way_split(
+                y,
+                groups=groups,
+                tuning_ratio=float(tuning_ratio),
+                test_ratio=float(test_ratio),
+                random_state=int(random_state),
+            )
         calibration = np.asarray(split.calibration, dtype=int)
         tuning = np.asarray(split.tuning, dtype=int)
         holdout = np.asarray(split.holdout, dtype=int)
@@ -566,7 +598,7 @@ def nir_train_classifier_tool(
         training_data_hash = _sha256_file(real_input)
         split_payload = {
             "strategy": split.strategy,
-            "random_state": int(random_state),
+            "random_state": int(random_state) if automatic_split else None,
             "group_column": group_name,
             "ratios": {
                 "calibration": float(1.0 - tuning_ratio - test_ratio),
@@ -579,6 +611,11 @@ def nir_train_classifier_tool(
             "tuning": {"n_samples": int(tuning.size), "sample_indices": tuning.tolist()},
             "holdout": {"n_samples": int(holdout.size), "sample_indices": holdout.tolist()},
         }
+        if workspace is not None:
+            source_indices = np.flatnonzero(keep)
+            split_payload["ratios"] = {"calibration": calibration.size / len(y), "tuning": tuning.size / len(y), "holdout": holdout.size / len(y)}
+            for part, indices in (("calibration", calibration), ("tuning", tuning), ("holdout", holdout)):
+                partition_payload[part]["sample_indices"] = source_indices[indices].tolist()
         if groups is not None:
             for name, indices in (("calibration", calibration), ("tuning", tuning), ("holdout", holdout)):
                 partition_payload[name]["group_values"] = sorted(set(groups[indices]))

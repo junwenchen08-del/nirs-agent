@@ -177,7 +177,9 @@ def nir_recommend_preprocessing_tool(
         data = _load_npz_safely(real_input)
         X = np.asarray(data["X"], dtype=float)
         wv = np.asarray(data["wv"], dtype=float).ravel() if data.get("wv") is not None else None
-        recommendation = recommend_preprocessing(X, wv, budget=budget)
+        from .method_catalog import get_method_knowledge_base
+
+        recommendation = recommend_preprocessing(X, wv, budget=budget, knowledge_mode="auto", knowledge_base=get_method_knowledge_base())
         return _ok(
             {
                 "status": "ok",

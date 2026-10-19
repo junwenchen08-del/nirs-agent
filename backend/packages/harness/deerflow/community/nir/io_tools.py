@@ -363,6 +363,11 @@ def nir_load_data_tool(
         real_in = _resolve(runtime, file_path, read_only=True)
         budget.check_file(real_in, stage="load_file_preflight")
 
+        from .datasets.workspace import load_workspace_export
+
+        if load_workspace_export(real_in) is not None:
+            return _err("此文件包含已保存的固定样本用途。定量分析请在 sealed_holdout 流程中直接使用 nir_prepare_search；分类请直接使用 nir_train_classifier。这样会保留已选波段与用途。")
+
         parsed_y_cols = _parse_y_cols(y_cols)
         if y_col is not None and parsed_y_cols is not None:
             return _err("y_col and y_cols are mutually exclusive")
@@ -482,6 +487,24 @@ def nir_inspect_tool(
         real_in = _resolve(runtime, file_path, read_only=True)
         budget.check_file(real_in, stage="inspect_file_preflight")
         raw = inspect_file(real_in)
+        from .datasets.workspace import load_workspace_export
+
+        workspace = load_workspace_export(real_in)
+        if workspace is not None:
+            return _ok(
+                {
+                    "format": "csv",
+                    "source": "dataset_workspace",
+                    "n_samples": len(workspace["X"]),
+                    "n_wavelengths": workspace["X"].shape[1],
+                    "target_names": workspace["target_names"],
+                    "usage_counts": {role: int(np.count_nonzero(workspace["usage"] == role)) for role in ("unassigned", "train", "validation", "test", "excluded")},
+                    "hint": (
+                        "User-saved fixed sample roles and selected wavelengths. Regression: start sealed_holdout and call nir_prepare_search directly. "
+                        "Classification: nir_train_classifier directly. Never randomize these roles; missing roles require user correction. These labels do not establish external validation."
+                    ),
+                }
+            )
         # inspect_file returns a JSON string. Parse it so we can layer extra
         # advisory fields and re-serialize.
         import json as _json
@@ -726,6 +749,12 @@ def nir_predict_tool(
                         "error_type": type(monitoring_error).__name__,
                     }
         event_id = str(uuid.uuid4())
+        output_sha256 = None
+        if payload.get("status") == "ok" and payload.get("output_path"):
+            try:
+                output_sha256 = _sha256_file(_resolve(runtime, payload["output_path"], read_only=True))
+            except Exception as output_error:  # noqa: BLE001
+                return finish({"status": "error", "error": str(output_error)[:1000]}, error=output_error)
         event = {
             "schema_version": 1,
             "event_id": event_id,
@@ -746,6 +775,7 @@ def nir_predict_tool(
                 "already_preprocessed": input_preprocessed,
             },
             "output_path": payload.get("output_path") or output_path,
+            "output_sha256": output_sha256,
             "prediction_summary": _prediction_summary_for_audit(payload),
             "drift": _drift_summary_for_audit(payload, requested=detect_drift),
             "drift_monitoring": payload.get("drift_monitoring"),
@@ -760,6 +790,9 @@ def nir_predict_tool(
             "event_id": event_id,
             "event_hash": persisted["event_hash"],
             "path": _PREDICTION_AUDIT_PATH,
+            "model_sha256": model_sha256,
+            "input_sha256": data_sha256,
+            "output_sha256": output_sha256,
         }
         return _ok(payload)
 

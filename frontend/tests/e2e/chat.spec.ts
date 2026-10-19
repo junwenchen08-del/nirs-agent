@@ -4,7 +4,7 @@ import { handleRunStream, mockLangGraphAPI } from "./utils/mock-api";
 
 test.describe("Chat workspace", () => {
   test.beforeEach(async ({ page }) => {
-    mockLangGraphAPI(page);
+    await mockLangGraphAPI(page).ready;
   });
 
   test("new chat page loads with input box", async ({ page }) => {
@@ -21,8 +21,8 @@ test.describe("Chat workspace", () => {
     const textarea = page.getByPlaceholder(/how can i assist you/i);
     await expect(textarea).toBeVisible({ timeout: 15_000 });
 
-    await textarea.fill("Hello, DeerFlow!");
-    await expect(textarea).toHaveValue("Hello, DeerFlow!");
+    await textarea.fill("Hello, ChemAgent!");
+    await expect(textarea).toHaveValue("Hello, ChemAgent!");
   });
 
   test("suggests matching skills after a leading slash", async ({ page }) => {
@@ -65,7 +65,7 @@ test.describe("Chat workspace", () => {
       page.locator("span.font-medium", { hasText: "finish all tests" }),
     ).toBeVisible();
     await expect.poll(() => streamCalls).toBe(1);
-    await expect(page.getByText("Hello from DeerFlow!")).toBeVisible();
+    await expect(page.getByText("Hello from ChemAgent!")).toBeVisible();
   });
 
   test("goal command keeps the welcome header clear of the goal status", async ({
@@ -205,7 +205,7 @@ test.describe("Chat workspace", () => {
     await expect.poll(() => streamCalled, { timeout: 10_000 }).toBeTruthy();
 
     // The AI response should appear in the chat
-    await expect(page.getByText("Hello from DeerFlow!")).toBeVisible({
+    await expect(page.getByText("Hello from ChemAgent!")).toBeVisible({
       timeout: 10_000,
     });
   });
@@ -243,7 +243,9 @@ test.describe("Chat workspace", () => {
     const textarea = page.getByPlaceholder(/how can i assist you/i);
     await expect(textarea).toBeVisible({ timeout: 15_000 });
 
-    await page.getByRole("button", { name: /research/i }).click();
+    await textarea.fill(
+      "Conduct a deep dive research on [topic], and summarize the findings.",
+    );
     await expect(textarea).toHaveValue(
       "Conduct a deep dive research on [topic], and summarize the findings.",
     );
@@ -319,7 +321,7 @@ test.describe("Chat workspace", () => {
     await expect
       .poll(() => submittedText, { timeout: 10_000 })
       .toBe(slashCommand);
-    await expect(page.getByText("Hello from DeerFlow!")).toBeVisible({
+    await expect(page.getByText("Hello from ChemAgent!")).toBeVisible({
       timeout: 10_000,
     });
   });
@@ -420,7 +422,7 @@ test.describe("Chat workspace", () => {
           status: "uploaded",
         },
       ]);
-    await expect(page.getByText("Hello from DeerFlow!")).toBeVisible({
+    await expect(page.getByText("Hello from ChemAgent!")).toBeVisible({
       timeout: 10_000,
     });
   });
@@ -477,7 +479,7 @@ test.describe("Chat workspace", () => {
     const textarea = page.locator('textarea[name="message"]');
     await textarea.fill("Continue without the rejected attachment");
     await textarea.press("Enter");
-    await expect(page.getByText("Hello from DeerFlow!")).toBeVisible({
+    await expect(page.getByText("Hello from ChemAgent!")).toBeVisible({
       timeout: 10_000,
     });
     expect(uploadCalled).toBe(false);
@@ -588,7 +590,7 @@ test.describe("Chat workspace", () => {
     await expect(promptForm.getByText("report.docx")).toBeVisible();
 
     releaseUpload();
-    await expect(page.getByText("Hello from DeerFlow!")).toBeVisible({
+    await expect(page.getByText("Hello from ChemAgent!")).toBeVisible({
       timeout: 10_000,
     });
     await expect(promptForm.getByText("report.docx")).toBeHidden();
@@ -630,7 +632,7 @@ test.describe("Chat workspace", () => {
     await textarea.press("Enter");
 
     await expect.poll(() => streamCalled, { timeout: 10_000 }).toBeTruthy();
-    await expect(page.getByText("Hello from DeerFlow!")).toBeVisible({
+    await expect(page.getByText("Hello from ChemAgent!")).toBeVisible({
       timeout: 10_000,
     });
     await page.waitForTimeout(1000);

@@ -18,6 +18,8 @@ export type GoalCommand =
 
 export type InputSubmitAction =
   | { kind: "goal"; command: GoalCommand }
+  | { kind: "datasets" }
+  | { kind: "models" }
   | { kind: "stop" }
   | { kind: "empty" }
   | { kind: "message" };
@@ -207,6 +209,13 @@ export function getInputSubmitAction({
   const goalCommand = parseGoalCommand(text);
   if (goalCommand && fileCount === 0) {
     return { kind: "goal", command: goalCommand };
+  }
+  if (fileCount === 0 && /^\/datasets\s*$/i.test(text.trim())) {
+    return { kind: "datasets" };
+  }
+  // The model picker can be opened after attaching new prediction data.
+  if (/^\/models\s*$/i.test(text.trim())) {
+    return { kind: "models" };
   }
   if (status === "streaming") {
     return { kind: "stop" };

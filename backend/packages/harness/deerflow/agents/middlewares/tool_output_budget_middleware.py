@@ -38,6 +38,18 @@ logger = logging.getLogger(__name__)
 # ``read_file`` tool can read it back (issue #3416).
 _VIRTUAL_OUTPUTS_BASE = "/mnt/user-data/outputs"
 
+# Sealed-search protocol JSON is consumed atomically by the decision middleware
+# and model. A file preview drops the context/version/schema and asks for a
+# read_file call that the sealed protocol correctly forbids. These bounded
+# service responses retain their original contract; NIR's cumulative model-call
+# admission still charges their complete bytes and tool definitions. Generic
+# tool outputs and operator-configured exemptions retain the existing behavior.
+_ATOMIC_NIR_PROTOCOL_TOOLS = frozenset({"nir_prepare_search", "nir_decision_context", "nir_submit_decision", "nir_execute_decision", "nir_decision_history", "nir_freeze_search", "nir_finalize_search"})
+
+
+def _exempt_message(msg: ToolMessage, config: ToolOutputConfig) -> bool:
+    return (msg.name or "") in _ATOMIC_NIR_PROTOCOL_TOOLS or (msg.name or "") in config.exempt_tools
+
 
 def _default_config() -> ToolOutputConfig:
     return ToolOutputConfig()
@@ -428,7 +440,7 @@ def _patch_tool_message(
 ) -> ToolMessage:
     """Apply budget to a single ToolMessage. Returns the original if unchanged."""
     tool_name = msg.name or "unknown"
-    if tool_name in config.exempt_tools:
+    if _exempt_message(msg, config):
         return msg
 
     text = _message_text(msg.content)
@@ -472,7 +484,7 @@ def _effective_trigger(tool_name: str, config: ToolOutputConfig) -> int:
 
 def _tool_message_over_budget(msg: ToolMessage, config: ToolOutputConfig) -> bool:
     """Cheap, per-tool-aware check: is this ToolMessage non-exempt and over its trigger?"""
-    if (msg.name or "") in config.exempt_tools:
+    if _exempt_message(msg, config):
         return False
     trigger = _effective_trigger(msg.name or "", config)
     if trigger < 0:

@@ -565,7 +565,7 @@ def _inspect_mat_v5(filepath: str) -> dict:
         info["schema_mapping"] = schema_mapping
         if schema_mapping["status"] == "auto":
             X, y, wv = load_inferred_mat_arrays(candidates, schema_mapping)
-            info.update(_summarize_array(X))
+            info.update(_summarize_array(X, structure="samples_in_rows"))
             info["auto_load_supported"] = True
             info["has_reference"] = y is not None
             info["has_wavelength_axis"] = wv is not None
@@ -575,7 +575,7 @@ def _inspect_mat_v5(filepath: str) -> dict:
 
     if schema_mapping["status"] == "auto":
         X, y, wv = load_inferred_mat_arrays(candidates, schema_mapping)
-        info = _summarize_array(X)
+        info = _summarize_array(X, structure="samples_in_rows")
         info["schema_mapping"] = schema_mapping
         info["auto_load_supported"] = True
         info["has_reference"] = y is not None
@@ -622,7 +622,7 @@ def _inspect_mat73(filepath: str) -> dict:
     mapping = infer_mat_mapping(root)
     if mapping["status"] == "auto":
         X, y, wv = load_inferred_mat_arrays(root, mapping)
-        info = _summarize_array(X)
+        info = _summarize_array(X, structure="samples_in_rows")
         info.update(
             {
                 "schema_mapping": mapping,
@@ -858,11 +858,13 @@ def _pick_first_2d(candidates: dict[str, np.ndarray]) -> np.ndarray | None:
     return two_d[best_key]
 
 
-def _summarize_array(arr: np.ndarray) -> dict:
+def _summarize_array(arr: np.ndarray, *, structure: str | None = None) -> dict:
     """Build the inspect_file info dict for a 2D array."""
     if arr.ndim == 1:
         arr = arr.reshape(1, -1)
-    structure = detect_structure(arr)
+    # Inferred MAT loaders have already resolved and normalized orientation
+    # using the target and axis. Do not re-guess a wide NIR matrix's direction.
+    structure = structure or detect_structure(arr)
     if structure == "samples_in_rows":
         n_samples, n_wavelengths = arr.shape
     else:

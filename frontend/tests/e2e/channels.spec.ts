@@ -84,7 +84,7 @@ function mockChannelsAPI(
         mode: "binding_code",
         url: null,
         code: "abc123",
-        instruction: "Send /connect abc123 to the DeerFlow Slack bot.",
+        instruction: "Send /connect abc123 to the ChemAgent Slack bot.",
         expires_in: 600,
       }),
     });
@@ -93,7 +93,7 @@ function mockChannelsAPI(
 
 test.describe("IM channels", () => {
   test("sidebar and settings expose channel connections", async ({ page }) => {
-    mockLangGraphAPI(page);
+    await mockLangGraphAPI(page).ready;
     mockChannelsAPI(page);
 
     await page.goto("/workspace/chats/new");
@@ -132,7 +132,7 @@ test.describe("IM channels", () => {
   test("only enabled providers are shown and runtime setup stays editable", async ({
     page,
   }) => {
-    mockLangGraphAPI(page);
+    await mockLangGraphAPI(page).ready;
     let slackConfigured = false;
     let submittedValues: Record<string, string> | undefined;
 
@@ -263,7 +263,7 @@ test.describe("IM channels", () => {
   test("configured provider connects directly with a binding-code instruction", async ({
     page,
   }) => {
-    mockLangGraphAPI(page);
+    await mockLangGraphAPI(page).ready;
     let slackConnectCalls = 0;
     mockChannelsAPI(
       page,
@@ -299,7 +299,7 @@ test.describe("IM channels", () => {
     await sidebar.getByRole("button", { name: "Connect" }).click();
 
     await expect(
-      page.getByText("Send /connect abc123 to the DeerFlow Slack bot."),
+      page.getByText("Send /connect abc123 to the ChemAgent Slack bot."),
     ).toBeVisible();
     expect(slackConnectCalls).toBe(1);
   });
@@ -307,7 +307,7 @@ test.describe("IM channels", () => {
   test("runtime setup continues into the connect flow when a binding is still required", async ({
     page,
   }) => {
-    mockLangGraphAPI(page);
+    await mockLangGraphAPI(page).ready;
     let slackConfigured = false;
     let slackConnectCalls = 0;
 
@@ -378,7 +378,7 @@ test.describe("IM channels", () => {
           mode: "binding_code",
           url: null,
           code: "abc123",
-          instruction: "Send /connect abc123 to the DeerFlow Slack bot.",
+          instruction: "Send /connect abc123 to the ChemAgent Slack bot.",
           expires_in: 600,
         }),
       });
@@ -397,7 +397,7 @@ test.describe("IM channels", () => {
 
     await expect(setupDialog).toBeHidden();
     await expect(
-      page.getByText("Send /connect abc123 to the DeerFlow Slack bot."),
+      page.getByText("Send /connect abc123 to the ChemAgent Slack bot."),
     ).toBeVisible();
     expect(slackConnectCalls).toBe(1);
   });
@@ -405,7 +405,7 @@ test.describe("IM channels", () => {
   test("runtime setup dialog prefills editable credential values", async ({
     page,
   }) => {
-    mockLangGraphAPI(page);
+    await mockLangGraphAPI(page).ready;
     mockChannelsAPI(page, [
       {
         provider: "feishu",

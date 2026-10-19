@@ -88,6 +88,16 @@ async def test_model_routes_use_authenticated_owner_and_checkpoint(model_router_
 
 
 @pytest.mark.asyncio
+async def test_completed_registered_checkpoint_can_retry_storage(model_router_client) -> None:
+    app, _owner, service = model_router_client
+    app.state.checkpointer.aget_tuple.return_value.checkpoint["channel_values"]["nir_workflow"]["stage"] = "completed"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/nir/models/promote", json={"source_thread_id": "source-thread", "model_id": "tablet", "version": "tablet-v1"})
+    assert response.status_code == 200
+    service.promote_registered.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_promote_fails_closed_without_registered_checkpoint(model_router_client) -> None:
     app, _owner, service = model_router_client
     app.state.checkpointer.aget_tuple.return_value = None

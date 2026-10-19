@@ -125,6 +125,14 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
         """
         # Extract clarification arguments
         args = request.tool_call.get("args", {})
+        workflow = (getattr(request, "state", None) or {}).get("nir_workflow") or {}
+        pending = workflow.get("user_question") or {}
+        if workflow.get("search_protocol") == "sealed_holdout" and pending.get("status") == "waiting" and pending.get("tool_call_id") == request.tool_call.get("id"):
+            # The NIR boundary already checked this display text. Keep the
+            # original call in history, while avoiding unchecked context prose.
+            args = {**args, "question": pending["question"], "context": None}
+            if pending.get("sanitized_display"):
+                args["options"] = []
         question = args.get("question", "")
 
         logger.info("Intercepted clarification request")

@@ -89,7 +89,11 @@ def test_nir_recommend_preprocessing_returns_bounded_evidence(tmp_path: Path) ->
     payload = json.loads(result)
     assert payload["status"] == "ok"
     assert payload["scope"] == "exploratory_input_only"
-    assert payload["recommendation"]["candidates"][0]["candidate_id"] == "raw"
+    candidates = payload["recommendation"]["candidates"]
+    assert any(item["candidate_id"] == "raw" for item in candidates)
+    assert candidates[0]["candidate_id"] != "raw"
+    assert candidates[0]["evidence_ids"]
+    assert payload["recommendation"]["method_knowledge"]["mode"] == "retrieval_guided"
     assert len(payload["recommendation"]["candidates"]) <= 8
     assert "baseline_drift" in payload["recommendation"]["profile"]["tags"]
     assert "X" not in payload["recommendation"]

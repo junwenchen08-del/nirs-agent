@@ -6,7 +6,6 @@ import {
   GraduationCapIcon,
   LightbulbIcon,
   PaperclipIcon,
-  PlusIcon,
   SparklesIcon,
   RocketIcon,
   TargetIcon,
@@ -22,7 +21,6 @@ import {
   useState,
   type ComponentProps,
   type KeyboardEvent,
-  type RefObject,
 } from "react";
 import { toast } from "sonner";
 
@@ -45,7 +43,6 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
-import { ConfettiButton } from "@/components/ui/confetti-button";
 import {
   Dialog,
   DialogContent,
@@ -57,13 +54,25 @@ import {
 import {
   DropdownMenuGroup,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { fetch } from "@/core/api/fetcher";
 import { getBackendBaseURL } from "@/core/config";
 import { useI18n } from "@/core/i18n/hooks";
 import { isHiddenFromUIMessage } from "@/core/messages/utils";
 import { useModels } from "@/core/models/hooks";
+import {
+  attachDatasetForComposer,
+  attachModelForComposer,
+  getDataset,
+  getModel,
+  useNirLibraryEnabled,
+  type NIRDataset,
+  type NIRModelVersion,
+} from "@/core/nir-library";
+import {
+  mountedModelContext,
+  type MountedModel,
+} from "@/core/nir-library/mounted-model";
 import { useSkills } from "@/core/skills/hooks";
 import { useSuggestionsConfig } from "@/core/suggestions/hooks";
 import type { AgentThreadContext, GoalState } from "@/core/threads";
@@ -75,6 +84,11 @@ import {
   type UploadLimits,
   type UploadLimitViolation,
 } from "@/core/uploads";
+import {
+  mountedDatasetFiles,
+  type MountedDataset,
+  type ThreadInputMessage,
+} from "@/core/uploads/mounted-dataset";
 import { isIMEComposing } from "@/lib/ime";
 import { cn } from "@/lib/utils";
 
@@ -88,12 +102,6 @@ import {
   ModelSelectorTrigger,
 } from "../ai-elements/model-selector";
 import { Suggestion, Suggestions } from "../ai-elements/suggestion";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
 
 import {
   abortGoalRequest,
@@ -112,6 +120,8 @@ import {
 } from "./input-box-helpers";
 import { useThread } from "./messages/context";
 import { ModeHoverGuide } from "./mode-hover-guide";
+import { DatasetCommandDialog } from "./nir/dataset-command-dialog";
+import { ModelCommandDialog } from "./nir/model-command-dialog";
 import { Tooltip } from "./tooltip";
 
 type InputMode = "flash" | "thinking" | "pro" | "ultra";
@@ -137,6 +147,8 @@ export function InputBox({
   context,
   extraHeader,
   isWelcomeMode,
+  enableDatasetCommand = false,
+  enableModelCommand = false,
   threadId,
   initialValue,
   onContextChange,
@@ -163,6 +175,8 @@ export function InputBox({
    * decoupled from "the backend has created the thread" — see issue #2746.
    */
   isWelcomeMode?: boolean;
+  enableDatasetCommand?: boolean;
+  enableModelCommand?: boolean;
   threadId: string;
   initialValue?: string;
   onContextChange?: (
@@ -176,10 +190,10 @@ export function InputBox({
   ) => void;
   onFollowupsVisibilityChange?: (visible: boolean) => void;
   onGoalChange?: (goal: GoalState | null) => void;
-  onSubmit?: (message: PromptInputMessage) => void | Promise<void>;
+  onSubmit?: (message: ThreadInputMessage) => void | Promise<void>;
   onStop?: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const searchParams = useSearchParams();
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const { models } = useModels();
@@ -188,6 +202,10 @@ export function InputBox({
   const attachmentParts = attachments.files;
   const removeAttachment = attachments.remove;
   const { skills } = useSkills();
+  const { enabled: nirLibraryEnabled } = useNirLibraryEnabled();
+  const datasetCommandAvailable =
+    enableDatasetCommand && nirLibraryEnabled && attachmentParts.length === 0;
+  const modelCommandAvailable = enableModelCommand && nirLibraryEnabled;
   const { data: uploadLimits } = useUploadLimits(threadId);
   const promptRootRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -210,18 +228,56 @@ export function InputBox({
   const messagesRef = useRef(thread.messages);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [datasetDialogOpen, setDatasetDialogOpen] = useState(false);
+  const [mountedDataset, setMountedDataset] = useState<MountedDataset | null>(
+    null,
+  );
+  const [datasetMounting, setDatasetMounting] = useState(false);
+  const datasetRequestRef = useRef<AbortController | null>(null);
+  const [libraryMountError, setLibraryMountError] = useState(false);
+  const [libraryMountRetry, setLibraryMountRetry] = useState(0);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [mountedModel, setMountedModel] = useState<MountedModel | null>(null);
+  const [modelMounting, setModelMounting] = useState(false);
+  const [modelLibraryMountError, setModelLibraryMountError] = useState(false);
+  const [modelLibraryMountRetry, setModelLibraryMountRetry] = useState(0);
+  const modelRequestRef = useRef<AbortController | null>(null);
   const [pendingSuggestion, setPendingSuggestion] = useState<string | null>(
     null,
   );
   const builtinSlashCommands = useMemo<SlashSuggestion[]>(
     () => [
+      ...(modelCommandAvailable
+        ? [
+            {
+              name: "models",
+              description: t.inputBox.modelCommandDescription,
+              kind: "builtin" as const,
+            },
+          ]
+        : []),
+      ...(datasetCommandAvailable
+        ? [
+            {
+              name: "datasets",
+              description: t.inputBox.datasetCommandDescription,
+              kind: "builtin" as const,
+            },
+          ]
+        : []),
       {
         name: "goal",
         description: t.inputBox.goalCommandDescription,
         kind: "builtin",
       },
     ],
-    [t.inputBox.goalCommandDescription],
+    [
+      datasetCommandAvailable,
+      modelCommandAvailable,
+      t.inputBox.modelCommandDescription,
+      t.inputBox.datasetCommandDescription,
+      t.inputBox.goalCommandDescription,
+    ],
   );
 
   const reportUploadLimitViolations = useCallback(
@@ -357,6 +413,21 @@ export function InputBox({
   useEffect(() => {
     const goalRequestState = goalRequestStateRef.current;
     return () => abortGoalRequest(goalRequestState);
+  }, [threadId]);
+
+  useEffect(() => {
+    setMountedDataset(null);
+    setDatasetMounting(false);
+    setDatasetDialogOpen(false);
+    return () => datasetRequestRef.current?.abort();
+  }, [threadId]);
+
+  useEffect(() => {
+    setMountedModel(null);
+    setModelMounting(false);
+    setModelLibraryMountError(false);
+    setModelPickerOpen(false);
+    return () => modelRequestRef.current?.abort();
   }, [threadId]);
 
   useEffect(() => {
@@ -531,6 +602,10 @@ export function InputBox({
 
   const submitThreadMessage = useCallback(
     (message: PromptInputMessage) => {
+      if (datasetMounting)
+        return Promise.reject(new Error(t.inputBox.datasetAttaching));
+      if (modelMounting)
+        return Promise.reject(new Error(t.inputBox.modelAttaching));
       const files = message.files.flatMap((file) =>
         file.file instanceof File ? [file.file] : [],
       );
@@ -559,6 +634,20 @@ export function InputBox({
       setFollowups([]);
       setFollowupsHidden(false);
       setFollowupsLoading(false);
+      const submission: ThreadInputMessage = {
+        ...message,
+        ...(mountedDataset?.threadId === threadId ? { mountedDataset } : {}),
+        ...(mountedModel?.threadId === threadId ? { mountedModel } : {}),
+      };
+      const send = async () => {
+        await onSubmit?.(submission);
+        setMountedDataset((current) =>
+          current === mountedDataset ? null : current,
+        );
+        setMountedModel((current) =>
+          current === mountedModel ? null : current,
+        );
+      };
 
       // Guard against submitting before the initial model auto-selection
       // effect has flushed thread settings to storage/state.
@@ -573,24 +662,268 @@ export function InputBox({
         });
         return new Promise<void>((resolve, reject) => {
           setTimeout(() => {
-            Promise.resolve(onSubmit?.(message)).then(resolve).catch(reject);
+            send().then(resolve).catch(reject);
           }, 0);
         });
       }
 
-      return onSubmit?.(message);
+      return send();
     },
     [
       context,
+      datasetMounting,
+      mountedDataset,
+      modelMounting,
+      mountedModel,
       onContextChange,
       onSubmit,
       reportUploadLimitViolations,
       resolvedModelName,
       selectedModel?.supports_thinking,
       t.inputBox.suggestionPlaceholderRequired,
+      t.inputBox.datasetAttaching,
+      t.inputBox.modelAttaching,
+      threadId,
       uploadLimits,
     ],
   );
+
+  const useSavedDataset = useCallback(
+    async (dataset: NIRDataset) => {
+      datasetRequestRef.current?.abort();
+      const controller = new AbortController();
+      datasetRequestRef.current = controller;
+      setDatasetMounting(true);
+      try {
+        const result = await attachDatasetForComposer(
+          dataset.id,
+          threadId,
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        const selected: MountedDataset = {
+          threadId,
+          datasetId: dataset.id,
+          name: dataset.name,
+          virtualPath: result.virtual_path,
+          sizeBytes: result.attachment_size_bytes ?? dataset.size_bytes,
+        };
+        if (
+          result.status !== "attached" ||
+          mountedDatasetFiles(selected, threadId).length !== 1
+        )
+          throw new Error(t.inputBox.datasetAttachFailed);
+        setMountedDataset(selected);
+        toast.success(t.inputBox.datasetAttached);
+      } finally {
+        if (datasetRequestRef.current === controller) {
+          datasetRequestRef.current = null;
+          setDatasetMounting(false);
+        }
+      }
+    },
+    [t.inputBox.datasetAttachFailed, t.inputBox.datasetAttached, threadId],
+  );
+
+  const datasetFromLibrary = searchParams.get("dataset");
+  const datasetProfileFromLibrary = searchParams.get("datasetProfile");
+  useEffect(() => {
+    if (
+      !datasetFromLibrary ||
+      !isWelcomeMode ||
+      !enableDatasetCommand ||
+      !nirLibraryEnabled ||
+      isMock
+    )
+      return;
+    const controller = new AbortController();
+    datasetRequestRef.current?.abort();
+    datasetRequestRef.current = controller;
+    setDatasetMounting(true);
+    setLibraryMountError(false);
+    async function mountFromLibrary() {
+      try {
+        const dataset = await getDataset(
+          datasetFromLibrary!,
+          controller.signal,
+        );
+        if (dataset.status !== "ready") throw new Error("Dataset unavailable");
+        const result = await attachDatasetForComposer(
+          dataset.id,
+          threadId,
+          controller.signal,
+          datasetProfileFromLibrary ?? undefined,
+        );
+        const selection: MountedDataset = {
+          threadId,
+          datasetId: dataset.id,
+          name: dataset.name,
+          virtualPath: result.virtual_path,
+          sizeBytes: result.attachment_size_bytes ?? dataset.size_bytes,
+        };
+        if (
+          result.status !== "attached" ||
+          mountedDatasetFiles(selection, threadId).length !== 1
+        )
+          throw new Error("Invalid dataset attachment");
+        if (controller.signal.aborted) return;
+        setMountedDataset(selection);
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("dataset") === datasetFromLibrary) {
+          url.searchParams.delete("dataset");
+          url.searchParams.delete("datasetProfile");
+          window.history.replaceState(
+            window.history.state,
+            "",
+            `${url.pathname}${url.search}${url.hash}`,
+          );
+        }
+      } catch {
+        if (!controller.signal.aborted) setLibraryMountError(true);
+      } finally {
+        if (datasetRequestRef.current === controller) {
+          datasetRequestRef.current = null;
+          setDatasetMounting(false);
+        }
+      }
+    }
+    void mountFromLibrary();
+    return () => controller.abort();
+  }, [
+    datasetFromLibrary,
+    datasetProfileFromLibrary,
+    threadId,
+    isWelcomeMode,
+    enableDatasetCommand,
+    nirLibraryEnabled,
+    isMock,
+    libraryMountRetry,
+  ]);
+
+  const useSavedModel = useCallback(
+    async (model: NIRModelVersion) => {
+      modelRequestRef.current?.abort();
+      const controller = new AbortController();
+      modelRequestRef.current = controller;
+      setModelMounting(true);
+      try {
+        const result = await attachModelForComposer(
+          model.model_id,
+          model.version,
+          threadId,
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        const selected: MountedModel = {
+          threadId,
+          modelId: model.model_id,
+          version: model.version,
+          modelPath: result.model_path,
+        };
+        if (
+          result.status !== "attached" ||
+          result.model_id !== selected.modelId ||
+          result.version !== selected.version ||
+          !mountedModelContext(selected, threadId, "model")
+        )
+          throw new Error(t.inputBox.modelAttachFailed);
+        setMountedModel(selected);
+        toast.success(t.inputBox.modelAttached);
+      } finally {
+        if (modelRequestRef.current === controller) {
+          modelRequestRef.current = null;
+          setModelMounting(false);
+        }
+      }
+    },
+    [t.inputBox.modelAttachFailed, t.inputBox.modelAttached, threadId],
+  );
+
+  const modelFromLibrary = searchParams.get("model");
+  const modelVersionFromLibrary = searchParams.get("version");
+  useEffect(() => {
+    if (
+      !modelFromLibrary ||
+      !isWelcomeMode ||
+      !enableModelCommand ||
+      !nirLibraryEnabled ||
+      isMock
+    )
+      return;
+    const controller = new AbortController();
+    modelRequestRef.current?.abort();
+    modelRequestRef.current = controller;
+    setModelMounting(true);
+    setModelLibraryMountError(false);
+    async function mountModelFromLibrary() {
+      try {
+        if (!modelVersionFromLibrary) throw new Error("Missing model version");
+        const model = await getModel(
+          modelFromLibrary!,
+          modelVersionFromLibrary,
+          controller.signal,
+        );
+        if (
+          model.status !== "ready" ||
+          model.model_id !== modelFromLibrary ||
+          model.version !== modelVersionFromLibrary
+        )
+          throw new Error("Model identity mismatch");
+        const result = await attachModelForComposer(
+          model.model_id,
+          model.version,
+          threadId,
+          controller.signal,
+        );
+        const selection: MountedModel = {
+          threadId,
+          modelId: model.model_id,
+          version: model.version,
+          modelPath: result.model_path,
+        };
+        if (
+          result.status !== "attached" ||
+          result.model_id !== model.model_id ||
+          result.version !== model.version ||
+          !mountedModelContext(selection, threadId, "model")
+        )
+          throw new Error("Invalid model attachment");
+        if (controller.signal.aborted) return;
+        setMountedModel(selection);
+        const url = new URL(window.location.href);
+        if (
+          url.searchParams.get("model") === modelFromLibrary &&
+          url.searchParams.get("version") === modelVersionFromLibrary
+        ) {
+          url.searchParams.delete("model");
+          url.searchParams.delete("version");
+          window.history.replaceState(
+            window.history.state,
+            "",
+            `${url.pathname}${url.search}${url.hash}`,
+          );
+        }
+      } catch {
+        if (!controller.signal.aborted) setModelLibraryMountError(true);
+      } finally {
+        if (modelRequestRef.current === controller) {
+          modelRequestRef.current = null;
+          setModelMounting(false);
+        }
+      }
+    }
+    void mountModelFromLibrary();
+    return () => controller.abort();
+  }, [
+    modelFromLibrary,
+    modelVersionFromLibrary,
+    threadId,
+    isWelcomeMode,
+    enableModelCommand,
+    nirLibraryEnabled,
+    isMock,
+    modelLibraryMountRetry,
+  ]);
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -599,6 +932,26 @@ export function InputBox({
         fileCount: message.files.length,
         status,
       });
+      if (submitAction.kind === "datasets") {
+        if (!enableDatasetCommand) return submitThreadMessage(message);
+        if (!datasetCommandAvailable) {
+          toast.error(t.nirLibrary.featureDisabledDescription);
+          return;
+        }
+        textInput.setInput("");
+        setDatasetDialogOpen(true);
+        return;
+      }
+      if (submitAction.kind === "models") {
+        if (!enableModelCommand) return submitThreadMessage(message);
+        if (!modelCommandAvailable) {
+          toast.error(t.nirLibrary.featureDisabledDescription);
+          return;
+        }
+        textInput.setInput("");
+        setModelPickerOpen(true);
+        return;
+      }
       if (submitAction.kind === "goal") {
         promptHistoryIndexRef.current = null;
         promptHistoryDraftRef.current = "";
@@ -629,7 +982,18 @@ export function InputBox({
       }
       return submitThreadMessage(message);
     },
-    [handleGoalCommand, onStop, status, submitThreadMessage],
+    [
+      handleGoalCommand,
+      datasetCommandAvailable,
+      enableDatasetCommand,
+      enableModelCommand,
+      modelCommandAvailable,
+      onStop,
+      status,
+      submitThreadMessage,
+      t.nirLibrary.featureDisabledDescription,
+      textInput,
+    ],
   );
 
   const requestFormSubmit = useCallback(() => {
@@ -711,6 +1075,16 @@ export function InputBox({
 
   const applySkillSuggestion = useCallback(
     (suggestion: SlashSuggestion) => {
+      if (suggestion.kind === "builtin" && suggestion.name === "models") {
+        textInput.setInput("");
+        setModelPickerOpen(true);
+        return;
+      }
+      if (suggestion.kind === "builtin" && suggestion.name === "datasets") {
+        textInput.setInput("");
+        setDatasetDialogOpen(true);
+        return;
+      }
       const nextValue = `/${suggestion.name} `;
       textInput.setInput(nextValue);
       setDismissedSkillSuggestionValue(nextValue);
@@ -1064,6 +1438,23 @@ export function InputBox({
         globalDrop
         multiple
         onSubmit={handleSubmit}
+        onSubmitCapture={(event) => {
+          if (
+            !enableModelCommand ||
+            !/^\/models\s*$/i.test(textInput.value.trim())
+          )
+            return;
+          // Stop the generated form's message cleanup: selecting a model must
+          // preserve any files already added for the later prediction request.
+          event.preventDefault();
+          event.stopPropagation();
+          if (!modelCommandAvailable) {
+            toast.error(t.nirLibrary.featureDisabledDescription);
+            return;
+          }
+          textInput.setInput("");
+          setModelPickerOpen(true);
+        }}
         {...props}
       >
         {extraHeader && (
@@ -1071,6 +1462,116 @@ export function InputBox({
             <div className="absolute right-0 bottom-0 left-0 flex items-center justify-center">
               {extraHeader}
             </div>
+          </div>
+        )}
+        {datasetMounting && datasetFromLibrary && (
+          <p className="text-muted-foreground mx-3 mt-3 text-sm" role="status">
+            {locale.startsWith("zh")
+              ? "正在将数据集文件带入新对话…"
+              : "Adding the dataset file to your new chat…"}
+          </p>
+        )}
+        {libraryMountError && datasetFromLibrary && (
+          <div
+            className="text-destructive relative z-10 mx-3 mt-3 flex flex-wrap items-center gap-2 text-sm"
+            role="alert"
+          >
+            <span>
+              {locale.startsWith("zh")
+                ? "文件未能挂载，请重试。"
+                : "The file could not be attached. Retry."}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setLibraryMountRetry((value) => value + 1)}
+            >
+              {locale.startsWith("zh") ? "重新挂载" : "Retry attachment"}
+            </Button>
+          </div>
+        )}
+        {modelMounting && (
+          <p
+            role="status"
+            className="text-muted-foreground relative z-10 mx-3 mt-3 text-sm"
+          >
+            {t.inputBox.modelAttaching}
+          </p>
+        )}
+        {modelLibraryMountError && (
+          <div
+            role="alert"
+            className="text-destructive relative z-10 mx-3 mt-3 flex flex-wrap items-center gap-2 text-sm"
+          >
+            <span>
+              {locale.startsWith("zh")
+                ? "模型未能挂载，请重试。"
+                : "The model could not be attached. Please retry."}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setModelLibraryMountRetry((value) => value + 1)}
+            >
+              {locale.startsWith("zh")
+                ? "重新挂载模型"
+                : "Retry model attachment"}
+            </Button>
+          </div>
+        )}
+        {mountedDataset?.threadId === threadId && (
+          <div
+            data-testid="mounted-dataset"
+            className="relative z-10 mx-3 mt-3 flex w-[calc(100%-1.5rem)] min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+          >
+            <PaperclipIcon className="size-4 shrink-0" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium" title={mountedDataset.name}>
+                {mountedDataset.name}
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {t.inputBox.datasetAttached}
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label={t.inputBox.datasetClearSelection}
+              onClick={() => setMountedDataset(null)}
+            >
+              <XIcon className="size-4" />
+            </Button>
+          </div>
+        )}
+        {mountedModel?.threadId === threadId && (
+          <div
+            data-testid="mounted-model"
+            className="relative z-10 mx-3 mt-3 flex w-[calc(100%-1.5rem)] min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+          >
+            <PaperclipIcon className="size-4 shrink-0" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p
+                className="truncate font-medium"
+                title={`${mountedModel.modelId} · ${mountedModel.version}`}
+              >
+                {mountedModel.modelId} · {mountedModel.version}
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {t.inputBox.modelAttached}
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label={t.inputBox.modelClearSelection}
+              onClick={() => setMountedModel(null)}
+            >
+              <XIcon className="size-4" />
+            </Button>
           </div>
         )}
         <PromptInputAttachments>
@@ -1434,7 +1935,7 @@ export function InputBox({
             </ModelSelector>
             <PromptInputSubmit
               className="rounded-full"
-              disabled={disabled}
+              disabled={Boolean(disabled) || datasetMounting || modelMounting}
               variant="outline"
               status={status}
             />
@@ -1449,7 +1950,18 @@ export function InputBox({
         searchParams.get("mode") !== "skill" &&
         !showSkillSuggestions && (
           <div className="flex items-center justify-center pt-2">
-            <SuggestionList textareaRef={textareaRef} />
+            <AnalysisShortcuts
+              datasetEnabled={enableDatasetCommand}
+              modelEnabled={enableModelCommand}
+              disabled={
+                Boolean(disabled) ||
+                datasetMounting ||
+                modelMounting ||
+                status === "streaming"
+              }
+              onDataset={() => setDatasetDialogOpen(true)}
+              onModel={() => setModelPickerOpen(true)}
+            />
           </div>
         )}
 
@@ -1474,75 +1986,96 @@ export function InputBox({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {enableDatasetCommand && (
+        <DatasetCommandDialog
+          open={datasetDialogOpen}
+          onOpenChange={(open) => {
+            setDatasetDialogOpen(open);
+            if (!open) datasetRequestRef.current?.abort();
+          }}
+          onUse={useSavedDataset}
+          canUse={
+            !disabled &&
+            !datasetMounting &&
+            !modelMounting &&
+            status !== "streaming"
+          }
+        />
+      )}
+      {enableModelCommand && (
+        <ModelCommandDialog
+          open={modelPickerOpen}
+          onOpenChange={(open) => {
+            setModelPickerOpen(open);
+            if (!open) modelRequestRef.current?.abort();
+          }}
+          onUse={useSavedModel}
+          canUse={
+            !disabled &&
+            !datasetMounting &&
+            !modelMounting &&
+            status !== "streaming"
+          }
+        />
+      )}
     </div>
   );
 }
 
-function SuggestionList({
-  textareaRef,
+function AnalysisShortcuts({
+  datasetEnabled,
+  modelEnabled,
+  disabled,
+  onDataset,
+  onModel,
 }: {
-  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  datasetEnabled: boolean;
+  modelEnabled: boolean;
+  disabled: boolean;
+  onDataset: () => void;
+  onModel: () => void;
 }) {
-  const { t } = useI18n();
-  const { textInput } = usePromptInputController();
-  const handleSuggestionClick = useCallback(
-    (prompt: string | undefined) => {
-      if (!prompt) return;
-      textInput.setInput(prompt);
-      requestAnimationFrame(() => {
-        const textarea = textareaRef.current;
-        const placeholder = findSuggestionTemplatePlaceholder(prompt);
-        if (textarea && placeholder) {
-          textarea.focus();
-          textarea.setSelectionRange(placeholder.start, placeholder.end);
-        }
-      });
-    },
-    [textareaRef, textInput],
-  );
+  const { locale } = useI18n();
+  const attachments = usePromptInputAttachments();
+  const zh = locale === "zh-CN";
   return (
-    <Suggestions className="min-h-16 w-full max-w-full justify-center px-4 sm:w-fit sm:px-0">
-      <ConfettiButton
-        className="text-muted-foreground cursor-pointer rounded-full px-4 text-xs font-normal"
+    <div
+      className="flex flex-wrap justify-center gap-2"
+      aria-label={zh ? "开始分析" : "Start analysis"}
+    >
+      <Button
+        type="button"
         variant="outline"
         size="sm"
-        onClick={() => handleSuggestionClick(t.inputBox.surpriseMePrompt)}
+        disabled={disabled}
+        onClick={() => attachments.openFileDialog()}
       >
-        <SparklesIcon className="size-4" /> {t.inputBox.surpriseMe}
-      </ConfettiButton>
-      {t.inputBox.suggestions.map((suggestion) => (
-        <Suggestion
-          key={suggestion.suggestion}
-          icon={suggestion.icon}
-          suggestion={suggestion.suggestion}
-          onClick={() => handleSuggestionClick(suggestion.prompt)}
-        />
-      ))}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Suggestion icon={PlusIcon} suggestion={t.common.create} />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuGroup>
-            {t.inputBox.suggestionsCreate.map((suggestion, index) =>
-              "type" in suggestion && suggestion.type === "separator" ? (
-                <DropdownMenuSeparator key={index} />
-              ) : (
-                !("type" in suggestion) && (
-                  <DropdownMenuItem
-                    key={suggestion.suggestion}
-                    onClick={() => handleSuggestionClick(suggestion.prompt)}
-                  >
-                    {suggestion.icon && <suggestion.icon className="size-4" />}
-                    {suggestion.suggestion}
-                  </DropdownMenuItem>
-                )
-              ),
-            )}
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </Suggestions>
+        <PaperclipIcon className="size-4" />
+        {zh ? "上传数据" : "Upload data"}
+      </Button>
+      {datasetEnabled && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={onDataset}
+        >
+          {zh ? "选择数据集" : "Choose a dataset"}
+        </Button>
+      )}
+      {modelEnabled && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={onModel}
+        >
+          {zh ? "使用已有模型" : "Use a saved model"}
+        </Button>
+      )}
+    </div>
   );
 }
 

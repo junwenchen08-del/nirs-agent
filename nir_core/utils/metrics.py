@@ -255,12 +255,63 @@ def _extract_bias(metrics: dict) -> float:
     return 0.0
 
 
+def search_metrics(metrics: dict) -> dict:
+    """Project regression evidence to Cal/CV/Val, never infer Val from Test.
+
+    Legacy flat RPD/RMSEP and cached quality are deliberately not copied.
+    This projection is also used when reflecting on historical reports.
+    """
+    validation = metrics.get("validation", metrics.get("val"))
+    if not isinstance(validation, dict):
+        if "R2_val" not in metrics or "RPD_val" not in metrics:
+            raise ValueError("Explicit validation metrics are required for search")
+        validation = {
+            "R2": metrics["R2_val"],
+            "RPD": metrics["RPD_val"],
+            "RMSE": metrics.get("RMSE_val"),
+            "bias": metrics.get("bias_val", 0.0),
+        }
+    if validation.get("scope", "validation") not in {"validation", "tuning"}:
+        raise ValueError("Expected validation metric scope")
+    result = {
+        key: metrics[key]
+        for key in (
+            "n_components",
+            "n_samples",
+            "domain",
+            "method",
+            "preprocessing_steps",
+            "pipeline",
+            "RMSECV",
+            "train_cv",
+            "train",
+            "diagnostics",
+        )
+        if key in metrics
+    }
+    result["val"] = dict(validation)
+    result["val"]["scope"] = "validation"
+    result.update(
+        evaluation_scope="validation",
+        R2_val=validation.get("R2"),
+        RPD=validation.get("RPD"),
+        RPD_val=validation.get("RPD"),
+        RMSE_val=validation.get("RMSE"),
+        bias_val=validation.get("bias", 0.0),
+    )
+    cv = metrics.get("train_cv")
+    if isinstance(cv, dict):
+        result["RMSECV"] = cv.get("RMSE", cv.get("rmse"))
+    return result
+
+
 def evaluate_quality(
     metrics: dict,
     domain: str = "default",
     n_samples: int | None = None,
     *,
     allow_small_sample_relaxation: bool = False,
+    evaluation_scope: str = "legacy",
 ) -> dict:
     """Evaluate model quality against domain-aware thresholds.
 
@@ -299,6 +350,21 @@ def evaluate_quality(
         - ``details``: ``{R2_status, RPD_status, overfitting_risk,
           bias_issue}``.
     """
+    if evaluation_scope not in {"legacy", "validation", "final_test"}:
+        raise ValueError("Unknown quality evaluation_scope")
+    if evaluation_scope == "validation":
+        metrics = search_metrics(metrics)
+    elif evaluation_scope == "final_test":
+        block = metrics.get("test")
+        if not isinstance(block, dict):
+            raise ValueError("Explicit final test metrics are required")
+        metrics = {
+            "test": block,
+            "R2": block.get("R2"),
+            "RPD": block.get("RPD"),
+            "RMSEP": block.get("RMSE"),
+            "RMSECV": metrics.get("RMSECV"),
+        }
     cfg = get_nir_config()
     thresholds = cfg.quality.get_thresholds(
         domain=domain,
@@ -349,7 +415,11 @@ def evaluate_quality(
         )
 
     # Overfitting detection.
-    rmsep = metrics.get("RMSEP")
+    rmsep = (
+        metrics.get("RMSE_val")
+        if evaluation_scope == "validation"
+        else metrics.get("RMSEP")
+    )
     if rmsep is None:
         rmsep = metrics.get("RMSE")
     rmsecv = metrics.get("RMSECV")
@@ -364,8 +434,15 @@ def evaluate_quality(
             overfitting = False
 
     # Bias issue detection (conservative; never flags a zero bias).
-    test_bias = _extract_bias(metrics)
-    test_block = metrics.get("test") if isinstance(metrics.get("test"), dict) else {}
+    test_bias = (
+        metrics.get("bias_val", 0.0)
+        if evaluation_scope == "validation"
+        else _extract_bias(metrics)
+    )
+    block_name = "val" if evaluation_scope == "validation" else "test"
+    test_block = (
+        metrics.get(block_name) if isinstance(metrics.get(block_name), dict) else {}
+    )
     reference_std = test_block.get("reference_std")
     test_n = test_block.get("n")
     test_rmse = test_block.get("RMSE", rmsep)
@@ -417,11 +494,19 @@ def evaluate_quality(
     }
     recommendation = rec_map[grade]
     if overfitting:
-        recommendation += " 检测到过拟合风险(RMSEP>2*RMSECV)，建议简化模型或增加样本。"
+        error_name = "RMSE(Val)" if evaluation_scope == "validation" else "RMSEP"
+        recommendation += (
+            f" 检测到过拟合风险({error_name}>2*RMSECV)，建议简化模型或增加样本。"
+        )
     if bias_issue:
         recommendation += " 检测到显著系统偏差，建议检查基准校正或仪器漂移。"
 
     return {
+        **(
+            {"evaluation_scope": evaluation_scope}
+            if evaluation_scope != "legacy"
+            else {}
+        ),
         "grade": grade,
         "passed": passed,
         "recommendation": recommendation,

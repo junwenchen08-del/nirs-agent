@@ -3,6 +3,8 @@ import { expect, test } from "@rstest/core";
 
 import {
   channelSourceOfThread,
+  contextOfThread,
+  agentNameOfThread,
   pathOfThread,
   textOfMessage,
 } from "@/core/threads/utils";
@@ -16,28 +18,40 @@ test("uses standard chat route when thread has no agent context", () => {
   ).toBe("/workspace/chats/thread-123");
 });
 
-test("uses agent chat route when thread context has agent_name", () => {
+test("historical agent threads use the standard route and preserve their binding", () => {
   expect(
     pathOfThread({
       thread_id: "thread-123",
       context: { agent_name: "researcher" },
     }),
-  ).toBe("/workspace/agents/researcher/chats/thread-123");
+  ).toBe("/workspace/chats/thread-123");
+  expect(
+    agentNameOfThread({
+      thread_id: "thread-123",
+      context: { agent_name: "researcher" },
+    }),
+  ).toBe("researcher");
 });
 
-test("uses provided context when pathOfThread is called with a thread id", () => {
+test("legacy context arguments still resolve to the standard chat route", () => {
   expect(pathOfThread("thread-123", { agent_name: "ops agent" })).toBe(
-    "/workspace/agents/ops%20agent/chats/thread-123",
+    "/workspace/chats/thread-123",
   );
 });
 
-test("uses agent chat route when thread metadata has agent_name", () => {
+test("historical agent metadata also uses the standard chat route", () => {
   expect(
     pathOfThread({
       thread_id: "thread-456",
       metadata: { agent_name: "coder" },
     }),
-  ).toBe("/workspace/agents/coder/chats/thread-456");
+  ).toBe("/workspace/chats/thread-456");
+  expect(
+    agentNameOfThread({
+      thread_id: "thread-456",
+      metadata: { agent_name: "coder" },
+    }),
+  ).toBe("coder");
 });
 
 test("prefers context.agent_name over metadata.agent_name", () => {
@@ -47,7 +61,48 @@ test("prefers context.agent_name over metadata.agent_name", () => {
       context: { agent_name: "from-context" },
       metadata: { agent_name: "from-metadata" },
     }),
-  ).toBe("/workspace/agents/from-context/chats/thread-789");
+  ).toBe("/workspace/chats/thread-789");
+  expect(
+    agentNameOfThread({
+      thread_id: "thread-789",
+      context: { agent_name: "from-context" },
+      metadata: { agent_name: "from-metadata" },
+    }),
+  ).toBe("from-context");
+});
+
+test("invalid or missing historical agent metadata does not create a binding", () => {
+  expect(agentNameOfThread(null)).toBeUndefined();
+  expect(
+    agentNameOfThread({ thread_id: "x", metadata: { agent_name: 123 } }),
+  ).toBeUndefined();
+  expect(
+    agentNameOfThread({ thread_id: "x", metadata: { agent_name: "  " } }),
+  ).toBeUndefined();
+});
+
+test("valid owned metadata survives an empty context and stale browser preferences", () => {
+  const thread = {
+    thread_id: "x",
+    context: { agent_name: "" },
+    metadata: { agent_name: "legacy-agent" },
+  };
+  expect(agentNameOfThread(thread)).toBe("legacy-agent");
+  const preferences = {
+    agent_name: "stale-agent",
+    model_name: "test-model",
+    thinking_enabled: true,
+  };
+  expect(contextOfThread(preferences, thread)).toEqual({
+    agent_name: "legacy-agent",
+    model_name: "test-model",
+    thinking_enabled: true,
+  });
+  expect(contextOfThread(preferences, null)).toEqual({
+    model_name: "test-model",
+    thinking_enabled: true,
+  });
+  expect(preferences.agent_name).toBe("stale-agent");
 });
 
 test("reads IM channel source metadata", () => {

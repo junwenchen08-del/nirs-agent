@@ -17,6 +17,11 @@ export interface UploadedFileInfo {
   markdown_path?: string;
   markdown_virtual_path?: string;
   markdown_artifact_url?: string;
+  dataset_library?: {
+    status: "saved" | "reused" | "failed";
+    dataset_id?: string | null;
+    error_code?: string | null;
+  } | null;
 }
 
 export interface UploadResponse {

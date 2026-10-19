@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { BRAND } from "@/core/branding";
 import { cn } from "@/lib/utils";
 
 export type FooterProps = {
@@ -11,19 +12,29 @@ export function Footer({ className }: FooterProps) {
   return (
     <footer
       className={cn(
-        "container-md mx-auto mt-32 flex flex-col items-center justify-center",
+        "mx-auto mt-12 flex max-w-6xl flex-col items-center justify-center px-6",
         className,
       )}
     >
-      <hr className="from-border/0 to-border/0 m-0 h-px w-full border-none bg-linear-to-r via-white/20" />
+      <hr className="from-border/0 to-border/0 via-border m-0 h-px w-full border-none bg-linear-to-r" />
       <div className="text-muted-foreground container flex h-20 flex-col items-center justify-center text-sm">
-        <p className="text-center font-serif text-lg md:text-xl">
+        <p className="text-center text-lg md:text-xl">
           &quot;让每一次近红外分析都有证据、可复现、可追踪。&quot;
         </p>
       </div>
       <div className="text-muted-foreground container mb-8 flex flex-col items-center justify-center text-xs">
-        <p>Built on DeerFlow · Licensed under MIT License</p>
-        <p>&copy; {year} NIR-Agent</p>
+        <p>ChemAgent · 近红外光谱智能分析平台</p>
+        <p>
+          &copy; {year} ChemAgent ·{" "}
+          <a
+            className="hover:underline"
+            href={BRAND.repositoryUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            ChemAgent 项目
+          </a>
+        </p>
       </div>
     </footer>
   );

@@ -2,6 +2,21 @@
 
 Deterministic near-infrared (NIR) spectroscopy algorithms for the NIR Agent.
 
+Official preprocessing references are packaged separately from the optional
+paper RAG. `knowledge.methods.MethodKnowledgeBase` retrieves reviewed Chemotools
+cards through offline bilingual FTS5 BM25, validates provider compatibility,
+and returns source IDs, constraints, and project search parameters separately.
+`recommend_preprocessing(..., knowledge_mode="auto")` uses calibration diagnostics
+to put retrieved candidates before the same-batch raw control. The default
+`knowledge_mode="rules"` preserves the library's earlier API behavior. All budgets,
+runtime constraints, explicit-only guards, and low-SNR exclusions still apply.
+See [implementation details](../docs/nir-method-knowledge.md).
+
+Report plots can pass `wavelength_unit=None` to `plot_raw_spectra`, `plot_vip`
+and `plot_regression_coefficients` when the axis unit is unrecorded. This labels
+the original numeric spectral axis explicitly as unknown rather than assuming nm.
+The optional argument preserves existing plotting call signatures.
+
 ## Design Principles
 
 - **Scientific-stack only**: numpy, scipy, scikit-learn, matplotlib, pydantic,

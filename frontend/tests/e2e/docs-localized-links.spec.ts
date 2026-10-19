@@ -6,15 +6,15 @@ test.describe("Localized documentation links", () => {
   }) => {
     await page.goto("/en/docs/introduction/core-concepts");
 
-    const card = page.locator("a.nextra-card", { hasText: "Why DeerFlow" });
+    const card = page.locator("a.nextra-card", { hasText: "Why ChemAgent" });
     await expect(card).toHaveAttribute(
       "href",
-      "/en/docs/introduction/why-deerflow",
+      "/en/docs/introduction/why-chemagent",
     );
 
     await card.click();
-    await expect(page).toHaveURL(/\/en\/docs\/introduction\/why-deerflow$/);
-    await expect(page.locator("main h1")).toContainText("Why DeerFlow");
+    await expect(page).toHaveURL(/\/en\/docs\/introduction\/why-chemagent$/);
+    await expect(page.locator("main h1")).toContainText("Why ChemAgent");
   });
 
   test("keeps Chinese card navigation in the Chinese docs", async ({
@@ -22,15 +22,17 @@ test.describe("Localized documentation links", () => {
   }) => {
     await page.goto("/zh/docs/introduction/core-concepts");
 
-    const card = page.locator("a.nextra-card", { hasText: "Harness 与应用" });
+    const card = page.locator("a.nextra-card", { hasText: "会话与分析记录" });
     await expect(card).toHaveAttribute(
       "href",
-      "/zh/docs/introduction/harness-vs-app",
+      "/zh/docs/application/agents-and-threads",
     );
 
     await card.click();
-    await expect(page).toHaveURL(/\/zh\/docs\/introduction\/harness-vs-app$/);
-    await expect(page.locator("main h1")).toContainText("Harness 与应用");
+    await expect(page).toHaveURL(
+      /\/zh\/docs\/application\/agents-and-threads$/,
+    );
+    await expect(page.locator("main h1")).toContainText("会话与分析记录");
   });
 
   test("localizes regular Markdown links", async ({ page }) => {
@@ -38,7 +40,7 @@ test.describe("Localized documentation links", () => {
 
     const link = page
       .locator("main")
-      .getByRole("link", { name: "Agents and Threads" })
+      .getByRole("link", { name: "Chats and analysis records" })
       .first();
     await expect(link).toHaveAttribute(
       "href",
@@ -49,6 +51,8 @@ test.describe("Localized documentation links", () => {
     await expect(page).toHaveURL(
       /\/en\/docs\/application\/agents-and-threads$/,
     );
-    await expect(page.locator("main h1")).toContainText("Agents and Threads");
+    await expect(page.locator("main h1")).toContainText(
+      "Chats and analysis records",
+    );
   });
 });

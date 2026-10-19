@@ -1,4 +1,7 @@
+from pathlib import Path
 from types import SimpleNamespace
+
+import yaml
 
 from deerflow.sandbox.security import is_host_bash_allowed
 from deerflow.tools.tools import get_available_tools
@@ -63,6 +66,35 @@ def test_get_available_tools_hides_renamed_host_bash_alias(monkeypatch):
     assert "bash" not in names
     assert "shell" not in names
     assert "ls" in names
+
+
+def test_get_available_tools_keeps_nir_tool_misgrouped_as_bash(monkeypatch):
+    config = _make_config(
+        allow_host_bash=False,
+        extra_tools=[SimpleNamespace(name="nir_workflow", group="bash", use="deerflow.community.nir.workflow:nir_workflow_tool")],
+    )
+    monkeypatch.setattr("deerflow.tools.tools.get_app_config", lambda: config)
+    monkeypatch.setattr(
+        "deerflow.tools.tools.resolve_variable",
+        lambda use, _: SimpleNamespace(name="nir_workflow" if "nir_workflow_tool" in use else "ls"),
+    )
+
+    names = [tool.name for tool in get_available_tools(include_mcp=False, subagent_enabled=False)]
+
+    assert "nir_workflow" in names
+    assert "bash" not in names
+
+
+def test_example_config_separates_nir_tools_from_host_bash():
+    example_path = Path(__file__).resolve().parents[2] / "config.example.yaml"
+    config = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+    groups = {group["name"] for group in config["tool_groups"]}
+    nir_tools = [tool for tool in config["tools"] if tool["name"].startswith("nir_")]
+
+    assert "nir" in groups
+    assert nir_tools
+    assert all(tool["group"] == "nir" for tool in nir_tools)
+    assert {tool["name"] for tool in config["tools"] if tool["group"] == "bash"} == {"bash"}
 
 
 def test_get_available_tools_keeps_bash_for_aio_sandbox(monkeypatch):

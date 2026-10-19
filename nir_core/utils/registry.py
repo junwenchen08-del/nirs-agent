@@ -104,13 +104,9 @@ class ModelRegistry:
             with open(p, encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError) as exc:
-            raise RegistryCorruptionError(
-                f"Cannot read model registry {p}: {exc}"
-            ) from exc
+            raise RegistryCorruptionError(f"Cannot read model registry {p}: {exc}") from exc
         if not isinstance(data, dict):
-            raise RegistryCorruptionError(
-                f"Model registry {p} must contain a JSON object"
-            )
+            raise RegistryCorruptionError(f"Model registry {p} must contain a JSON object")
         return data
 
     def _read(self) -> dict[str, list[dict]]:
@@ -154,6 +150,7 @@ class ModelRegistry:
         model_path: str,
         wavelength_indices: list[int] | None = None,
         artifact_hash: str | None = None,
+        registration_approval: dict | None = None,
     ) -> str:
         """Register a new model version and return its version tag.
 
@@ -166,6 +163,7 @@ class ModelRegistry:
             data_hash: Hash of the training data the model was fit on.
             model_path: Path to the serialized model artifact.
             wavelength_indices: Optional selected wavelength indices.
+            registration_approval: Optional artifact-bound user quality acceptance.
 
         Returns:
             Version string ``"<model_id>-v<timestamp>"``.
@@ -190,6 +188,8 @@ class ModelRegistry:
                 "wavelength_indices": wavelength_indices,
                 "registered_at": timestamp,
             }
+            if registration_approval is not None:
+                record["registration_approval"] = registration_approval
             versions.append(record)
             data[model_id] = versions
             self._write_unlocked(data)

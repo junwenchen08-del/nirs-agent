@@ -1,0 +1,119 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>NIR 建模报告</title><style>body{font:16px/1.8 system-ui,sans-serif;color:#1e293b;background:#fff;margin:40px auto;padding:0 32px;max-width:1120px}h1{border-bottom:3px solid #0f766e;padding-bottom:16px}h2{margin-top:42px;color:#0f766e}table{width:100%;border-collapse:collapse;margin:20px 0;font-variant-numeric:tabular-nums}td{border:1px solid #cbd5e1;padding:10px}tr:first-child{background:#f1f5f9;font-weight:600}img{max-width:100%;height:auto}figure{margin:24px 0}figcaption{color:#64748b}p,td{overflow-wrap:anywhere}code{background:#f1f5f9;padding:2px 4px}@media print{body{margin:0;padding:0;font-size:11pt}h2{break-after:avoid}figure,tr{break-inside:avoid}}</style><body><h1>近红外光谱建模报告</h1>
+<h2>1. 结论摘要</h2>
+<p>- 分析目标：Oil；参考值单位：unknown (not stated in source)。</p>
+<p>- 最终方案：pls；预处理：SNV → 二阶导数(window=11,order=2,delta=1.0,spacing_mode=index)；成分数：15。</p>
+<p>- 最终留出集：R²=0.8997，RMSEP=0.0479，RPD=3.2615。误差单位与参考值一致。</p>
+<p>- 验证范围：内部独立留出，不是外部验证；质量门禁通过（good）。</p>
+<p>- 质量达标不等同于生产批准；本报告不代表已完成审批、注册或实际部署。</p>
+<h2>2. 数据概览与验证协议</h2>
+<p>- 样本数：48；原始光谱变量数：700。</p>
+<p>- 协议：sealed_single_target_holdout。</p>
+<p>- 光谱轴范围：1100.0000–2498.0000（单位未记录）。</p>
+<p>- 参考值范围：3.0880–3.8220（unknown (not stated in source)）。</p>
+<table>
+<tr><td>分区</td><td>样本数</td><td>用途</td></tr>
+<tr><td>校准集</td><td>48</td><td>拟合预处理、变量筛选和候选模型</td></tr>
+<tr><td>调参集</td><td>16</td><td>选择预处理、变量和模型方案</td></tr>
+<tr><td>最终留出集</td><td>16</td><td>选择完成后的最终评估</td></tr>
+</table>
+<p>- 最终拟合范围：校准集。训练拟合指标不能作为独立验证结果。</p>
+<p>- 模型选择使用调参/CV证据；最终留出/外部验证指标不用于选择候选。</p>
+<h2>3. 预处理、波长与模型选择依据</h2>
+<p>- 选定流水线：SNV → 二阶导数(window=11,order=2,delta=1.0,spacing_mode=index)。</p>
+<p>- 波长选择：未记录；保留 未记录 / 未记录 个变量。</p>
+<p>- 未记录模型族比较；不能由当前方案推断其他方法已经执行或较差。</p>
+<h2>4. 分区指标与质量评估</h2>
+<table>
+<tr><td>评估分区</td><td>R²</td><td>RMSE</td><td>RPD</td><td>偏差（预测−参考）</td></tr>
+<tr><td>Cal（校准拟合）</td><td>0.9998</td><td>0.0028</td><td>65.6830</td><td>0.0000</td></tr>
+<tr><td>Cal CV（校准交叉验证 OOF）</td><td>0.9045</td><td>0.0552</td><td>3.2708</td><td>0.0011</td></tr>
+<tr><td>Val（选择用验证集）</td><td>0.9111</td><td>0.0565</td><td>3.4639</td><td>0.0150</td></tr>
+<tr><td>Test（冻结后唯一最终留出）</td><td>0.8997</td><td>0.0479</td><td>3.2615</td><td>0.0085</td></tr>
+</table>
+<p>- R²描述拟合解释能力；RMSE描述误差大小；RPD受参考值分布影响。三者应结合样本覆盖与偏差共同判断。</p>
+<p>- 表中指标读取实际计算结果；未记录字段不补算。RMSEP表示最终评估分区的RMSE，不能与调参误差混称。</p>
+<p>- 领域：food；质量等级：good；门禁通过：是。</p>
+<p>- 使用阈值：R²≥0.8，RPD≥3.0；其他门禁约束见 metrics.json 的 quality 字段。</p>
+<h2>5. 可视化与诊断解读</h2>
+<h3>调参集残差诊断（与上方最终评估图分区不同）</h3>
+<table>
+<tr><td>诊断字段</td><td>实际结果</td></tr>
+<tr><td>residual_trend</td><td>flat</td></tr>
+<tr><td>residual_variance</td><td>low</td></tr>
+<tr><td>outlier_count</td><td>1</td></tr>
+</table>
+<h2>6. 适用范围与后续建议</h2>
+<p>- 预测限于与训练数据一致的仪器、光谱轴、预处理和目标单位；超出参考值覆盖范围时应单独验证。</p>
+<p>- 使用前核对样本代表性、批次/仪器差异、偏差和误差是否满足业务要求；内部留出达标仍需针对实际使用场景复核。</p>
+<p>- 上线需独立完成用户批准与模型注册；使用时保留漂移监测和定期参考样本复测。</p>
+<h2>7. 复现与交付说明</h2>
+<p>- 数据SHA-256：b461d7644db2fb16bf0dce25896b6a4ba4e4c73c40aab9f681287dbe10ede19d。</p>
+<p>- 随机种子：42；协议：sealed_single_target_holdout。</p>
+<p>- report.html：可离线打开的完整图文报告；delivery.zip：报告、模型、指标、诊断图和文件校验清单。</p>
+<p>- 模型及原有安全清单保持原样；metrics.json保留完整结果与复现参数。下载包不包含原始上传数据。</p>
+<p>- 未记录的单位、样本数或诊断保持明确缺失；请勿将缺失字段解释为零或已通过。</p>
+<h2>8. LLM 自主决策与终结</h2>
+<p>- 停止来源：LLM 主动停止；资源原因：未记录。</p>
+<p>- 最终保留实验：exp_31cfe4f52b6810aa76cb966b1fc0964b；终结决策：decision_82b27f44f48e804e27e852ff9c718d90。</p>
+<p>- 提出的候选不代表已训练；只有有成功／失败执行记录的决策才进入实际执行统计。</p>
+<p>- 模型冻结直接使用 Cal 工件，没有 Cal+Val 重拟合；最终 Test 不再进入搜索或后续 DecisionContext。</p>
+<table>
+<tr><td>决策</td><td>LLM 选择动作</td><td>实际执行状态</td><td>fits</td><td>Val RMSE</td><td>原预期检验</td></tr>
+<tr><td>decision_477900f915efd4aac3163357c38ffb82</td><td>EXPLORE</td><td>succeeded</td><td>51</td><td>0.0694</td><td>not_evaluable</td></tr>
+<tr><td>decision_142c8c17dc25ce2405c2043949d099b8</td><td>CHANGE_PREPROCESS</td><td>succeeded</td><td>76</td><td>0.0565</td><td>achieved</td></tr>
+<tr><td>decision_d6a92b8f361381caedae67917496f587</td><td>TUNE</td><td>succeeded</td><td>26</td><td>0.0571</td><td>not_achieved</td></tr>
+<tr><td>decision_82b27f44f48e804e27e852ff9c718d90</td><td>STOP</td><td>stopped</td><td>0</td><td>未记录</td><td>未记录</td></tr>
+</table>
+<h3>decision_477900f915efd4aac3163357c38ffb82</h3>
+<p>- 原始选择理由：The Cal profile is dominated by baseline drift while noise and spikes are negligible, so derivative-based baseline filtering is the most defensible first correction; SNV is added as a complementary scatter/scale correction that is standard for powdered corn spectra. PLS is chosen over tree/kernel families because with only 48 calibration rows and 700 strongly collinear wavelengths a low-variance linear latent model is the safest, and it is preferred over Ridge because latent compression handles collinearity while still allowing a searchable complexity knob. Snv + derivative1(w=11, order=2) with scale=False and a 1-10 component grid is the single executed arm; the other three alternatives are recorded comparisons only.。</p>
+<p>- 原始预期：The selected arm should yield Cal 5-fold CV RMSE clearly below the target&#x27;s Cal standard deviation (0.1788) with a small selected component count, and a comparable Val RMSE. Metrics are expected in the unnamed source target units; no improvement is asserted until observed.。</p>
+<p>- 提出候选：alt_pls_snv_d1:EXPLORE, alt_pls_raw:EXPLORE, alt_pls_d1:EXPLORE, alt_ridge_snv_d1:EXPLORE；选中 alt_pls_snv_d1。</p>
+<p>- 未选理由：{&quot;alt_pls_d1&quot;: &quot;Comparison only: derivative alone may miss residual multiplicative scatter, but it is the cheapest way to isolate the SNV contribution later.&quot;, &quot;alt_pls_raw&quot;: &quot;Kept as a comparison only: skipping all preprocessing contradicts the tagged baseline drift and risks absorbing drift into PLS components.&quot;, &quot;alt_ridge_snv_d1&quot;: &quot;Comparison only: Ridge may need many more effective variables and lacks the latent complexity control; deferred unless Cal CV shows PLS is unstable.&quot;}。</p>
+<h3>decision_142c8c17dc25ce2405c2043949d099b8</h3>
+<p>- 原始选择理由：The round-1 diagnosis is baseline drift with negligible noise, and the first SG derivative already handled most drift, so the highest-value legal change is to strengthen baseline/curvature filtering while keeping the PLS family that suits 48 samples and 700 collinear wavelengths. A second-order SG derivative after SNV removes residual additive baseline and linear slope and sharpens overlapping oil bands, and because high-frequency noise is 0.00019 the usual noise-amplification penalty of second derivatives should be small. I widen the component grid to 1-15 since the round-1 optimum sat at the edge, which may indicate the search was capped. Ridge (unchanged inputs), parameter-only tuning (flat CV curve), and AsLS+first-derivative (mechanism overlap) are recorded comparisons only and are no。</p>
+<p>- 原始预期：The executed SNV + second-derivative PLS arm should select a component count within the grid and produce Cal 5-fold CV RMSE at or below the round-1 0.0789, with Val RMSE at or below 0.0694 and Val R2 at or above 0.866; whether Val RPD reaches 3.0 is uncertain. All metrics remain in the analyte&#x27;s unnamed source units and no improvement is claimed until observed.。</p>
+<p>- 提出候选：chg_snv_d2:CHANGE_PREPROCESS, sw_ridge_d1:SWITCH_MODEL, tune_pls_scale:TUNE, exp_asls_d1:EXPLORE；选中 chg_snv_d2。</p>
+<p>- 未选理由：{&quot;exp_asls_d1&quot;: &quot;AsLS baseline correction plus a first derivative largely duplicates the baseline removal the first SG derivative already performs, so it risks being an approximate replication rather than a distinct mechanism; the second derivative instead adds new curvature information.&quot;, &quot;sw_ridge_d1&quot;: &quot;Ridge keeps all 700 collinear derivative variables and its solution is a smoother of the same linear signal; with n=48 the round-1 latent PLS already captured most linear structure, so the more informative next test is the spectral representation (curvature) rather than another linear estimator on unchanged inputs.&quot;, &quot;tune_pls_scale&quot;: &quot;Parameter-only tuning around the same SNV + first-derivative representation is expected to yield marginal movement since the round-1 CV curve was flat acro。</p>
+<h3>decision_d6a92b8f361381caedae67917496f587</h3>
+<p>- 原始选择理由：The only unresolved structural question is the edge-limited component optimum: round-2 Cal CV RMSE decreased to n_components=15, which was the grid cap, so the PLS rank search may have been truncated. PLS is retained because with 48 calibration rows and 700 strongly collinear wavelengths a low-variance latent-variable linear model is the safest and it already exceeds the R2/RPD gates. This is a pure TUNE: same family, same SNV + second-derivative preprocessing, only the discrete n_components region moves to 16-20, costing 26 of the 33 remaining fits. SVR introduces kernel hyper-parameters unsupported by 48 rows and no non-linearity evidence exists, and MSC duplicates SNV&#x27;s scatter-correction role while scatter variation is only 0.064. If the new optimum is interior it is the retained candi。</p>
+<p>- 原始预期：The extended component region should locate the Cal-CV minimum interior to or at 20. Expected Cal CV RMSE at or below the round-2 value 0.05295 with Val RMSE near 0.0565 and Val R2 near 0.911. If the minimum is interior (n_components&lt;20) that configuration becomes the preferred retained candidate; if CV RMSE rises monotonically beyond 15 the round-2 model stays best. All metrics remain in the analyte&#x27;s unnamed source units and no improvement is asserted until observed.。</p>
+<p>- 提出候选：tune_ncomp_16_20:TUNE, switch_svr_rbf:SWITCH_MODEL, change_msc_d2:CHANGE_PREPROCESS；选中 tune_ncomp_16_20。</p>
+<p>- 未选理由：{&quot;change_msc_d2&quot;: &quot;MSC addresses the same additive and multiplicative scatter mechanism as SNV, which is already selected, and the Cal scatter_variation_score is low (0.064); swapping it in is expected to be near-neutral and adds no new information about the unresolved component-optimum question.&quot;, &quot;switch_svr_rbf&quot;: &quot;No residual non-linearity has been evidenced in either executed round, and an RBF SVR adds kernel hyper-parameters (C, gamma, epsilon) that are hard to identify reliably from only 48 calibration rows, so it is a lower-probability source of gain than completing the component probe.&quot;}。</p>
+<h3>decision_82b27f44f48e804e27e852ff9c718d90</h3>
+<p>- 原始选择理由：Both structural axes tested have converged: the second derivative gave a large mechanistically explained gain (Val RMSE 0.0694 to 0.0565), and extending PLS rank to 16-20 gave a flat Cal-CV plateau with slightly worse Val, so the rank optimum is interior to a plateau. The remaining 7 fits allow only one fixed single point (6 fits), which cannot fairly test a new preprocessing or family, because a point fixed at n_components=15 (a rank tuned for SNV+d2) would confound the changed axis with rank and could not be followed by a component search. The two probes also have low prior: scatter variation is only 0.064 so MSC duplicates SNV, and there is no non-linearity evidence while 48 rows cannot support SVR tuning. With convergence demonstrated and no affordable well-powered hypothesis test, ret。</p>
+<p>- 原始预期：Stop search and retain exp_31cfe4f52b6810aa76cb966b1fc0964b (SNV + SG derivative2 w=11 order=2; PLS n_components=15, scale=false, max_iter=500, tol=1e-06). No further fits. Under automatic delivery the server freezes it, evaluates the sealed Test once as an internal holdout (not external/production validation) and publishes model, metrics and report. Metrics are in the unnamed source units.。</p>
+<p>- 提出候选：stop_retain_round2:STOP, msc_scatter_probe:CHANGE_PREPROCESS, svr_nonlinear_probe:SWITCH_MODEL；选中 stop_retain_round2。</p>
+<p>- 未选理由：{&quot;msc_scatter_probe&quot;: &quot;Low scatter (0.064) makes MSC largely redundant with SNV, and with only ~7 fits a single fixed point at n_components=15 would confound the preprocessing change with latent rank, giving an uninterpretable result.&quot;, &quot;svr_nonlinear_probe&quot;: &quot;No non-linearity evidence; 48 calibration rows cannot support tuning C/gamma/epsilon, so one frozen triple would be arbitrary and its outcome uninterpretable.&quot;}。</p>
+<p>- 保留依据、覆盖及未验证方向：{&quot;retained_advantages&quot;: [&quot;Best Val of the three successes: RMSE 0.056535, R2 0.91110, RPD 3.464, slope 0.920, MAE 0.043199.&quot;, &quot;More parsimonious (15 components) than round-3 (20) with equal-or-better Val; Cal-CV RMSE 0.052952 indistinguishable from 0.052859.&quot;, &quot;Preprocessing mechanism matches the Cal diagnosis: baseline drift removed with negligible noise penalty; stable calibration pass (slope 0.9998, ~zero bias).&quot;], &quot;retained_limitations&quot;: [&quot;Validation is a 16-sample internal holdout, not external or production validation.&quot;, &quot;Residual Val bias 0.01499 in unnamed units and slope 0.920 indicate slight holdout shrinkage.&quot;, &quot;Target unit unnamed; preprocessing coverage limited to scatter-plus-derivative pipelines.&quot;], &quot;search_coverage&quot;: &quot;Three successful PLS experiments over two axes: derivati。</p>
+<h2>9. 实际模型配置与资源</h2>
+<p>- 冻结模型 SHA-256：d63ca67b78cca9979928c5c665fef43cbb25e82a0ff39ade8a0254353b631823。</p>
+<p>- 冻结 CV manifest：cv_f8d479ce3cdfb72c8c58f3408a8a07503dde244c240842d80a50b3c6793f1c19。</p>
+<p>- 实际参数：{&quot;copy&quot;: true, &quot;max_iter&quot;: 500, &quot;n_components&quot;: 15, &quot;scale&quot;: false, &quot;tol&quot;: 1e-06}。</p>
+<p>- 有序预处理：[{&quot;method&quot;: &quot;snv&quot;, &quot;params&quot;: {}}, {&quot;method&quot;: &quot;derivative2&quot;, &quot;params&quot;: {&quot;delta&quot;: 1.0, &quot;order&quot;: 2, &quot;spacing_mode&quot;: &quot;index&quot;, &quot;window&quot;: 11}}]。</p>
+<p>- 参数优化策略：grid；完整授权空间见 metrics.json 和 decisions.json。</p>
+<p>- 可通过现有 nir_predict 加载带完整性 manifest 的 model.joblib；预处理状态已随工件保存。</p>
+<p>- 配置、运行时 adapter 版本、原始候选、实际参数和完整决策证据见 decisions.json／metrics.json。</p>
+<table>
+<tr><td>资源字段</td><td>实际记录</td></tr>
+<tr><td>scope</td><td>workflow intake through finalization tool; excludes subsequent narration/approval</td></tr>
+<tr><td>intake_model_calls_included</td><td>2</td></tr>
+<tr><td>experiments_started</td><td>3</td></tr>
+<tr><td>experiments_succeeded</td><td>3</td></tr>
+<tr><td>experiments_failed</td><td>0</td></tr>
+<tr><td>completed_parameter_candidates</td><td>30</td></tr>
+<tr><td>failed_candidate_count</td><td>unavailable for interrupted numerical fits</td></tr>
+<tr><td>actual_model_fits</td><td>153</td></tr>
+<tr><td>llm_calls</td><td>20</td></tr>
+<tr><td>actual_input_tokens</td><td>728024</td></tr>
+<tr><td>actual_output_tokens</td><td>42258</td></tr>
+<tr><td>calls_with_unknown_usage</td><td>0</td></tr>
+<tr><td>admission_tokens_estimated_or_actual_max</td><td>2921020</td></tr>
+<tr><td>scientific_execution_seconds</td><td>1.4380000000819564</td></tr>
+<tr><td>total_elapsed_seconds</td><td>192.9082591533661</td></tr>
+<tr><td>llm_seconds</td><td>187.72100000013597</td></tr>
+<tr><td>monetary_cost</td><td>not supplied by provider</td></tr>
+<tr><td>all_caller_provider_usage</td><td>{&#x27;lead_agent_tokens&#x27;: 770282, &#x27;llm_call_count&#x27;: 20, &#x27;middleware_tokens&#x27;: 0, &#x27;run_id&#x27;: &#x27;a24f38c7-39a2-4a2b-b227-d938de54ae50&#x27;, &#x27;scope&#x27;: &#x27;current_run_until_deterministic_publication&#x27;, &#x27;source&#x27;: &#x27;trusted_run_journal&#x27;, &#x27;subagent_tokens&#x27;: 0, &#x27;token_usage_by_model&#x27;: {&#x27;deepseek-flash&#x27;: {&#x27;input_tokens&#x27;: 728024, &#x27;output_tokens&#x27;: 42258, &#x27;total_tokens&#x27;: 770282}}, &#x27;total_input_tokens&#x27;: 728024, &#x27;total_output_tokens&#x27;: 42258, &#x27;total_tokens&#x27;: 770282, &#x27;usage_kind&#x27;: &#x27;actual_provider_usage&#x27;}</td></tr>
+<tr><td>token_limit_enabled</td><td>False</td></tr>
+</table>
+<p>- input/output token 字段仅统计 provider 实际 usage；未知 usage 单独计数。admission 字段含 estimated 额度，不是准确计费。未实现金额硬上限。</p>
+<p>- 交付时搜索已停止、模型已冻结、Test 已完成；质量门禁独立记录。用户尚未批准，模型尚未注册。后续审批状态见工作流／注册表，不回写本次交付证据。</p></body></html>

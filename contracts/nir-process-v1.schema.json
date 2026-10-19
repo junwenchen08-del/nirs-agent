@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chemagent:nir-process:v1",
+  "title": "ChemAgent durable process evidence v1",
+  "oneOf": [{"$ref": "#/$defs/step"}, {"$ref": "#/$defs/chart"}, {"$ref": "#/$defs/summary"}],
+  "$defs": {
+    "numbers": {"type": "array", "items": {"type": "number"}},
+    "execution": {"enum": ["pending", "running", "waiting_user", "succeeded", "failed", "cancelled", "interrupted", "skipped", "unknown"]},
+    "evidence": {"enum": ["available", "partial", "not_recorded", "not_applicable", "failed", "unavailable"]},
+    "step": {
+      "type": "object", "required": ["step_execution_id", "step_key", "execution_status", "evidence_status", "facts", "charts", "candidate_count"],
+      "properties": {
+        "step_execution_id": {"type": "string"},
+        "step_key": {"enum": ["audit", "split", "preprocessing", "wavelength", "model", "validation", "reflection", "registration", "workflow"]},
+        "execution_status": {"$ref": "#/$defs/execution"}, "evidence_status": {"$ref": "#/$defs/evidence"},
+        "facts": {"type": "object"}, "charts": {"type": "array", "items": {"type": "object", "required": ["chart_id", "version", "type", "evidence_status"]}},
+        "candidate_count": {"type": "integer", "minimum": 0},
+        "score": {"type": ["number", "null"]}, "comparison_group_id": {"type": ["string", "null"]}
+      }
+    },
+    "chart": {
+      "type": "object", "required": ["chart_schema_version", "chart_id", "evidence_status"],
+      "properties": {
+        "chart_schema_version": {"const": 1}, "chart_id": {"type": "string"}, "evidence_status": {"$ref": "#/$defs/evidence"},
+        "type": {"enum": ["spectra", "distribution", "prediction", "residual", "wavelength", "cv"]},
+        "x": {"$ref": "#/$defs/numbers"}, "y": {"$ref": "#/$defs/numbers"},
+        "n_total": {"type": "integer", "minimum": 0}, "n_returned": {"type": "integer", "minimum": 0},
+        "series": {"type": "array", "items": {"type": "object", "required": ["id", "values"], "properties": {"id": {"type": "string"}, "values": {"$ref": "#/$defs/numbers"}}}},
+        "sample_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "ranges": {"type": "array", "items": {"type": "object", "required": ["start", "end", "count"], "properties": {"start": {"type": "number"}, "end": {"type": "number"}, "count": {"type": "integer", "minimum": 1}}}}
+      },
+      "allOf": [{"if": {"properties": {"evidence_status": {"const": "available"}}}, "then": {"required": ["type", "scope", "run_id", "attempt_id", "step_execution_id", "n_total", "n_returned", "sampling"]}}]
+    },
+    "summary": {
+      "type": "object", "required": ["schema_version", "run_id", "revision", "attempts", "shared_steps", "capabilities", "next_offset"],
+      "properties": {"schema_version": {"const": 1}, "run_id": {"type": "string"}, "revision": {"type": "integer", "minimum": 0}, "attempts": {"type": "array", "maxItems": 20}, "shared_steps": {"type": "array", "maxItems": 50}, "capabilities": {"type": "object"}, "next_offset": {"type": ["integer", "null"]}}
+    }
+  }
+}
