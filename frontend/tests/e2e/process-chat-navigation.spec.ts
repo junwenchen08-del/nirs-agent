@@ -79,3 +79,23 @@ test("other workspace pages keep their existing workspace breadcrumb destination
       .getByRole("link", { name: "Workspace", exact: true }),
   ).toHaveAttribute("href", "/workspace");
 });
+
+test("workspace redirect survives repeated client navigation without timing errors", async ({
+  page,
+}) => {
+  await setup(page, "zh-CN");
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/workspace/methods");
+  for (let visit = 0; visit < 3; visit++) {
+    await page
+      .getByRole("navigation", { name: "breadcrumb" })
+      .getByRole("link", { name: "工作区", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/workspace\/chats\/new$/);
+    await expect(page.getByRole("textbox").first()).toBeVisible();
+    await page.getByRole("link", { name: "方法库", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "方法库", exact: true })).toBeVisible();
+  }
+  expect(errors).toEqual([]);
+});

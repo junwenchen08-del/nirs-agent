@@ -1,5 +1,12 @@
 # AGENTS.md
 
+Next 16.2 development redirects can produce negative Server Component timing
+entries through the separate React debug WebSocket (upstream Next.js #99032).
+next.config.js keeps experimental.reactDebugChannel=false so debug metadata
+travels with its RSC response. Do not suppress page errors or patch Performance
+globally. process-chat-navigation.spec.ts covers repeated soft navigation through
+the workspace redirect. Recheck this workaround when upgrading Next.js.
+
 ModelLibrary defaults to dataset identity groups with target, family and quality
 filters; it preserves exact model-version mounting and profile-pinned data links.
 core/nir-library/model-catalog.ts loads ready versions and recovers only missing

@@ -25,6 +25,12 @@ const config = {
     defaultLocale: "zh",
   },
   devIndicators: false,
+  experimental: {
+    // Next 16.2's separate React debug stream can mix clock origins during
+    // redirect navigation and throw from performance.measure (upstream #99032).
+    // Keep debug info in the RSC payload instead; never patch browser timing APIs.
+    reactDebugChannel: false,
+  },
   async redirects() {
     return [
       {

@@ -164,3 +164,9 @@ quality, safety, latency, token usage, check-level evidence, and a browser-local
 ## License
 
 MIT License. See [LICENSE](../LICENSE) for details.
+
+## 开发环境跳转兼容
+
+Next.js 16.2 的独立 React 调试通道可能在工作区跳转时产生负性能时间戳。
+当前配置将调试信息保留在原 RSC 响应中，避免该开发模式错误；不覆盖浏览器
+性能 API。升级 Next.js 时需重新验证并评估移除兼容配置。
