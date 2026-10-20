@@ -4,7 +4,11 @@ ChemAgent provides the spectroscopy workspace, dataset and model libraries, auto
 
 On a modeling process page, the **Workspace** breadcrumb returns to that process's original conversation. It works after direct entry or refresh, with a localized return hint; other workspace pages retain their usual workspace link.
 
+The process workbench groups stages beside a wider detail pane. Data stages show saved source metadata and Cal-only raw spectra; round stages show executed plans, diagnostics and guarded same-session comparisons. Raw/processed spectra share zoom and sample visibility. Original next-round proposals appear only in the Decisions and advice tab, alongside recorded rationale and expectations; other tabs and the footer do not repeat them. Final metrics, limitations and downloads share **Final results and delivery**. Missing historical evidence remains explicit; viewing never retrains or generates new recommendations.
+
 ## Tech Stack
+
+The model library defaults to verified training-dataset groups, with target, analysis type, algorithm and quality filters and an all-models view. Dataset cards link to exact dataset-filtered model lists. Historical lineage recovery reuses verified reports; unknown sources stay explicit. Profile links and mounting always preserve exact versions.
 
 - **Framework**: [Next.js 16](https://nextjs.org/) with [App Router](https://nextjs.org/docs/app)
 - **UI**: [React 19](https://react.dev/), [Tailwind CSS 4](https://tailwindcss.com/), [Shadcn UI](https://ui.shadcn.com/), [MagicUI](https://magicui.design/) and [React Bits](https://reactbits.dev/)

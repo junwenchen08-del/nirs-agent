@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+
 import { ModelLibrary } from "@/components/workspace/nir-library";
 import {
   WorkspaceBody,
@@ -10,7 +12,9 @@ export default function NIRModelsPage() {
     <WorkspaceContainer>
       <WorkspaceHeader />
       <WorkspaceBody className="items-stretch overflow-y-auto">
-        <ModelLibrary />
+        <Suspense>
+          <ModelLibrary />
+        </Suspense>
       </WorkspaceBody>
     </WorkspaceContainer>
   );

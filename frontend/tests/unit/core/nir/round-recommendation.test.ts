@@ -45,7 +45,7 @@ function render(next: unknown, overrides: Record<string, unknown> = {}) {
 
 test("a pending model proposal shows its plan, search range, rationale and expectation before execution", () => {
   const html = render(proposed);
-  expect(html).toContain("大模型的下一轮建议");
+  expect(html).toContain("下一步优化建议");
   expect(html).toContain("建议方案");
   expect(html).toContain("支持向量回归");
   expect(html).toContain("建议模型参数");

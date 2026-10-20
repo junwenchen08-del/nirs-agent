@@ -23,6 +23,7 @@ import { Trends } from "./autonomous-final-views";
 import { CalSpectraComparison } from "./cal-spectra";
 import { NodeDetailTabs, type NodeDetailTab } from "./node-detail-tabs";
 import { ProcessFacts } from "./process-facts";
+import { RoundComparison } from "./round-comparison";
 import { RoundDiagnostics } from "./round-diagnostics";
 import { RoundNextRecommendation } from "./round-next-recommendation";
 
@@ -157,20 +158,22 @@ export function AutonomousRoundDetail({
         )}
         {tab === "overview" && (
           <>
+            {!stopping && (
+              <RoundComparison
+                key={details.decision_id}
+                threadId={threadId}
+                summary={summary}
+                decision={details}
+                zh={zh}
+                onSelect={onSelect}
+              />
+            )}
             <h4 className="text-sm font-semibold">
               {zh ? "使用的方法与动作" : "Methods and action"}
             </h4>
             <p className="text-sm">
               {stopping ? actionLabel(details.action, zh) : pipeline}
             </p>
-            <h4 className="text-sm font-semibold">
-              {zh ? "本轮选择依据" : "Recorded rationale"}
-            </h4>
-            <RecordedNarrative value={details.rationale} zh={zh} />
-            <h4 className="text-sm font-semibold">
-              {zh ? "原始预期" : "Original expectation"}
-            </h4>
-            <RecordedNarrative value={details.expected_outcome} zh={zh} />
             <ProcessFacts
               value={{
                 elapsed_seconds: feedback.elapsed_seconds,
@@ -180,11 +183,6 @@ export function AutonomousRoundDetail({
               }}
               zh={zh}
             />
-            <p className="text-muted-foreground text-xs">
-              {zh
-                ? "参数、各范围指标与图表、下一轮原始建议分别在上方主分区查看。"
-                : "Use the tabs for parameters, scoped diagnostics and the original next proposal."}
-            </p>
           </>
         )}
         {tab === "config" && (
@@ -405,7 +403,6 @@ export function AutonomousRoundDetail({
                 zh={zh}
               />
             </details>
-
             <RoundNextRecommendation
               current={details}
               next={next}
@@ -436,10 +433,12 @@ export function AutonomousRoundDetail({
           />
         </details>
       </div>
-      <footer className="text-muted-foreground shrink-0 border-t px-4 py-2 text-xs">
-        {zh
-          ? "方法、参数、结果与建议均来自本节点记录"
-          : "Methods, parameters, results and advice use this node's records"}
+      <footer className="text-muted-foreground flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-4 py-2 text-xs">
+        <span>
+          {zh
+            ? "方法、参数、结果与建议均来自本节点记录"
+            : "Methods, parameters, results and advice use this node's records"}
+        </span>
       </footer>
     </section>
   );

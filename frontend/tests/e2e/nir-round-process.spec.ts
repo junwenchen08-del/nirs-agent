@@ -86,6 +86,91 @@ test.afterEach(async ({ page }, info) => {
     });
 });
 
+test("stage-specific data preview uses saved Cal spectra and never opens Test", async ({
+  page,
+}) => {
+  const { requests } = await setup(page);
+  await page.goto(`/workspace/nir/process/${threadId}`);
+  await page
+    .getByTestId("lifecycle-node")
+    .filter({ hasText: "文件进入" })
+    .click();
+  const detail = page.getByTestId("lifecycle-detail");
+  await expect(detail.getByTestId("process-data-overview")).toContainText("36");
+  await expect(detail).toContainText("来源记录未提供");
+  await expect(detail.getByRole("tab", { name: "LLM 建议" })).toHaveCount(0);
+  await page.reload();
+  await expect(
+    detail.getByRole("tab", { name: "数据概览", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(detail.getByTestId("process-data-overview")).toBeVisible();
+  await detail.getByRole("tab", { name: "原始光谱", exact: true }).click();
+  await expect(detail.getByTestId("cal-spectra")).toContainText(
+    "原始光谱 · Cal",
+  );
+  await expect(detail.locator("svg[aria-label]")).toHaveCount(1);
+  expect(requests.some((resource) => resource.includes("/charts/"))).toBe(
+    false,
+  );
+  await page.reload();
+  await expect(page.getByTestId("lifecycle-detail")).toHaveAttribute(
+    "data-node-id",
+    "input",
+  );
+  await expect(page.getByTestId("cal-spectra")).toBeVisible();
+});
+
+test("next recommendation appears only in the decisions and advice tab", async ({
+  page,
+}) => {
+  await setup(page);
+  const [first, second] = evidence!.decisions.data;
+  await page.goto(`/workspace/nir/process/${threadId}`);
+  await page
+    .getByRole("navigation", { name: "建模轮次节点" })
+    .locator(`[data-decision-id="${first!.decision_id}"]`)
+    .click();
+  const detail = page.getByTestId("round-detail");
+  for (const name of ["本轮变化", "实际方案", "结果与诊断"]) {
+    await detail.getByRole("tab", { name, exact: true }).click();
+    await expect(detail.getByTestId("round-next-recommendation")).toHaveCount(
+      0,
+    );
+    await expect(detail.getByText("本轮选择依据", { exact: true })).toHaveCount(
+      0,
+    );
+    await expect(detail.getByText("原始预期", { exact: true })).toHaveCount(0);
+  }
+  await expect(
+    detail.getByRole("button", { name: "定位下一步建议", exact: true }),
+  ).toHaveCount(0);
+  await detail.getByRole("tab", { name: "决策与建议", exact: true }).click();
+  await expect(detail.getByTestId("round-next-recommendation")).toHaveCount(1);
+  await expect(detail.getByTestId("round-next-recommendation")).toContainText(
+    "下一步优化建议",
+  );
+  await detail.getByRole("button", { name: "查看下一轮执行记录" }).click();
+  await expect(detail).toHaveAttribute("data-decision-id", second!.decision_id);
+  await detail.getByRole("tab", { name: "本轮变化", exact: true }).click();
+  await expect(detail.getByTestId("round-comparison")).toContainText(
+    "反馈来源",
+  );
+  await expect(
+    detail.getByTestId("round-comparison").getByRole("table"),
+  ).toContainText("Val RMSE");
+  await expect(
+    page.getByRole("button", { name: "验证与图表", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "最终结果与交付", exact: true })
+    .click();
+  await expect(page.getByTestId("future-improvements")).toHaveCount(0);
+  await expect(page.getByTestId("round-next-recommendation")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "后续改进方向", exact: true }),
+  ).toHaveCount(0);
+});
+
 test("real rounds expose executed parameters, retention links and refreshable selection", async ({
   page,
 }) => {
@@ -97,10 +182,10 @@ test("real rounds expose executed parameters, retention links and refreshable se
   await expect(explorer.getByTestId("round-node")).toHaveCount(3);
   await explorer.locator(`[data-decision-id="${second!.decision_id}"]`).click();
   const detail = page.getByTestId("round-detail");
-  await detail.getByRole("tab", { name: "参数" }).click();
+  await detail.getByRole("tab", { name: "实际方案" }).click();
   await expect(detail).toContainText("实际执行配置");
   await expect(detail).toContainText("3");
-  await detail.getByRole("tab", { name: "诊断图", exact: true }).click();
+  await detail.getByRole("tab", { name: "结果与诊断", exact: true }).click();
   await detail.getByRole("button", { name: "参数搜索", exact: true }).click();
   await expect(detail.getByRole("table")).toContainText("3");
   await detail.getByRole("button", { name: "光谱对照", exact: true }).click();
@@ -179,10 +264,10 @@ test("the next recommendation exposes the model's pre-execution plan and links t
     .click();
   await page
     .getByTestId("round-detail")
-    .getByRole("tab", { name: "LLM 建议", exact: true })
+    .getByRole("tab", { name: "决策与建议", exact: true })
     .click();
   const recommendation = page.getByTestId("round-next-recommendation");
-  await expect(recommendation).toContainText("大模型的下一轮建议");
+  await expect(recommendation).toContainText("下一步优化建议");
   await expect(recommendation).toContainText("建议方案");
   await expect(recommendation).toContainText("建议模型参数");
   await expect(recommendation).toContainText("参数搜索计划");
@@ -355,7 +440,23 @@ test("full lifecycle panes stay aligned and final Test remains lazy while chart 
   await expect(
     detail.getByRole("img", { name: "光谱曲线", exact: true }),
   ).toHaveCount(2);
-  await detail.getByRole("tab", { name: "LLM 建议", exact: true }).click();
+  const spectra = detail.getByTestId("cal-linked-plots");
+  const sampleButtons = spectra.getByRole("button", {
+    name: "样本 1",
+    exact: true,
+  });
+  await sampleButtons.first().click();
+  await expect(sampleButtons.nth(1)).toHaveAttribute("aria-pressed", "false");
+  const rangeStarts = spectra.getByLabel("区间起点", { exact: true });
+  await rangeStarts.first().fill("20");
+  await expect(rangeStarts.nth(1)).toHaveValue("20");
+  await spectra
+    .getByRole("button", { name: "重置图表", exact: true })
+    .first()
+    .click();
+  await expect(rangeStarts.nth(1)).toHaveValue("0");
+  await expect(sampleButtons.nth(1)).toHaveAttribute("aria-pressed", "true");
+  await detail.getByRole("tab", { name: "决策与建议", exact: true }).click();
   await expect(detail.getByTestId("round-next-recommendation")).toContainText(
     "建议模型参数",
   );
@@ -372,7 +473,7 @@ test("full lifecycle panes stay aligned and final Test remains lazy while chart 
     .locator('[data-testid="lifecycle-node"][data-node-id="prepare"]')
     .click();
   const lifecycle = page.getByTestId("lifecycle-detail");
-  await lifecycle.getByRole("tab", { name: "诊断图", exact: true }).click();
+  await lifecycle.getByRole("tab", { name: "分区图", exact: true }).click();
   await expect(
     lifecycle.getByRole("img", { name: "样本用途数量", exact: true }),
   ).toBeVisible();
@@ -403,19 +504,19 @@ test("lifecycle selection and explicit detail tabs survive reload and compact sc
     .click();
   await page
     .getByTestId("lifecycle-detail")
-    .getByRole("tab", { name: "LLM 建议", exact: true })
+    .getByRole("tab", { name: "记录详情", exact: true })
     .click();
   await page.reload();
   const detail = page.getByTestId("lifecycle-detail");
   await expect(detail).toHaveAttribute("data-node-id", "approval");
   await expect(
-    detail.getByRole("tab", { name: "LLM 建议", exact: true }),
+    detail.getByRole("tab", { name: "记录详情", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
   await detail
-    .getByRole("tab", { name: "LLM 建议", exact: true })
+    .getByRole("tab", { name: "记录详情", exact: true })
     .press("Home");
   await expect(
-    detail.getByRole("tab", { name: "概览", exact: true }),
+    detail.getByRole("tab", { name: "阶段概览", exact: true }),
   ).toBeFocused();
   for (const width of [1024, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
@@ -442,12 +543,12 @@ test("dark process panes keep visible focus, enlarged charts and contained compa
   const detail = page.getByTestId("round-detail");
   await expect(detail.getByTestId("round-linked-plots")).toBeVisible();
   await detail
-    .getByRole("tab", { name: "诊断图", exact: true })
+    .getByRole("tab", { name: "结果与诊断", exact: true })
     .press("ArrowRight");
   await expect(
-    detail.getByRole("tab", { name: "LLM 建议", exact: true }),
+    detail.getByRole("tab", { name: "决策与建议", exact: true }),
   ).toBeFocused();
-  await detail.getByRole("tab", { name: "诊断图", exact: true }).click();
+  await detail.getByRole("tab", { name: "结果与诊断", exact: true }).click();
   await page
     .getByTestId("process-workbench")
     .screenshot({ path: "../.tmp/ui-redesign/process-dark.png" });
@@ -458,6 +559,6 @@ test("dark process panes keep visible focus, enlarged charts and contained compa
     ),
   ).toBe(true);
   await expect(
-    detail.getByRole("tab", { name: "参数", exact: true }),
+    detail.getByRole("tab", { name: "实际方案", exact: true }),
   ).toBeVisible();
 });

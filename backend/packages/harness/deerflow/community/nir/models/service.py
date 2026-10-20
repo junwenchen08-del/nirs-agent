@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from deerflow.community.nir._common import _read_regular_bytes, _verify_trusted_model_bundle
 from deerflow.community.nir.datasets.service import _owner_admission_lock, _size_of_regular_files
 from deerflow.community.nir.models.report import build_report, complete_dimensions
-from deerflow.community.nir.models.source import recorded_source, verified_library_source, verify_historical_source
+from deerflow.community.nir.models.source import legacy_input_digest, recorded_source, verified_library_source, verify_historical_source
 from deerflow.community.nir.registration import _quality_approval_record, _registration_gate, _validation_goal_gate
 from deerflow.config.nir_library_config import NIRLibraryConfig
 from deerflow.config.paths import Paths
@@ -314,6 +314,26 @@ class ModelService:
         from deerflow.community.nir.datasets.service import DatasetError, _validated_mapping, _workspace_attachment
 
         try:
+            legacy_digest = legacy_input_digest(metrics)
+            if legacy_digest is not None:
+                # Legacy nir_analyze persisted the exact input file digest in
+                # both the hash-bound metrics and reproduction manifest. Only
+                # recover the Dataset; no historical Profile can be inferred.
+                matches = (
+                    await session.scalars(
+                        select(NIRDatasetRow)
+                        .where(
+                            NIRDatasetRow.owner_user_id == owner,
+                            NIRDatasetRow.sha256 == legacy_digest,
+                            NIRDatasetRow.status.in_({"ready", "archived"}),
+                        )
+                        .limit(2)
+                    )
+                ).all()
+                if len(matches) != 1 or not await asyncio.to_thread(verified_library_source, self.paths, owner, matches[0]):
+                    return None
+                dataset = matches[0]
+                return {"id": dataset.id, "name": dataset.name, "source_sha256": dataset.sha256, "profile_id": None}
             source = await asyncio.to_thread(recorded_source, metrics, self.paths, owner, thread)
             if source is None:
                 return None

@@ -42,6 +42,10 @@ export function processLifecycle(
     "profile_id",
     "sample_count",
     "feature_count",
+    "filename",
+    "source_name",
+    "file_format",
+    "size_bytes",
   ]) {
     const value = rawIngestion[key];
     if (typeof value === "string" && text(value)) ingestion[key] = text(value);
@@ -49,6 +53,8 @@ export function processLifecycle(
       ingestion[key] = value;
   }
   const lifecycle = autonomousLifecycleFacts(summary, workflow);
+  const sourceFile = record(summary.data_context.source_file);
+  const recordedSource = sourceFile.evidence_status === "recorded";
   const approval = text(lifecycle.user_approval_status);
   const registered = text(lifecycle.registered_model_id);
   return [
@@ -56,9 +62,17 @@ export function processLifecycle(
       id: "input",
       title: ["文件进入", "Data intake"],
       stage: "data",
-      status: text(ingestion.status) || "not_recorded",
-      method: ["读取已有输入记录", "Recorded data intake"],
-      facts: ingestion,
+      status:
+        text(ingestion.status) ||
+        (recordedSource ? "source_recorded" : "not_recorded"),
+      method:
+        recordedSource && text(sourceFile.name, 255)
+          ? [text(sourceFile.name, 255), text(sourceFile.name, 255)]
+          : ["读取已有输入记录", "Recorded data intake"],
+      facts: {
+        ...ingestion,
+        ...(recordedSource ? { source_file: sourceFile } : {}),
+      },
     },
     {
       id: "inspect",
@@ -161,6 +175,7 @@ export function lifecycleStatus(status: string, zh: boolean) {
   return (
     {
       recorded: ["已记录", "Recorded"],
+      source_recorded: ["来源已记录", "Source recorded"],
       completed: ["已完成", "Completed"],
       succeeded: ["已完成", "Completed"],
       failed: ["失败", "Failed"],

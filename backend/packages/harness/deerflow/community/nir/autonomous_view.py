@@ -7,10 +7,29 @@ service is called. Old records without chart evidence remain unavailable.
 import hashlib
 import json
 import math
+import re
 import sqlite3
 from contextlib import contextmanager
 
 from .process import CHART_LIMIT, _digest, _id, _safe
+
+
+def source_file_summary(source):
+    """Project the original preparation receipt, without reading the source file."""
+    missing = {"evidence_status": "not_recorded"}
+    if not isinstance(source, dict):
+        return missing
+    path, sha, size = source.get("virtual_path"), source.get("sha256"), source.get("size_bytes")
+    if not isinstance(path, str) or not path.startswith(("/mnt/user-data/uploads/", "/mnt/user-data/outputs/")):
+        return missing
+    if "\\" in path or any(part in {".", ".."} for part in path.split("/")) or any(ord(char) < 32 for char in path):
+        return missing
+    if not isinstance(sha, str) or not re.fullmatch(r"[a-f0-9]{64}", sha) or type(size) is not int or size < 0:
+        return missing
+    name = path.rsplit("/", 1)[-1]
+    if not name or len(name) > 255:
+        return missing
+    return {"evidence_status": "recorded", "name": name, "format": name.rsplit(".", 1)[-1].upper() if "." in name else None, "sha256": sha, "size_bytes": size}
 
 
 def scoped_metrics(value, *, final=False):
@@ -201,6 +220,7 @@ class AutonomousView:
                     "calibration_samples": session["profile"].get("n_samples"),
                     "n_features": session["profile"].get("n_wavelengths"),
                     "unit": session.get("task_snapshot", {}).get("unit"),
+                    "source_file": source_file_summary(session.get("task_snapshot", {}).get("source_file")),
                 }
             ),
             "trends": trends,

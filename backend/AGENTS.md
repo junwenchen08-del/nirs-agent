@@ -48,6 +48,13 @@ existing base/retained IDs and do not relax execution policy. No migration or
 scientific/approval policy changes. See docs/nir-round-process.md, the shared
 round-diagnostics contract, and test_nir_round_diagnostics.py.
 
+AutonomousView.summary exposes bounded source_file metadata from the immutable
+task_snapshot preparation receipt: basename, extension, byte count and SHA-256.
+It validates the allowed virtual prefix and complete identity, omits paths and
+returns not_recorded for incomplete historical receipts. This projection never
+opens source arrays, queries current Dataset versions or rewrites session state.
+Anchor: test_nir_autonomous_view.py.
+
 Successful sealed publication passes explicit model/HTML/ZIP references to
 search_tools._result; other tool responses never infer attachments from payload
 claims. STOP/RETAIN automatic delivery shares this path. The artifact reducer
@@ -1657,6 +1664,15 @@ model and dataset response objects. The original stored row/package remains
 unchanged; front-end strict identity validation must remain enabled. Regression
 coverage includes raw/no-Profile and derived/pinned-Profile historical responses,
 and acceptance must inspect actual authenticated UI rendering, not HTTP 200 only.
+
+Legacy `nir_analyze` reports using `automated_analysis_three_way_holdout` can
+recover Dataset-only display lineage from matching `training_data_hash` and
+schema-1 reproducibility `input_sha256`, after model package verification.
+Require the matching manifest protocol and exactly one owner-scoped Dataset
+whose manifest, size and actual source bytes verify. Never infer a Profile or
+downgrade an autonomous audit to this legacy path. Reads leave stored lineage,
+packages and approval unchanged; no original upload, matrix or estimator is
+needed. Mismatches, ambiguous matches and corrupt sources remain unlinked.
 
 NIR pause/termination regressions cover colon/newline and numbered answer requests,
 question options, mixed tool batches and genuine-user-only resume in the actual

@@ -1,5 +1,17 @@
 # AGENTS.md
 
+ModelLibrary defaults to dataset identity groups with target, family and quality
+filters; it preserves exact model-version mounting and profile-pinned data links.
+core/nir-library/model-catalog.ts loads ready versions and recovers only missing
+lineage through the existing verified report, with three concurrent reads and
+artifact/training hash matching. It never groups by filename or writes lineage.
+use-model-catalog.ts shares the owner-keyed query with DatasetLibrary counts.
+Unknown sources remain usable in a separate group; unavailable names retain IDs.
+Dataset links use /workspace/nir/models?dataset=<encoded ID>. Group collapse is
+retained while changing views/filters on the page. Latest saved time is the only
+default order; Test scores never rank or select models. Browser regressions:
+model-library.spec.ts, dataset-library.spec.ts and model-command.spec.ts.
+
 Model cards and details render `ModelQualityNotice` only for the server's
 `quality_status=below_threshold_user_approved`. Keep recorded metrics unchanged
 and mounting available. Do not infer acceptance from metric values or fabricate
@@ -38,23 +50,39 @@ breadcrumb returns to that exact chat (with a localized return hint), including
 direct entry and unavailable evidence; other workspace pages keep the root link.
 Browser regression: process-chat-navigation.spec.ts.
 The autonomous process now uses autonomous-round-explorer/detail/graph.tsx and
-round-diagnostics.tsx. Default navigation is the full lifecycle canvas with equal-height panes and Overview/Parameters/Diagnostics/LLM advice tabs; the timeline remains available. The lazy relation graph
+round-diagnostics.tsx. Default navigation groups lifecycle stages in a 28/72
+equal-height workbench; the timeline remains available. Data, split and delivery
+nodes have stage-specific tabs. Round tabs are Changes/Executed plan/Results and
+diagnostics/Decisions and advice. The lazy relation graph
 draws only recorded feedback and retention links, and fits the selected round
 with its recorded neighbours instead of the whole history so a long chain stays
 readable (the canvas controls still show every node). The infinite history query
 uses existing owner/thread-scoped process keys and 20-record pages. Manual
 selection stays pinned during updates, including terminal summary revisions;
 URL session/decision/lifecycle-node/layout/detail-tab references restore only within the matching session.
+Restored lifecycle nodes without an explicit detail-tab parameter default to
+overview, matching a fresh node selection; an explicit saved tab still wins.
 Round charts bind session, decision, experiment and comparison identity, share
 sample selection/zoom, and allow only Cal/Cal CV/Val. Missing old points stay
 missing. Actual configuration is distinct from accepted plans. Next decisions
 come from the server's persisted successor, never from inferred prose.
-round-next-recommendation.tsx presents that model-issued pre-execution proposal
+round-next-recommendation.tsx renders only in the reason (Decisions and advice)
+tab. Current rationale and expectations also live only there; no footer locate
+button or empty future-advice section duplicates this entry. It presents the model-issued pre-execution proposal
 as the next-round recommendation: pipeline, preprocessing/fixed parameters,
 search range, rationale and expected outcome. Its execution status/link is
 separate. Never substitute fitted parameters/scores or infer a new suggestion
 on page reads. Missing proposals, stopped searches and stale detail responses
 remain explicit. Pending accepted proposals display before execution completes.
+process-data-overview.tsx uses the fixed preparation source receipt and bounded
+task/profile facts, never a filename-based library lookup. source_recorded does
+not claim a separate intake step ran. Raw previews show saved Cal curves only.
+cal-spectra.tsx shares zoom and series visibility between raw/processed plots,
+including enlarged views. round-comparison.tsx verifies detail identity and only
+calculates scoped metric deltas for successful configurations in the same session
+with a comparison group and matching recorded CV manifest. Missing preprocessing
+is distinct from an explicit empty/raw pipeline. Final charts/downloads live in
+Final results and delivery; missing future advice is not generated on read.
 See docs/nir-round-process.md and nir-round-process.spec.ts for evidence-backed
 browser QA; HTTP interception is not a production/provider acceptance claim.
 

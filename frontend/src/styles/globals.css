@@ -446,8 +446,8 @@
 }
 .process-workbench {
   display: grid;
-  grid-template-columns: minmax(280px, 0.68fr) minmax(0, 1.32fr);
-  gap: 20px;
+  grid-template-columns: minmax(280px, 0.28fr) minmax(0, 0.72fr);
+  gap: 16px;
   height: clamp(620px, calc(100dvh - 220px), 860px);
 }
 .process-node-pane,

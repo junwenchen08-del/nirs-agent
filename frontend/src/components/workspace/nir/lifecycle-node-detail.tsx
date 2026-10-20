@@ -12,7 +12,13 @@ import {
 
 import { Metrics } from "./autonomous-evidence";
 import { FinalCharts } from "./autonomous-final-views";
-import { NodeDetailTabs, type NodeDetailTab } from "./node-detail-tabs";
+import { CalSpectraComparison } from "./cal-spectra";
+import {
+  NodeDetailTabs,
+  type DetailTabOption,
+  type NodeDetailTab,
+} from "./node-detail-tabs";
+import { ProcessDataOverview } from "./process-data-overview";
 import { ProcessFacts } from "./process-facts";
 
 export function LifecycleNodeDetail({
@@ -20,7 +26,7 @@ export function LifecycleNodeDetail({
   threadId,
   summary,
   zh,
-  tab,
+  tab: requestedTab,
   onTabChange,
 }: {
   node: LifecycleNode;
@@ -31,6 +37,58 @@ export function LifecycleNodeDetail({
   onTabChange: (tab: NodeDetailTab) => void;
 }) {
   const id = `lifecycle-${node.id}`;
+  const isData = node.id === "input" || node.id === "inspect";
+  const options: DetailTabOption[] = [
+    {
+      key: "overview",
+      label: isData
+        ? zh
+          ? "数据概览"
+          : "Data overview"
+        : node.id === "prepare"
+          ? zh
+            ? "分区概览"
+            : "Partition overview"
+          : zh
+            ? "阶段概览"
+            : "Stage overview",
+    },
+    {
+      key: "config",
+      label: isData
+        ? zh
+          ? "数据结构"
+          : "Data structure"
+        : node.id === "prepare"
+          ? zh
+            ? "验证协议"
+            : "Validation protocol"
+          : zh
+            ? "记录详情"
+            : "Recorded details",
+    },
+    ...(isData || node.id === "prepare" || node.id === "test"
+      ? [
+          {
+            key: "evaluation" as const,
+            label: isData
+              ? zh
+                ? "原始光谱"
+                : "Raw spectra"
+              : node.id === "prepare"
+                ? zh
+                  ? "分区图"
+                  : "Partition chart"
+                : zh
+                  ? "最终诊断"
+                  : "Final diagnostics",
+          },
+        ]
+      : []),
+  ];
+  const tab = options.some((item) => item.key === requestedTab)
+    ? requestedTab
+    : "overview";
   const counts = Object.entries(
     record(summary.data_context.partition_counts),
   ).filter(
@@ -54,7 +112,13 @@ export function LifecycleNodeDetail({
         </div>
         <p className="text-sm">{node.method[zh ? 0 : 1]}</p>
       </header>
-      <NodeDetailTabs value={tab} onChange={onTabChange} id={id} zh={zh} />
+      <NodeDetailTabs
+        value={tab}
+        onChange={onTabChange}
+        id={id}
+        zh={zh}
+        options={options}
+      />
       <div
         className="process-detail-body space-y-4 p-4"
         id={`${id}-panel`}
@@ -64,24 +128,40 @@ export function LifecycleNodeDetail({
       >
         {tab === "overview" && (
           <>
-            <h4 className="text-sm font-semibold">
-              {zh ? "这一步发生的信息" : "Recorded information"}
-            </h4>
-            {Object.keys(node.facts).length ? (
-              <ProcessFacts value={node.facts} zh={zh} />
-            ) : (
-              <p className="text-muted-foreground text-sm">
-                {zh
-                  ? "本次运行未单独保存此步骤的详细记录。后续完成状态不能证明此步骤的具体操作。"
-                  : "No separate detail receipt was recorded. A later completed stage does not prove this operation."}
-              </p>
+            {(isData || node.id === "prepare") && (
+              <ProcessDataOverview summary={summary} node={node} zh={zh} />
             )}
-            {node.id === "inspect" && (
-              <p className="text-muted-foreground text-xs">
-                {zh
-                  ? "以上为搜索准备时固定的数据摘要；未单独记录的解析操作与时间保持缺失。"
-                  : "This is the fixed preparation context; separate parsing operations and timestamps remain unrecorded."}
-              </p>
+            <details
+              open={!isData && node.id !== "prepare"}
+              className="rounded-lg border p-3"
+            >
+              <summary className="cursor-pointer text-sm font-semibold">
+                {zh ? "这一步发生的信息" : "Recorded information"}
+              </summary>
+              {Object.keys(node.facts).length ? (
+                <ProcessFacts value={node.facts} zh={zh} />
+              ) : (
+                <p className="text-muted-foreground text-sm">
+                  {zh
+                    ? "本次运行未单独保存此步骤的详细记录。后续完成状态不能证明此步骤的具体操作。"
+                    : "No separate detail receipt was recorded. A later completed stage does not prove this operation."}
+                </p>
+              )}
+              {node.id === "inspect" && (
+                <p className="text-muted-foreground text-xs">
+                  {zh
+                    ? "以上为搜索准备时固定的数据摘要；未单独记录的解析操作与时间保持缺失。"
+                    : "This is the fixed preparation context; separate parsing operations and timestamps remain unrecorded."}
+                </p>
+              )}
+            </details>
+            {isData && (
+              <CalSpectraComparison
+                threadId={threadId}
+                summary={summary}
+                zh={zh}
+                rawOnly
+              />
             )}
             {node.id === "delivery" && (
               <div className="flex flex-wrap gap-2">
@@ -122,7 +202,13 @@ export function LifecycleNodeDetail({
         {tab === "config" && (
           <>
             <h4 className="text-sm font-semibold">
-              {zh ? "参数与输入" : "Parameters and inputs"}
+              {isData
+                ? zh
+                  ? "已记录的数据结构与解析信息"
+                  : "Recorded structure and parsing"
+                : zh
+                  ? "参数与输入"
+                  : "Parameters and inputs"}
             </h4>
             <ProcessFacts
               value={
@@ -132,6 +218,13 @@ export function LifecycleNodeDetail({
               }
               zh={zh}
             />
+            {isData && (
+              <p className="rounded-lg border border-dashed p-3 text-sm">
+                {zh
+                  ? "矩阵映射、样本方向、质量检查和采集条件仅在原记录提供时展示；未记录不代表已检查或没有问题。需要补充信息时，请返回原对话。"
+                  : "Mapping, orientation, quality checks and acquisition conditions require original records. Missing checks do not imply clean data. Return to the chat to provide corrections."}
+              </p>
+            )}
             <p className="text-muted-foreground text-xs">
               {zh
                 ? "未记录的固定、搜索或最终参数不作补写；实验参数在对应轮次中查看。"
@@ -141,7 +234,14 @@ export function LifecycleNodeDetail({
         )}
         {tab === "evaluation" && (
           <>
-            {node.id === "prepare" && counts.length > 0 ? (
+            {isData ? (
+              <CalSpectraComparison
+                threadId={threadId}
+                summary={summary}
+                zh={zh}
+                rawOnly
+              />
+            ) : node.id === "prepare" && counts.length > 0 ? (
               <figure>
                 <figcaption className="mb-3 text-sm font-medium">
                   {zh ? "样本用途分布" : "Sample partitions"}
@@ -234,31 +334,17 @@ export function LifecycleNodeDetail({
             )}
           </>
         )}
-        {tab === "reason" && (
-          <>
-            <h4 className="text-sm font-semibold">
-              {zh ? "LLM 下一步建议" : "LLM next-step advice"}
-            </h4>
-            <p className="text-sm">
-              {zh
-                ? "此步骤未记录单独的 LLM 下一步提案。每轮建模后的原始提案、理由、参数和预期在对应实验的“LLM 建议”中保留。"
-                : "No separate LLM successor proposal was recorded for this lifecycle step. Original proposals, parameters, rationale and expectations remain in each experiment's LLM advice tab."}
-            </p>
-            <Link
-              className="text-primary inline-block text-sm underline"
-              href={`/workspace/chats/${threadId}`}
-            >
-              {zh
-                ? "返回对话查看问题或回复"
-                : "Return to chat to read or reply"}
-            </Link>
-          </>
-        )}
       </div>
-      <footer className="text-muted-foreground shrink-0 border-t px-4 py-2 text-xs">
+      <footer className="text-muted-foreground flex shrink-0 flex-wrap justify-between gap-2 border-t px-4 py-2 text-xs">
         {zh
           ? "按已记录事实展示；查看不会启动执行"
           : "Recorded facts only; viewing never starts execution"}
+        <Link
+          className="text-primary underline"
+          href={`/workspace/chats/${encodeURIComponent(threadId)}`}
+        >
+          {zh ? "返回原对话" : "Return to chat"}
+        </Link>
       </footer>
     </section>
   );

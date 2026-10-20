@@ -362,3 +362,164 @@ test("missing old charts stay absent, and mounting failure can retry without sen
   await expect(page.getByTestId("mounted-model")).toContainText(model.model_id);
   expect(state.runs).toBe(0);
 });
+
+test("groups by verified dataset identity and filters targets without changing model versions", async ({
+  page,
+}) => {
+  const state = await setup(page);
+  const rows = [
+    model,
+    {
+      ...model,
+      id: "protein",
+      model_id: "corn_protein",
+      version: "v3",
+      created_at: "2026-10-16T00:00:00Z",
+      source_profile_id: "profile_second",
+      report_summary: { ...model.report_summary, target: "蛋白质" },
+    },
+    {
+      ...model,
+      id: "same_name",
+      model_id: "other_corn",
+      source_dataset_id: "ds_other",
+      created_at: "2026-10-15T00:00:00Z",
+    },
+    {
+      ...model,
+      id: "missing",
+      model_id: "unknown_model",
+      source_dataset_id: null,
+      source_profile_id: null,
+    },
+    {
+      ...model,
+      id: "unavailable",
+      model_id: "unnamed_data",
+      source_dataset_id: "ds_unavailable",
+    },
+  ];
+  await page.route("**/api/nir/models?include_archived=true", (route) =>
+    route.fulfill({ json: { models: rows } }),
+  );
+  await page.route("**/api/nir/datasets", (route) =>
+    route.fulfill({
+      json: { datasets: [dataset, { ...dataset, id: "ds_other" }] },
+    }),
+  );
+  await page.route(
+    "**/api/nir/models/unknown_model/versions/v2/report",
+    (route) => route.fulfill({ status: 404, json: { detail: "No report" } }),
+  );
+  await page.goto("/workspace/nir/models");
+  await expect(page.getByTestId("model-dataset-group")).toHaveCount(4);
+  await expect(page.getByTestId("nir-model-card")).toHaveCount(5);
+  const corn = page.locator(
+    '[data-testid="model-dataset-group"][data-dataset-id="ds_corn"]',
+  );
+  await expect(corn.getByTestId("nir-model-card")).toHaveCount(2);
+  await expect(corn.getByTestId("nir-model-card").first()).toContainText(
+    "corn_protein",
+  );
+  await expect(
+    corn.getByRole("link", { name: "profile_second", exact: true }),
+  ).toHaveAttribute(
+    "href",
+    "/workspace/nir/datasets/ds_corn?profile=profile_second",
+  );
+  await corn.getByLabel("组内预测目标").selectOption("蛋白质");
+  await expect(corn.getByTestId("nir-model-card")).toHaveCount(1);
+  await expect(
+    corn.getByRole("link", { name: "在新对话中使用", exact: true }),
+  ).toHaveAttribute(
+    "href",
+    "/workspace/chats/new?model=corn_protein&version=v3",
+  );
+  await corn.getByLabel("组内预测目标").selectOption("");
+  await corn.getByRole("button", { expanded: true }).click();
+  await expect(corn.getByTestId("nir-model-card")).toHaveCount(0);
+  await page.getByRole("button", { name: "全部模型", exact: true }).click();
+  await expect(page.getByTestId("nir-model-card")).toHaveCount(5);
+  await page.getByRole("button", { name: "按数据集", exact: true }).click();
+  await expect(corn.getByRole("button", { expanded: false })).toBeVisible();
+  await page.getByLabel("预测目标", { exact: true }).selectOption("蛋白质");
+  await expect(page.getByTestId("model-dataset-group")).toHaveCount(1);
+  await page.getByLabel("预测目标", { exact: true }).selectOption("");
+  await page.getByLabel("搜索模型").fill("unknown_model");
+  await expect(page.getByTestId("model-dataset-group")).toContainText(
+    "训练数据来源待确认",
+  );
+  await page.getByLabel("搜索模型").fill("unnamed_data");
+  await expect(page.getByTestId("model-dataset-group")).toContainText(
+    "数据集名称暂不可用",
+  );
+  await page.goto("/workspace/nir/models?dataset=ds_other");
+  await expect(page.getByTestId("nir-model-card")).toHaveCount(1);
+  await expect(page.getByTestId("nir-model-card")).toContainText("other_corn");
+  await page.getByRole("link", { name: "清除数据集筛选" }).click();
+  await expect(page.getByTestId("model-dataset-group")).toHaveCount(4);
+  expect(state.runs).toBe(0);
+  expect(state.attachments).toBe(0);
+});
+
+test("historical verified report lineage also drives dataset model counts", async ({
+  page,
+}) => {
+  const state = await setup(page);
+  await page.route("**/api/nir/models?include_archived=true", (route) =>
+    route.fulfill({
+      json: {
+        models: [
+          { ...model, source_dataset_id: null, source_profile_id: null },
+        ],
+      },
+    }),
+  );
+  await page.goto("/workspace/nir/models");
+  await expect(page.getByTestId("model-dataset-group")).toHaveCount(1);
+  await expect(page.getByTestId("model-dataset-group")).toContainText(
+    dataset.name,
+  );
+  await expect(
+    page.getByRole("link", { name: "profile_training", exact: true }),
+  ).toHaveAttribute(
+    "href",
+    "/workspace/nir/datasets/ds_corn?profile=profile_training",
+  );
+  await page.goto("/workspace/nir/datasets");
+  await page
+    .getByRole("link", { name: "已保存模型 1 个", exact: true })
+    .click();
+  await expect(page).toHaveURL(/models\?dataset=ds_corn/);
+  await expect(page.getByTestId("nir-model-card")).toHaveCount(1);
+  expect(state.runs).toBe(0);
+  expect(state.attachments).toBe(0);
+});
+
+test("historical recovery rejects a different model artifact", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.route("**/api/nir/models?include_archived=true", (route) =>
+    route.fulfill({
+      json: {
+        models: [
+          { ...model, source_dataset_id: null, source_profile_id: null },
+        ],
+      },
+    }),
+  );
+  await page.route(`**${reportUrl}`, (route) =>
+    route.fulfill({
+      json: { ...detail, model: { ...model, artifact_sha256: "e".repeat(64) } },
+    }),
+  );
+  await page.goto("/workspace/nir/models");
+  await expect(page.getByTestId("model-dataset-group")).toContainText(
+    "训练数据来源待确认",
+  );
+  await expect(page.getByTestId("nir-model-card")).toHaveCount(1);
+  await expect(
+    page.getByRole("link", { name: "查看数据集", exact: true }),
+  ).toHaveCount(0);
+});

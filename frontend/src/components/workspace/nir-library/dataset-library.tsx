@@ -10,8 +10,9 @@ import {
   Trash2Icon,
   MoreHorizontalIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -49,10 +50,12 @@ import {
   useNirLibraryEnabled,
   type NIRDataset,
 } from "@/core/nir-library";
+import { modelLibraryPath } from "@/core/nir-library/model-catalog";
 import type {
   DatasetAnalysisType,
   NIRDatasetPreview,
 } from "@/core/nir-library/types";
+import { useModelCatalog } from "@/core/nir-library/use-model-catalog";
 
 import { DatasetDetailsPanel } from "./dataset-details-panel";
 import { formatBytes } from "./storage-usage-card";
@@ -69,6 +72,16 @@ export function DatasetLibrary() {
   const text = (cn: string, en: string) => (locale.startsWith("zh") ? cn : en);
   const copy = t.nirLibrary;
   const { enabled, isLoading: featureLoading } = useNirLibraryEnabled();
+  const modelCatalog = useModelCatalog(enabled && !featureLoading);
+  const modelCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const model of modelCatalog.data ?? []) {
+      if (model.source_dataset_id)
+        counts[model.source_dataset_id] =
+          (counts[model.source_dataset_id] ?? 0) + 1;
+    }
+    return counts;
+  }, [modelCatalog.data]);
   const [datasets, setDatasets] = useState<NIRDataset[]>([]);
   const [previews, setPreviews] = useState<Record<string, NIRDatasetPreview>>(
     {},
@@ -93,7 +106,10 @@ export function DatasetLibrary() {
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [parsingExpanded, setParsingExpanded] = useState(false);
 
-  const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
+  const refresh = () => {
+    setRefreshKey((value) => value + 1);
+    void modelCatalog.refetch();
+  };
 
   useEffect(() => {
     if (featureLoading) return;
@@ -352,6 +368,17 @@ export function DatasetLibrary() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
+                <Link
+                  className="text-primary inline-block text-sm underline underline-offset-4"
+                  href={modelLibraryPath(dataset.id)}
+                >
+                  {modelCatalog.isPending || modelCatalog.isError
+                    ? text("查看关联模型", "View linked models")
+                    : text(
+                        `已保存模型 ${modelCounts[dataset.id] ?? 0} 个`,
+                        `${modelCounts[dataset.id] ?? 0} saved models`,
+                      )}
+                </Link>
                 <p className="font-medium">
                   {previews[dataset.id]?.status === "ready"
                     ? `${previews[dataset.id]?.sample_count?.toLocaleString() ?? "—"} ${text("个样本", "samples")} · ${previews[dataset.id]?.feature_count?.toLocaleString() ?? "—"} ${text("个光谱变量", "spectral variables")}`

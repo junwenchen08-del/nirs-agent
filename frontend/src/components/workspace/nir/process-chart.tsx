@@ -76,6 +76,8 @@ export function ProcessChartView({
   onZoom,
   selected,
   onSelect,
+  hiddenSeries,
+  onHiddenSeriesChange,
   expanded = false,
 }: {
   chart: ProcessChart;
@@ -84,11 +86,19 @@ export function ProcessChartView({
   onZoom: (range: [number, number]) => void;
   selected: string[];
   onSelect: (ids: string[]) => void;
+  hiddenSeries?: string[];
+  onHiddenSeriesChange?: (ids: string[]) => void;
   expanded?: boolean;
 }) {
   const clipId = useId().replaceAll(":", "");
   const [enlarged, setEnlarged] = useState(false);
-  const [hidden, setHidden] = useState<string[]>([]);
+  const [localHidden, setLocalHidden] = useState<string[]>([]);
+  const hidden = hiddenSeries ?? localHidden;
+  const setHidden = (next: string[] | ((previous: string[]) => string[])) => {
+    const value = typeof next === "function" ? next(hidden) : next;
+    if (onHiddenSeriesChange) onHiddenSeriesChange(value);
+    else setLocalHidden(value);
+  };
   const [hover, setHover] = useState<{ index: number; series: number } | null>(
     null,
   );
@@ -515,7 +525,9 @@ export function ProcessChartView({
                   )
                 }
               >
-                <span style={{ color: seriesColor(index) }}>● </span>
+                <span aria-hidden="true" style={{ color: seriesColor(index) }}>
+                  ●{" "}
+                </span>
                 {chart.type === "spectra"
                   ? zh
                     ? `样本 ${index + 1}`
@@ -652,6 +664,8 @@ export function ProcessChartView({
                 onZoom={onZoom}
                 selected={selected}
                 onSelect={onSelect}
+                hiddenSeries={hidden}
+                onHiddenSeriesChange={setHidden}
                 expanded
               />
             )}

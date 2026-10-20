@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { urlOfArtifact } from "@/core/artifacts/utils";
@@ -19,9 +20,8 @@ import { formatProcessNumber as fmt } from "@/core/nir/process-display";
 import { useProcessResource } from "@/core/nir/process-hooks";
 
 import { Metrics } from "./autonomous-evidence";
-import { FinalCharts, Trends } from "./autonomous-final-views";
+import { FinalCharts } from "./autonomous-final-views";
 import { AutonomousRoundExplorer } from "./autonomous-round-explorer";
-import { CalSpectraComparison } from "./cal-spectra";
 import { ProcessFacts } from "./process-facts";
 
 const stageLabels: Record<string, [string, string]> = {
@@ -175,9 +175,7 @@ export function AutonomousProcess({
   useEffect(() => {
     setShowRejections(false);
   }, [threadId, sid]);
-  const [tab, setTab] = useState<"timeline" | "charts" | "delivery">(
-    "timeline",
-  );
+  const [tab, setTab] = useState<"timeline" | "delivery">("timeline");
   if (summaryQuery.isError || sessions.isError)
     return (
       <div className="p-4" role="alert">
@@ -272,27 +270,87 @@ export function AutonomousProcess({
         </p>
         <p className="text-muted-foreground text-xs">
           {zh
-            ? "完整过程保留方法、参数、各范围图表和 LLM 下一步建议。"
-            : "The full process includes methods, parameters, scoped plots and original LLM advice."}
+            ? "完整过程保留方法、参数、各范围图表和决策记录。"
+            : "The full process includes methods, parameters, scoped plots and recorded decisions."}
         </p>
       </div>
     );
   }
   const limits = record(summary.budget.limits);
+  const retained = summary.trends.find(
+    (row) => row.experiment_id === summary.retained_experiment_id,
+  );
+  const waiting =
+    record(workflow).search_session_id === summary.session_id &&
+    record(record(workflow).user_question).status === "waiting";
   return (
     <div
       className="mx-auto min-h-0 w-full max-w-[1600px] flex-1 space-y-4 overflow-y-auto p-4 lg:p-6"
       data-testid="autonomous-process"
     >
-      <section className="rounded-xl border p-4">
-        <h2 className="text-lg font-semibold">
-          {zh ? "建模全过程" : "LLM autonomous modeling"}
-        </h2>
-        <p className="mt-1 text-sm" role="status">
-          {deliveryLabels[deliveryStage]?.[zh ? 0 : 1] ??
-            stageLabels[summary.stage]?.[zh ? 0 : 1] ??
-            summary.stage}
-        </p>
+      <section
+        className="bg-card rounded-xl border p-4"
+        data-testid="process-task-summary"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">
+              {zh ? "建模全过程" : "LLM autonomous modeling"}
+            </h2>
+            <p className="mt-1 text-sm" role="status">
+              {waiting
+                ? zh
+                  ? "等待你的回复"
+                  : "Waiting for your reply"
+                : (deliveryLabels[deliveryStage]?.[zh ? 0 : 1] ??
+                  stageLabels[summary.stage]?.[zh ? 0 : 1] ??
+                  summary.stage)}
+            </p>
+          </div>
+          <Link
+            className="hover:bg-accent rounded-lg border px-3 py-2 text-sm"
+            href={`/workspace/chats/${encodeURIComponent(threadId)}`}
+          >
+            {zh ? "返回原对话" : "Return to chat"}
+          </Link>
+        </div>
+        <div className="text-muted-foreground mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs">
+          <span>
+            {zh ? "Cal 样本" : "Cal samples"}{" "}
+            <strong className="text-foreground">
+              {fmt(summary.data_context.calibration_samples)}
+            </strong>
+          </span>
+          <span>
+            {zh ? "光谱变量" : "Spectral variables"}{" "}
+            <strong className="text-foreground">
+              {fmt(summary.data_context.n_features)}
+            </strong>
+          </span>
+          <span>
+            {zh ? "已记录实验" : "Recorded experiments"}{" "}
+            <strong className="text-foreground">
+              {fmt(summary.budget.experiments_used)}
+            </strong>
+          </span>
+          <span>
+            {zh ? "保留轮次" : "Retained round"}{" "}
+            <strong className="text-foreground">
+              {retained
+                ? zh
+                  ? `第 ${fmt(retained.round_index)} 轮`
+                  : `Round ${fmt(retained.round_index)}`
+                : summary.retained_experiment_id
+                  ? zh
+                    ? "已指定实验"
+                    : "Experiment selected"
+                  : zh
+                    ? "尚未选择"
+                    : "Not selected"}
+            </strong>
+          </span>
+          <span>Test · {autonomousTestStatusLabel(summary, zh)}</span>
+        </div>
         <details className="mt-3 text-xs">
           <summary className="text-muted-foreground cursor-pointer">
             {zh ? "资源用量与执行状态" : "Usage and execution status"}
@@ -347,12 +405,12 @@ export function AutonomousProcess({
             ))}
           </div>
         </details>
-        <p className="mt-3 text-sm">{stopExplanation(summary, zh)}</p>
         {(summary.stop_source || summary.terminal_failure_source) && (
           <details className="mt-2 text-xs">
             <summary>
               {zh ? "停止与资源依据" : "Stop and resource evidence"}
             </summary>
+            <p className="my-2 text-sm">{stopExplanation(summary, zh)}</p>
             <ProcessFacts
               zh={zh}
               value={{
@@ -366,21 +424,12 @@ export function AutonomousProcess({
             />
           </details>
         )}
-        <p className="text-muted-foreground mt-2 text-xs">
-          {summary.spectra_experiments.length
-            ? zh
-              ? "Cal 原始与预处理光谱已记录，可在“验证与图表”中查看。"
-              : "Raw and preprocessed Cal spectra are available in Validation and charts."
-            : zh
-              ? "本运行未记录 Cal 光谱曲线；页面不读取原始文件或 Test 来补画。"
-              : "No Cal spectra recorded for this run. The page does not reopen raw data or Test."}
-        </p>
       </section>
       <nav
         className="flex gap-2"
         aria-label={zh ? "自主建模视图" : "Autonomous views"}
       >
-        {(["timeline", "charts", "delivery"] as const).map((key) => (
+        {(["timeline", "delivery"] as const).map((key) => (
           <button
             type="button"
             key={key}
@@ -391,8 +440,7 @@ export function AutonomousProcess({
             {
               {
                 timeline: ["建模过程", "Modeling process"],
-                charts: ["验证与图表", "Validation and charts"],
-                delivery: ["最终模型与下载", "Model and downloads"],
+                delivery: ["最终结果与交付", "Final results and delivery"],
               }[key][zh ? 0 : 1]
             }
           </button>
@@ -427,19 +475,12 @@ export function AutonomousProcess({
           />
         </section>
       )}
-      {tab === "charts" && (
-        <>
-          <Trends summary={summary} zh={zh} />
-          <Metrics value={summary} />
-          <CalSpectraComparison threadId={threadId} summary={summary} zh={zh} />
-          <FinalCharts threadId={threadId} summary={summary} zh={zh} />
-        </>
-      )}
       {tab === "delivery" && (
         <section className="space-y-4 rounded-xl border p-4">
           <h3 className="font-medium">
             {zh ? "最终保留模型" : "Final retained model"}
           </h3>
+          <p className="text-sm">{stopExplanation(summary, zh)}</p>
           {!summary.freeze ? (
             <p>
               {zh
@@ -450,6 +491,20 @@ export function AutonomousProcess({
             <ProcessFacts zh={zh} value={summary.freeze} />
           )}
           <Metrics value={summary} />
+          <FinalCharts threadId={threadId} summary={summary} zh={zh} />
+          <section className="bg-muted/20 space-y-2 rounded-lg border p-4">
+            <h4 className="font-medium">
+              {zh ? "验证范围与局限" : "Validation scope and limitations"}
+            </h4>
+            <p className="text-muted-foreground text-sm">
+              {zh
+                ? "Cal 用于拟合，Cal CV / Val 用于搜索和选择。最终 Test 是本次固定划分的留出评价，不代表已经完成外部验证。未保存的图表不补算。"
+                : "Cal fits the model; Cal CV / Val support search and selection. Final Test evaluates this fixed holdout and does not establish external validation. Missing charts are not recomputed."}
+            </p>
+          </section>
+          <h4 className="font-medium">
+            {zh ? "交付、审批与入库" : "Delivery, approval and registration"}
+          </h4>
           <p className="text-sm">
             {zh
               ? "科学协议、性能门禁、用户审批与注册分别记录。"

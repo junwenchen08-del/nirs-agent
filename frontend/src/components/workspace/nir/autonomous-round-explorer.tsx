@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -93,8 +94,10 @@ export function AutonomousRoundExplorer({
           "approval",
           "registration",
         ].includes(node ?? "")
-      )
+      ) {
         setLifecycleId(node as LifecycleKey);
+        setDetailTab("overview");
+      }
       const tab = params.get("nir_tab");
       if (["overview", "config", "evaluation", "reason"].includes(tab ?? "")) {
         setDetailTab(tab as NodeDetailTab);
@@ -187,6 +190,12 @@ export function AutonomousRoundExplorer({
           <p className="text-muted-foreground mt-2 text-xs">
             {zh ? "请在聊天中回复后继续。" : "Reply in the chat to continue."}
           </p>
+          <Link
+            href={`/workspace/chats/${encodeURIComponent(threadId)}`}
+            className="text-primary mt-3 inline-block text-sm underline"
+          >
+            {zh ? "返回原对话回答" : "Reply in the original chat"}
+          </Link>
         </section>
       )}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -221,7 +230,7 @@ export function AutonomousRoundExplorer({
             >
               {
                 {
-                  flow: ["全过程画布", "Full process"],
+                  flow: ["阶段导航", "Stage navigation"],
                   timeline: ["轮次时间线", "Round timeline"],
                   graph: ["方案关系图", "Recorded relations"],
                 }[view][zh ? 0 : 1]
@@ -303,9 +312,7 @@ export function AutonomousRoundExplorer({
             style={
               layout === "flow"
                 ? {
-                    backgroundImage:
-                      "radial-gradient(var(--border) 1px, transparent 1px)",
-                    backgroundSize: "18px 18px",
+                    backgroundColor: "var(--card)",
                   }
                 : undefined
             }
@@ -320,7 +327,7 @@ export function AutonomousRoundExplorer({
               />
             ) : (
               <ol
-                className={`mx-auto max-w-lg px-5 py-6 ${layout === "flow" ? "space-y-8" : "space-y-3"}`}
+                className={`mx-auto max-w-lg px-3 py-4 ${layout === "flow" ? "space-y-6" : "space-y-3"}`}
                 style={{ zoom }}
               >
                 {[
@@ -330,6 +337,13 @@ export function AutonomousRoundExplorer({
                 ].map((node, index, all) => {
                   const decision = "decision_id" in node;
                   const key = decision ? node.decision_id : node.id;
+                  const stage = decision ? "search" : node.stage;
+                  const preceding = all[index - 1];
+                  const precedingStage = preceding
+                    ? "decision_id" in preceding
+                      ? "search"
+                      : preceding.stage
+                    : null;
                   return (
                     <li
                       key={key}
@@ -339,8 +353,23 @@ export function AutonomousRoundExplorer({
                       {layout === "flow" && index < all.length - 1 && (
                         <span
                           aria-hidden
-                          className="border-border absolute top-full left-1/2 h-8 border-l"
+                          className="border-border absolute top-full left-1/2 h-6 border-l"
                         />
+                      )}
+                      {stage !== precedingStage && (
+                        <p className="text-muted-foreground mb-3 text-xs font-semibold">
+                          {
+                            {
+                              data: ["01 · 数据准备", "01 · Data preparation"],
+                              search: ["02 · 方案搜索", "02 · Model search"],
+                              final: ["03 · 最终评价", "03 · Final evaluation"],
+                              delivery: [
+                                "04 · 交付与审批",
+                                "04 · Delivery and approval",
+                              ],
+                            }[stage][zh ? 0 : 1]
+                          }
+                        </p>
                       )}
                       {decision ? (
                         <RoundNodeCard
@@ -484,6 +513,20 @@ export function AutonomousRoundExplorer({
             >
               {zh ? "回到开始" : "Back to start"}
             </button>
+            {retained && (
+              <button
+                type="button"
+                className="bg-card rounded-md border px-3 py-2 text-xs"
+                onClick={() => {
+                  onSelect(retained);
+                  canvasRef.current
+                    ?.querySelector(`[data-flow-id="${retained.decision_id}"]`)
+                    ?.scrollIntoView({ block: "center" });
+                }}
+              >
+                {zh ? "查看保留轮次" : "Retained round"}
+              </button>
+            )}
             <span className="text-muted-foreground ml-auto text-xs">
               {Math.round(zoom * 100)}%
             </span>

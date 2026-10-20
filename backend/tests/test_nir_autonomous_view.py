@@ -19,6 +19,37 @@ def test_invalid_metrics_are_missing_instead_of_fabricated_zero():
     assert value == {"val": {"scope": "validation", "n": 10}}
 
 
+def test_summary_projects_bound_source_metadata_without_opening_or_rewriting_input(tmp_path):
+    service, ctx, _result, _stop = stopped_session(tmp_path)
+    sid = ctx["session_id"]
+    with service.search.process._connection(write=True) as db:
+        session = service.search._session(db, sid)
+        session["task_snapshot"] = {"analyte": "水分", "source_file": {"virtual_path": "/mnt/user-data/uploads/原始光谱.MAT", "sha256": "a" * 64, "size_bytes": 8192}}
+        db.execute("UPDATE search_sessions SET payload=? WHERE id=?", (_json(session), sid))
+    before = service.search.process.db.read_bytes()
+    with patch("numpy.load", side_effect=AssertionError("metadata read cannot load arrays")):
+        summary = AutonomousView(service.search.process).summary(sid)
+    assert summary["data_context"]["source_file"] == {"name": "原始光谱.MAT", "format": "MAT", "size_bytes": 8192, "sha256": "a" * 64, "evidence_status": "recorded"}
+    assert "/mnt/" not in json.dumps(summary)
+    assert service.search.process.db.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        None,
+        {},
+        {"virtual_path": "/mnt/user-data/uploads/x.csv"},
+        {"virtual_path": "/mnt/user-data/uploads/../private.csv", "sha256": "a" * 64, "size_bytes": 12},
+        {"virtual_path": "/mnt/user-data/uploads/x.csv", "sha256": "bad", "size_bytes": 12},
+    ],
+)
+def test_incomplete_source_metadata_does_not_claim_a_verified_file(source):
+    from deerflow.community.nir.autonomous_view import source_file_summary
+
+    assert source_file_summary(source) == {"evidence_status": "not_recorded"}
+
+
 def test_old_process_index_has_no_autonomous_session(tmp_path):
     import sqlite3
 

@@ -14,18 +14,39 @@ import { useProcessResource } from "@/core/nir/process-hooks";
 import { ProcessChartView } from "./process-chart";
 import { ProcessFacts } from "./process-facts";
 
-function CalPlot({ chart, zh }: { chart: ProcessChart; zh: boolean }) {
+function LinkedCalPlots({
+  before,
+  after,
+  zh,
+  rawOnly,
+}: {
+  before: ProcessChart;
+  after: ProcessChart;
+  zh: boolean;
+  rawOnly: boolean;
+}) {
   const [zoom, setZoom] = useState<[number, number]>([0, 1]);
   const [selected, setSelected] = useState<string[]>([]);
+  const [hidden, setHidden] = useState<string[]>([]);
   return (
-    <ProcessChartView
-      chart={chart}
-      zh={zh}
-      zoom={zoom}
-      onZoom={setZoom}
-      selected={selected}
-      onSelect={setSelected}
-    />
+    <div
+      className={rawOnly ? "" : "process-plot-pair"}
+      data-testid="cal-linked-plots"
+    >
+      {(rawOnly ? [before] : [before, after]).map((chart) => (
+        <ProcessChartView
+          key={chart.chart_id}
+          chart={chart}
+          zh={zh}
+          zoom={zoom}
+          onZoom={setZoom}
+          selected={selected}
+          onSelect={setSelected}
+          hiddenSeries={hidden}
+          onHiddenSeriesChange={setHidden}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -34,11 +55,13 @@ export function CalSpectraComparison({
   summary,
   zh,
   experimentId,
+  rawOnly = false,
 }: {
   threadId: string;
   summary: AutonomousSummary;
   zh: boolean;
   experimentId?: string;
+  rawOnly?: boolean;
 }) {
   const [choice, setChoice] = useState("");
   const experiments = experimentId
@@ -62,9 +85,18 @@ export function CalSpectraComparison({
     ? parseCalSpectra(query.data, summary.session_id, current.experiment_id)
     : null;
   return (
-    <section className="space-y-3 rounded-xl border p-4">
+    <section
+      className="space-y-3 rounded-xl border p-4"
+      data-testid="cal-spectra"
+    >
       <h3 className="font-medium">
-        {zh ? "Cal 原始与预处理光谱" : "Raw and preprocessed Cal spectra"}
+        {rawOnly
+          ? zh
+            ? "原始光谱 · Cal"
+            : "Raw spectra · Cal"
+          : zh
+            ? "Cal 原始与预处理光谱"
+            : "Raw and preprocessed Cal spectra"}
       </h3>
       <p className="text-muted-foreground text-sm">
         {zh
@@ -106,15 +138,22 @@ export function CalSpectraComparison({
               (item) => item.experiment_id === experimentId,
             )?.decision_id) ? (
         <>
-          <ProcessFacts
-            value={{
-              preprocessing: value.configuration.steps,
-              model: value.configuration.method,
-              experiment_id: current?.experiment_id,
-              decision_id: value.decision_id,
-            }}
-            zh={zh}
-          />
+          <details className="text-xs">
+            <summary className="cursor-pointer">
+              {zh
+                ? "曲线来源与实际处理记录"
+                : "Curve source and executed preprocessing"}
+            </summary>
+            <ProcessFacts
+              value={{
+                preprocessing: value.configuration.steps,
+                model: value.configuration.method,
+                experiment_id: current?.experiment_id,
+                decision_id: value.decision_id,
+              }}
+              zh={zh}
+            />
+          </details>
           {!value.before.x_unit && (
             <p className="text-muted-foreground text-xs">
               {zh
@@ -122,18 +161,13 @@ export function CalSpectraComparison({
                 : "Axis units unspecified; original channel indices are used when no wavelength axis exists."}
             </p>
           )}
-          <div className="process-plot-pair">
-            <CalPlot
-              key={`${current?.experiment_id}_before`}
-              chart={value.before}
-              zh={zh}
-            />
-            <CalPlot
-              key={`${current?.experiment_id}_after`}
-              chart={value.after}
-              zh={zh}
-            />
-          </div>
+          <LinkedCalPlots
+            key={`${summary.session_id}:${current?.experiment_id}`}
+            before={value.before}
+            after={value.after}
+            zh={zh}
+            rawOnly={rawOnly}
+          />
         </>
       ) : (
         <p className="text-muted-foreground text-sm">

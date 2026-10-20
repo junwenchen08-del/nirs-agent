@@ -11,6 +11,28 @@ from deerflow.community.nir.datasets.service import _hash_regular_file, _source_
 from deerflow.community.nir.process import _digest, _id
 
 
+def legacy_input_digest(metrics):
+    """File-byte identity for the legacy nir_analyze protocol, not a split identity.
+
+    Callers must first verify the model/metrics bundle. Never downgrade a sealed
+    audit to this path, even when its session is unavailable or incomplete.
+    """
+    protocol = "automated_analysis_three_way_holdout"
+    if metrics.get("autonomous_decision_audit") is not None or metrics.get("protocol") != protocol:
+        return None
+    reproduction = metrics.get("reproducibility")
+    if not isinstance(reproduction, dict) or reproduction.get("schema_version") != 1 or reproduction.get("protocol") != protocol:
+        return None
+    digest = metrics.get("training_data_hash")
+    input_digest = reproduction.get("input_sha256")
+    if not isinstance(digest, str) or not isinstance(input_digest, str):
+        return None
+    digest = digest.lower()
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest) or input_digest.lower() != digest:
+        return None
+    return digest
+
+
 def verified_library_source(paths, owner, dataset):
     relative = PurePosixPath(dataset.storage_relpath or "")
     if len(relative.parts) != 2 or relative.parts[0] != dataset.id:

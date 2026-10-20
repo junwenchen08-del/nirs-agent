@@ -39,15 +39,18 @@ export function RoundNextRecommendation({
     ? pipeline.preprocessing
     : [];
   return (
-    <section className="space-y-3" data-testid="round-next-recommendation">
+    <section
+      className="border-primary/30 bg-accent/20 space-y-3 rounded-xl border p-4"
+      data-testid="round-next-recommendation"
+    >
       <h4 className="font-medium">
         {ended
           ? zh
             ? "搜索结束"
             : "Search ended"
           : zh
-            ? "大模型的下一轮建议"
-            : "Model recommendation for the next round"}
+            ? "下一步优化建议"
+            : "Next optimization recommendation"}
       </h4>
       {!ended && next ? (
         <>
@@ -164,7 +167,7 @@ export function RoundNextRecommendation({
         <p className="text-muted-foreground">
           {ended
             ? zh
-              ? "搜索已结束，最终评价与模型状态见“最终模型与下载”。"
+              ? "搜索已结束，最终评价与模型状态见“最终结果与交付”。"
               : "Search has ended; see the final model and delivery view."
             : loading
               ? zh

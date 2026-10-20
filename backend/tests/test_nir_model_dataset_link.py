@@ -20,6 +20,82 @@ from deerflow.community.nir.search_tools import _load_search_mat
 from deerflow.persistence.nir_library.model import NIRDatasetRow, NIRModelVersionRow
 
 
+def legacy_metrics(digest):
+    return {
+        "protocol": "automated_analysis_three_way_holdout",
+        "training_data_hash": digest,
+        "reproducibility": {"schema_version": 1, "protocol": "automated_analysis_three_way_holdout", "input_sha256": digest, "random_state": 42},
+    }
+
+
+async def legacy_dataset(service, paths, owner="alice", thread="source-thread", content=b"target,1000,1100\n1,2,3\n2,3,4\n"):
+    source = paths.sandbox_uploads_dir(thread, user_id=owner) / "tablets.csv"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(content)
+    dataset = await DatasetService(service.session_factory, paths, service.policy).save_from_thread_upload(owner, thread, "/mnt/user-data/uploads/tablets.csv", "药片数据", save_confirmed=True)
+    return dataset
+
+
+@pytest.mark.asyncio
+async def test_legacy_file_hash_recovers_group_without_inventing_profile_or_writing_history(model_library, monkeypatch):
+    service, paths = model_library
+    digest = hashlib.sha256(b"target,1000,1100\n1,2,3\n2,3,4\n").hexdigest()
+    version, workflow = _registered_package(paths, training_hash=digest, extra_metrics=legacy_metrics(digest))
+    saved = await service.promote_registered("alice", "source-thread", "tablet_assay", version, workflow=workflow)
+    assert saved["source_dataset_id"] is None
+    folder = paths.user_nir_model_version_dir("alice", "tablet_assay", version)
+    before = {p.name: p.read_bytes() for p in folder.iterdir()}
+    dataset = await legacy_dataset(service, paths)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Legacy file identity must not inspect session arrays or reconstruct splits")
+
+    monkeypatch.setattr("deerflow.community.nir.models.service.recorded_source", forbidden)
+    monkeypatch.setattr("deerflow.community.nir.models.service.verify_historical_source", forbidden)
+    detail = await service.get_report("alice", "tablet_assay", version)
+    assert detail["dataset"]["id"] == dataset["id"]
+    assert detail["dataset"]["name"] == "药片数据"
+    assert detail["dataset"]["profile_id"] is None
+    assert detail["model"]["source_dataset_id"] == dataset["id"]
+    assert detail["model"]["source_profile_id"] is None
+    async with service.session_factory() as db:
+        row = await db.scalar(select(NIRModelVersionRow))
+        assert row.source_dataset_id is None and row.source_profile_id is None
+    assert {p.name: p.read_bytes() for p in folder.iterdir()} == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["input_mismatch", "training_mismatch", "invalid_hash", "wrong_protocol", "wrong_manifest_protocol", "wrong_schema", "sealed_audit", "other_owner", "same_name", "corrupt_bytes", "corrupt_manifest"])
+async def test_legacy_group_recovery_requires_exact_owned_verified_file(model_library, case):
+    service, paths = model_library
+    dataset = await legacy_dataset(service, paths, owner="bob" if case == "other_owner" else "alice", thread="bob-thread" if case == "other_owner" else "source-thread")
+    metrics = legacy_metrics(dataset["sha256"])
+    if case == "input_mismatch":
+        metrics["reproducibility"]["input_sha256"] = "b" * 64
+    elif case in {"training_mismatch", "same_name"}:
+        metrics["training_data_hash"] = "b" * 64
+        if case == "same_name":
+            metrics["reproducibility"]["input_sha256"] = "b" * 64
+    elif case == "invalid_hash":
+        metrics["training_data_hash"] = metrics["reproducibility"]["input_sha256"] = "not-a-hash"
+    elif case == "wrong_protocol":
+        metrics["protocol"] = "sealed_holdout"
+    elif case == "wrong_manifest_protocol":
+        metrics["reproducibility"]["protocol"] = "unknown"
+    elif case == "wrong_schema":
+        metrics["reproducibility"]["schema_version"] = 2
+    elif case == "sealed_audit":
+        metrics["autonomous_decision_audit"] = {"session_id": "search_missing"}
+    elif case in {"corrupt_bytes", "corrupt_manifest"}:
+        directory = paths.user_nir_dataset_dir("alice", dataset["id"])
+        if case == "corrupt_manifest":
+            (directory / "manifest.json").write_text("{}")
+        else:
+            (directory / "source.csv").write_bytes(b"changed")
+    async with service.session_factory() as db:
+        assert await service._recover_dataset(db, "alice", "source-thread", metrics) is None
+
+
 def source_fixture(paths, *, recorded_hash=False, source=None, data=None, project="project"):
     from nir_core.model.evaluation import split_dataset
 

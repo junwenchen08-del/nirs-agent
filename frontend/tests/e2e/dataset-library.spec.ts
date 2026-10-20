@@ -6,6 +6,9 @@ import { mockLangGraphAPI } from "./utils/mock-api";
 
 async function setupLibrary(page: Page) {
   await mockLangGraphAPI(page).ready;
+  await page.route("**/api/nir/models?include_archived=true", (route) =>
+    route.fulfill({ json: { models: [] } }),
+  );
   await page.route("**/api/langgraph/threads", (route) =>
     route.fulfill({
       json: { ...route.request().postDataJSON(), status: "idle", values: {} },
@@ -101,6 +104,7 @@ test("local upload appears in the library and can be mounted into a new chat", a
     return route.fulfill({ json: { ...dataset, reused_existing: false } });
   });
   await page.goto("/workspace/nir/datasets");
+  await expect(page.getByTestId("nir-dataset-card")).toHaveCount(3);
   await page.getByRole("tab", { name: /^分类识别/ }).click();
   await page.getByRole("button", { name: "上传数据集", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "上传数据集", exact: true });
