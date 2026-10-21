@@ -15,7 +15,7 @@ import {
 } from "@/core/nir/process-display";
 
 import { ProcessChartView } from "./process-chart";
-import { ProcessFacts } from "./process-facts";
+import { RoundParameters } from "./round-recorded-content";
 
 export function Metrics({ value }: { value: unknown }) {
   const { locale } = useI18n();
@@ -63,27 +63,7 @@ export function Metrics({ value }: { value: unknown }) {
   ) : null;
 }
 
-export function RecordedNarrative({
-  value,
-  zh,
-}: {
-  value: string;
-  zh: boolean;
-}) {
-  if (!value) return <span>{zh ? "未记录" : "Not recorded"}</span>;
-  if (!zh || /[\u3400-\u9fff]/u.test(value))
-    return <span className="whitespace-pre-wrap">{value}</span>;
-  return (
-    <details className="text-sm">
-      <summary className="text-muted-foreground cursor-pointer">
-        历史理由为英文，展开查看原始记录
-      </summary>
-      <p className="mt-2 whitespace-pre-wrap" lang="en">
-        {value}
-      </p>
-    </details>
-  );
-}
+export { RecordedNarrative } from "./round-recorded-content";
 
 export function EvidenceChart({
   x,
@@ -207,7 +187,7 @@ export function ParameterTrials({
               <tr key={trial.index} className="border-t">
                 <td className="py-2">{trial.index}</td>
                 <td className="max-w-80 break-words">
-                  <ProcessFacts value={trial.parameters} zh={zh} />
+                  <RoundParameters value={trial.parameters} zh={zh} />
                 </td>
                 <td>{fmt(trial.RMSECV)}</td>
                 <td>{trial.fold_rmse.map(fmt).join(" / ") || "—"}</td>

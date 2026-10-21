@@ -241,6 +241,7 @@ class AutonomousView:
     def spectra(self, sid, eid):
         """Owner/thread/session-bound cached Cal evidence; no numeric IO."""
         from ._common import _read_regular_bytes
+        from .cal_spectra import validate_step_spectra
 
         with self._read() as db:
             self._session(db, sid)
@@ -250,7 +251,7 @@ class AutonomousView:
         result = json.loads(row["result"])
         missing = {"scope": "calibration", "experiment_id": eid, "evidence_status": "not_recorded"}
         if not result.get("spectra_sha256"):
-            return missing
+            return {**missing, "evidence_status": "failed" if result.get("spectra_error_type") else "not_recorded"}
         try:
             path = self.process.root / "sessions" / _id(sid) / (_id(eid) + ".spectra.json")
             if any(parent.is_symlink() for parent in (path, *path.parents)):
@@ -263,10 +264,13 @@ class AutonomousView:
                 or payload.get("session_id") != sid
                 or payload.get("experiment_id") != eid
                 or payload.get("model_hash") != row["artifact_hash"]
+                or payload.get("decision_id") != result.get("decision_id")
+                or payload.get("configuration") != result.get("configuration")
             ):
                 raise ValueError("Cal chart integrity mismatch")
+            validate_step_spectra(payload, result.get("configuration", {}))
             return payload
-        except (OSError, ValueError):
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
             return {**missing, "evidence_status": "unavailable", "reason": "missing_or_corrupt_evidence"}
 
     def diagnostics(self, sid, eid):

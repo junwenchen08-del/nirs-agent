@@ -16,12 +16,15 @@ import {
 import { formatProcessNumber } from "@/core/nir/process-display";
 import { cn } from "@/lib/utils";
 
-const height = 330,
-  left = 64,
-  top = 24,
-  bottom = 270;
+const left = 64,
+  top = 24;
 const fmt = formatProcessNumber;
 export const plotLabel = (value: string | undefined, zh: boolean): string => {
+  const step = value?.match(/^calibration_step_(\d+)$/);
+  if (step)
+    return zh
+      ? `步骤 ${Number(step[1]) + 1} 输出 · Cal`
+      : `Step ${Number(step[1]) + 1} output · Cal`;
   const labels: Record<string, [string, string]> = {
     trend: ["Val 性能趋势", "Val performance trend"],
     round: ["实验轮次", "Experiment round"],
@@ -52,6 +55,14 @@ export const plotLabel = (value: string | undefined, zh: boolean): string => {
     variable: ["变量序号", "Variable index"],
     reference: ["实测值", "Reference"],
     spectral_value: ["光谱数值", "Spectral value"],
+    standardized_spectral_value: [
+      "标准化光谱数值",
+      "Standardized spectral value",
+    ],
+    normalized_spectral_value: ["归一化光谱数值", "Normalized spectral value"],
+    centered_spectral_value: ["中心化光谱数值", "Centered spectral value"],
+    first_derivative_value: ["一阶导数数值", "First derivative value"],
+    second_derivative_value: ["二阶导数数值", "Second derivative value"],
     count: ["样本数", "Count"],
     components: ["成分数", "Components"],
   };
@@ -79,6 +90,8 @@ export function ProcessChartView({
   hiddenSeries,
   onHiddenSeriesChange,
   expanded = false,
+  valueBounds,
+  compact = false,
 }: {
   chart: ProcessChart;
   zh: boolean;
@@ -89,7 +102,12 @@ export function ProcessChartView({
   hiddenSeries?: string[];
   onHiddenSeriesChange?: (ids: string[]) => void;
   expanded?: boolean;
+  valueBounds?: [number, number];
+  compact?: boolean;
 }) {
+  const small = compact && !expanded;
+  const height = small ? 210 : 330,
+    bottom = small ? 156 : 270;
   const clipId = useId().replaceAll(":", "");
   const [enlarged, setEnlarged] = useState(false);
   const [localHidden, setLocalHidden] = useState<string[]>([]);
@@ -114,7 +132,7 @@ export function ProcessChartView({
     if (!svg) return;
     const observer = new ResizeObserver(([entry]) => {
       if (entry && entry.contentRect.width > 0)
-        setWidth(Math.max(280, entry.contentRect.width));
+        setWidth(Math.max(180, entry.contentRect.width));
     });
     observer.observe(svg);
     return () => observer.disconnect();
@@ -124,6 +142,7 @@ export function ProcessChartView({
       chart.series ?? (chart.y ? [{ id: chart.type, values: chart.y }] : []),
     [chart],
   );
+  const tickCount = width < 380 ? 2 : 4;
   const xs = useMemo(
     () =>
       chart.x ??
@@ -143,8 +162,8 @@ export function ProcessChartView({
         (_, index) => xs[index]! >= low && xs[index]! <= high,
       ),
     );
-  const yMin = Math.min(0, ...ys),
-    yMax = Math.max(0, ...ys);
+  const yMin = valueBounds?.[0] ?? Math.min(0, ...ys),
+    yMax = valueBounds?.[1] ?? Math.max(0, ...ys);
   const ySpan = yMax - yMin || 1;
   const sx = (x: number) =>
     left + ((x - low) / (high - low || 1)) * (right - left);
@@ -159,7 +178,7 @@ export function ProcessChartView({
           )
           .join(" "),
       ),
-    [lineSeries, xs, low, high, width, yMin, ySpan],
+    [lineSeries, xs, low, high, width, yMin, ySpan, bottom],
   );
   const scatter = ["prediction", "residual"].includes(chart.type);
   const point = (
@@ -188,7 +207,12 @@ export function ProcessChartView({
   return (
     <>
       <section
-        className="bg-card min-w-0 rounded-xl border p-3"
+        className={
+          small
+            ? "bg-card min-w-0 rounded-lg border p-2"
+            : "bg-card min-w-0 rounded-xl border p-3"
+        }
+        data-compact={small || undefined}
         aria-label={`${plotLabel(chart.type, zh)} ${plotLabel(chart.scope, zh)}`}
       >
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
@@ -203,7 +227,7 @@ export function ProcessChartView({
               {zh ? "放大" : "Enlarge"}
             </button>
           )}
-          <span className="text-muted-foreground min-h-8 w-full text-xs">
+          <span className="text-muted-foreground w-full text-xs">
             {plotLabel(chart.scope, zh)} ·{" "}
             {chart.type === "distribution"
               ? `${chart.n_returned} ${zh ? "分箱" : "bins"} / ${chart.n_total} ${zh ? "样本" : "samples"}`
@@ -212,33 +236,37 @@ export function ProcessChartView({
               ` · ${chart.axis_returned}/${chart.axis_total} ${zh ? "显示变量 / 全部变量" : "displayed / total variables"}`}
           </span>
         </div>
-        <div
-          className="text-muted-foreground flex min-h-7 flex-wrap gap-2 text-xs"
-          aria-live="polite"
-        >
-          {hover ? (
-            <span>
-              {plotLabel(
-                chart.x_label === "wavelength"
-                  ? "wavelength_axis"
-                  : chart.x_label,
-                zh,
-              )}
-              : {fmt(xs[hover.index])} {chart.x_unit} ·{" "}
-              {axisLabel(chart.y_label, zh)}:{" "}
-              {fmt(lineSeries[hover.series]?.values[hover.index])}{" "}
-              {chart.y_unit}
-              {hoverId ? ` · ${zh ? "样本标识" : "Sample ID"} ${hoverId}` : ""}
-            </span>
-          ) : (
-            <span>
-              {zh
-                ? "悬停读取数值；拖动框选显示点；下方可缩放和重置。"
-                : "Hover for values; drag to select displayed points; zoom or reset below."}
-            </span>
-          )}
-        </div>
-        {scatter && chart.sample_ids?.length ? (
+        {!small && (
+          <div
+            className="text-muted-foreground flex min-h-7 flex-wrap gap-2 text-xs"
+            aria-live="polite"
+          >
+            {hover ? (
+              <span>
+                {plotLabel(
+                  chart.x_label === "wavelength"
+                    ? "wavelength_axis"
+                    : chart.x_label,
+                  zh,
+                )}
+                : {fmt(xs[hover.index])} {chart.x_unit} ·{" "}
+                {axisLabel(chart.y_label, zh)}:{" "}
+                {fmt(lineSeries[hover.series]?.values[hover.index])}{" "}
+                {chart.y_unit}
+                {hoverId
+                  ? ` · ${zh ? "样本标识" : "Sample ID"} ${hoverId}`
+                  : ""}
+              </span>
+            ) : (
+              <span>
+                {zh
+                  ? "悬停读取数值；拖动框选显示点；下方可缩放和重置。"
+                  : "Hover for values; drag to select displayed points; zoom or reset below."}
+              </span>
+            )}
+          </div>
+        )}
+        {!small && scatter && chart.sample_ids?.length ? (
           <label className="my-2 flex flex-wrap items-center gap-2 text-xs">
             {zh ? "选中样本" : "Selected sample"}
             <select
@@ -258,12 +286,36 @@ export function ProcessChartView({
             </select>
           </label>
         ) : null}
+        {!small && chart.type === "spectra" && chart.series?.length ? (
+          <label className="my-2 flex flex-wrap items-center gap-2 text-xs">
+            {zh ? "聚焦样本" : "Focus sample"}
+            <select
+              aria-label={zh ? "聚焦样本" : "Focus sample"}
+              className="bg-background max-w-full rounded border px-2 py-1"
+              value={selected.length === 1 ? selected[0] : ""}
+              onChange={(event) =>
+                onSelect(event.target.value ? [event.target.value] : [])
+              }
+            >
+              <option value="">{zh ? "全部曲线" : "All curves"}</option>
+              {chart.series.map((series, i) => (
+                <option key={series.id} value={series.id}>
+                  {zh ? `样本 ${i + 1}` : `Sample ${i + 1}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <svg
           ref={svgRef}
           role="img"
           aria-label={plotLabel(chart.type, zh)}
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full touch-none select-none"
+          className={
+            small
+              ? "h-[210px] w-full touch-none select-none"
+              : "w-full touch-none select-none"
+          }
           onPointerDown={(event) => {
             if (scatter) {
               const pos = point(event);
@@ -330,38 +382,42 @@ export function ProcessChartView({
               />
             </clipPath>
           </defs>
-          {[0, 1, 2, 3, 4].map((tick) => (
-            <g key={tick}>
-              <line
-                x1={left}
-                x2={right}
-                y1={top + (tick / 4) * (bottom - top)}
-                y2={top + (tick / 4) * (bottom - top)}
-                stroke="currentColor"
-                opacity=".08"
-              />
-              {chart.type !== "wavelength" && (
+          {Array.from({ length: tickCount + 1 }, (_, tick) => tick).map(
+            (tick) => (
+              <g key={tick}>
+                <line
+                  x1={left}
+                  x2={right}
+                  y1={top + (tick / tickCount) * (bottom - top)}
+                  y2={top + (tick / tickCount) * (bottom - top)}
+                  stroke="currentColor"
+                  opacity=".08"
+                />
+                {chart.type !== "wavelength" && (
+                  <text
+                    x={left - 8}
+                    y={top + (tick / tickCount) * (bottom - top) + 4}
+                    textAnchor="end"
+                    fill="currentColor"
+                    fontSize="11"
+                  >
+                    {fmt(yMax - (tick / tickCount) * ySpan)}
+                  </text>
+                )}
                 <text
-                  x={left - 8}
-                  y={top + (tick / 4) * (bottom - top) + 4}
-                  textAnchor="end"
+                  x={left + (tick / tickCount) * (right - left)}
+                  y={bottom + 22}
+                  textAnchor={
+                    tick === 0 ? "start" : tick === tickCount ? "end" : "middle"
+                  }
                   fill="currentColor"
                   fontSize="11"
                 >
-                  {fmt(yMax - (tick / 4) * ySpan)}
+                  {fmt(low + (tick / tickCount) * (high - low))}
                 </text>
-              )}
-              <text
-                x={left + (tick / 4) * (right - left)}
-                y={bottom + 22}
-                textAnchor="middle"
-                fill="currentColor"
-                fontSize="11"
-              >
-                {fmt(low + (tick / 4) * (high - low))}
-              </text>
-            </g>
-          ))}
+              </g>
+            ),
+          )}
           <line
             x1={left}
             x2={right}
@@ -486,8 +542,19 @@ export function ProcessChartView({
                   key={series.id}
                   fill="none"
                   stroke={seriesColor(seriesIndex)}
-                  strokeWidth="1.7"
-                  opacity=".8"
+                  strokeWidth={
+                    chart.type === "spectra" && selected.includes(series.id)
+                      ? 3
+                      : 1.7
+                  }
+                  opacity={
+                    chart.type === "spectra" &&
+                    selected.length &&
+                    !selected.includes(series.id)
+                      ? 0.2
+                      : 0.8
+                  }
+                  data-series-id={series.id}
                   points={curvePaths[seriesIndex]}
                 />
               ),
@@ -505,7 +572,7 @@ export function ProcessChartView({
             )}
           </g>
         </svg>
-        {chart.series && (
+        {!small && chart.series && (
           <div className="mb-3 flex flex-wrap gap-1.5">
             {chart.series.map((series, index) => (
               <button
@@ -537,54 +604,56 @@ export function ProcessChartView({
             ))}
           </div>
         )}
-        <div className="flex flex-wrap items-center gap-3 border-t pt-3 text-xs">
-          <label className="flex items-center gap-2">
-            {zh ? "区间起点" : "Range start"}
-            <input
-              aria-label={zh ? "区间起点" : "Range start"}
-              type="range"
-              min="0"
-              max="99"
-              value={zoom[0] * 100}
-              onChange={(event) =>
-                onZoom([
-                  Math.min(Number(event.target.value) / 100, zoom[1] - 0.01),
-                  zoom[1],
-                ])
-              }
-              className="w-24"
-            />
-          </label>
-          <label className="flex items-center gap-2">
-            {zh ? "区间终点" : "Range end"}
-            <input
-              aria-label={zh ? "区间终点" : "Range end"}
-              type="range"
-              min="1"
-              max="100"
-              value={zoom[1] * 100}
-              onChange={(event) =>
-                onZoom([
-                  zoom[0],
-                  Math.max(Number(event.target.value) / 100, zoom[0] + 0.01),
-                ])
-              }
-              className="w-24"
-            />
-          </label>
-          <button
-            type="button"
-            className="rounded border px-2 py-1"
-            onClick={() => {
-              onZoom([0, 1]);
-              onSelect([]);
-              setHidden([]);
-            }}
-          >
-            {zh ? "重置图表" : "Reset chart"}
-          </button>
-        </div>
-        {scatter && (
+        {!small && (
+          <div className="flex flex-wrap items-center gap-3 border-t pt-3 text-xs">
+            <label className="flex items-center gap-2">
+              {zh ? "区间起点" : "Range start"}
+              <input
+                aria-label={zh ? "区间起点" : "Range start"}
+                type="range"
+                min="0"
+                max="99"
+                value={zoom[0] * 100}
+                onChange={(event) =>
+                  onZoom([
+                    Math.min(Number(event.target.value) / 100, zoom[1] - 0.01),
+                    zoom[1],
+                  ])
+                }
+                className="w-24"
+              />
+            </label>
+            <label className="flex items-center gap-2">
+              {zh ? "区间终点" : "Range end"}
+              <input
+                aria-label={zh ? "区间终点" : "Range end"}
+                type="range"
+                min="1"
+                max="100"
+                value={zoom[1] * 100}
+                onChange={(event) =>
+                  onZoom([
+                    zoom[0],
+                    Math.max(Number(event.target.value) / 100, zoom[0] + 0.01),
+                  ])
+                }
+                className="w-24"
+              />
+            </label>
+            <button
+              type="button"
+              className="rounded border px-2 py-1"
+              onClick={() => {
+                onZoom([0, 1]);
+                onSelect([]);
+                setHidden([]);
+              }}
+            >
+              {zh ? "重置图表" : "Reset chart"}
+            </button>
+          </div>
+        )}
+        {!small && scatter && (
           <p className="mt-3 text-sm" aria-live="polite">
             {zh ? "当前显示的所选点" : "Selected displayed points"}:{" "}
             {summary.count}
@@ -593,57 +662,61 @@ export function ProcessChartView({
               : ""}
           </p>
         )}
-        <p className="text-muted-foreground mt-2 text-xs">
-          {chart.sampling.includes("histogram")
-            ? zh
-              ? "直方图统计来自全量样本。"
-              : "Histogram counts use all samples."
-            : chart.type === "wavelength"
+        {!small && (
+          <p className="text-muted-foreground mt-2 text-xs">
+            {chart.sampling.includes("histogram")
               ? zh
-                ? "区间记录精确保留的变量；缩放不会改变实际选择。"
-                : "Intervals describe the exact retained variables; zoom does not change the selection."
-              : chart.n_returned < chart.n_total ||
-                  (chart.axis_returned ?? 0) < (chart.axis_total ?? 0)
+                ? "直方图统计来自全量样本。"
+                : "Histogram counts use all samples."
+              : chart.type === "wavelength"
                 ? zh
-                  ? "已抽样显示，框选仅统计显示点；全量指标另列。"
-                  : "Sampled display; selection summarizes displayed points. Full-population metrics are separate."
-                : zh
-                  ? "本图覆盖所标范围的全部记录。"
-                  : "All records in the labeled scope are shown."}
-        </p>
-        <details className="mt-3 text-xs">
-          <summary className="cursor-pointer">
-            {zh ? "数据表与抽样说明" : "Data table and sampling"}
-          </summary>
-          <p className="mt-2 break-all">{chart.sampling}</p>
-          <div className="mt-2 max-h-48 overflow-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr>
-                  <th>{zh ? "标识" : "ID"}</th>
-                  <th>{axisLabel(chart.x_label, zh)}</th>
-                  <th>{axisLabel(chart.y_label, zh)}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {xs.slice(0, 2000).map((x, index) => (
-                  <tr key={index} className="border-b">
-                    <td className="py-1">
-                      {chart.sample_ids?.[index]?.slice(0, 8) ?? index + 1}
-                    </td>
-                    <td>{fmt(x)}</td>
-                    <td>{fmt(lineSeries[0]?.values[index])}</td>
+                  ? "区间记录精确保留的变量；缩放不会改变实际选择。"
+                  : "Intervals describe the exact retained variables; zoom does not change the selection."
+                : chart.n_returned < chart.n_total ||
+                    (chart.axis_returned ?? 0) < (chart.axis_total ?? 0)
+                  ? zh
+                    ? "已抽样显示，框选仅统计显示点；全量指标另列。"
+                    : "Sampled display; selection summarizes displayed points. Full-population metrics are separate."
+                  : zh
+                    ? "本图覆盖所标范围的全部记录。"
+                    : "All records in the labeled scope are shown."}
+          </p>
+        )}
+        {!small && (
+          <details className="mt-3 text-xs">
+            <summary className="cursor-pointer">
+              {zh ? "数据表与抽样说明" : "Data table and sampling"}
+            </summary>
+            <p className="mt-2 break-all">{chart.sampling}</p>
+            <div className="mt-2 max-h-48 overflow-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr>
+                    <th>{zh ? "标识" : "ID"}</th>
+                    <th>{axisLabel(chart.x_label, zh)}</th>
+                    <th>{axisLabel(chart.y_label, zh)}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            {chart.ranges?.map((range, index) => (
-              <p key={index}>
-                {range.start}–{range.end}: {range.count}
-              </p>
-            ))}
-          </div>
-        </details>
+                </thead>
+                <tbody>
+                  {xs.slice(0, 2000).map((x, index) => (
+                    <tr key={index} className="border-b">
+                      <td className="py-1">
+                        {chart.sample_ids?.[index]?.slice(0, 8) ?? index + 1}
+                      </td>
+                      <td>{fmt(x)}</td>
+                      <td>{fmt(lineSeries[0]?.values[index])}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {chart.ranges?.map((range, index) => (
+                <p key={index}>
+                  {range.start}–{range.end}: {range.count}
+                </p>
+              ))}
+            </div>
+          </details>
+        )}
       </section>
       {!expanded && (
         <Dialog open={enlarged} onOpenChange={setEnlarged}>
@@ -667,6 +740,7 @@ export function ProcessChartView({
                 hiddenSeries={hidden}
                 onHiddenSeriesChange={setHidden}
                 expanded
+                valueBounds={valueBounds}
               />
             )}
           </DialogContent>

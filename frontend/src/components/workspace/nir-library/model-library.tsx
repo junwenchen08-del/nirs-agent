@@ -389,6 +389,7 @@ export function ModelLibrary() {
         groups.map((group) => {
           const key = group.datasetId ?? "__unconfirmed";
           const title = groupName(group.datasetId, group.models);
+          const isCollapsed = collapsed[key] ?? true;
           const options = [
             ...new Set(
               group.models.map(
@@ -420,11 +421,11 @@ export function ModelLibrary() {
                 <button
                   type="button"
                   className="flex min-w-0 flex-1 items-start gap-3 text-left"
-                  aria-expanded={!collapsed[key]}
+                  aria-expanded={!isCollapsed}
                   onClick={() =>
                     setCollapsed((current) => ({
                       ...current,
-                      [key]: !current[key],
+                      [key]: !(current[key] ?? true),
                     }))
                   }
                 >
@@ -447,7 +448,7 @@ export function ModelLibrary() {
                     )}
                   </span>
                   <ChevronDownIcon
-                    className={`ml-auto size-4 shrink-0 ${collapsed[key] ? "-rotate-90" : ""}`}
+                    className={`ml-auto size-4 shrink-0 ${isCollapsed ? "-rotate-90" : ""}`}
                   />
                 </button>
                 {group.datasetId && (
@@ -458,7 +459,7 @@ export function ModelLibrary() {
                   </Button>
                 )}
               </div>
-              {!collapsed[key] && (
+              {!isCollapsed && (
                 <>
                   {options.length > 1 && (
                     <div className="border-t px-4 py-3">

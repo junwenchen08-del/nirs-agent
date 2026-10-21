@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import {
   record,
@@ -8,13 +8,13 @@ import {
   type DecisionView,
 } from "@/core/nir/autonomous";
 import { type ProcessChart } from "@/core/nir/process-contract";
+import { formatProcessNumber as fmt } from "@/core/nir/process-display";
 import { useProcessResource } from "@/core/nir/process-hooks";
 import {
   parseRoundDiagnostics,
   type RoundPoints,
 } from "@/core/nir/round-process";
 
-import { Metrics } from "./autonomous-evidence";
 import { ProcessChartView } from "./process-chart";
 
 const scopes = [
@@ -42,40 +42,114 @@ function LinkedPlots({
   const [zoom, setZoom] = useState<[number, number]>([0, 1]);
   const [selected, setSelected] = useState<string[]>([]);
   return (
-    <div className="process-plot-pair min-w-0" data-testid="round-linked-plots">
-      {(["prediction", "residual"] as const).map((type) => {
-        const chart: ProcessChart = {
-          chart_schema_version: 1,
-          chart_id: `${decision.experiment_id}_${points.scope}_${type}`,
-          run_id: sid,
-          attempt_id: decision.experiment_id!,
-          step_execution_id: decision.decision_id,
-          evidence_status: "available",
-          type,
-          scope: points.scope,
-          x_label: "reference",
-          y_label: type,
-          x_unit: points.unit,
-          y_unit: points.unit,
-          x: points.observed,
-          y: type === "prediction" ? points.predicted : points.residual,
-          sample_ids: points.sample_ids,
-          n_total: points.n_total,
-          n_returned: points.n_returned,
-          sampling: points.sampling,
-        };
-        return (
-          <ProcessChartView
-            key={type}
-            chart={chart}
-            zh={zh}
-            zoom={zoom}
-            onZoom={setZoom}
-            selected={selected}
-            onSelect={setSelected}
+    <div className="min-w-0 space-y-3" data-testid="round-linked-plots">
+      <div
+        className="flex flex-wrap items-center gap-3 text-xs"
+        data-testid="diagnostic-linked-controls"
+      >
+        <label className="flex items-center gap-2">
+          {zh ? "选中样本" : "Selected sample"}
+          <select
+            aria-label={zh ? "选中样本" : "Selected sample"}
+            className="bg-background max-w-full rounded border px-2 py-1"
+            value={selected[0] ?? ""}
+            onChange={(event) =>
+              setSelected(event.target.value ? [event.target.value] : [])
+            }
+          >
+            <option value="">{zh ? "全部样本" : "All samples"}</option>
+            {points.sample_ids.map((id, index) => (
+              <option key={id} value={id}>
+                {zh ? `图中样本 ${index + 1}` : `Displayed sample ${index + 1}`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2">
+          {zh ? "区间起点" : "Range start"}
+          <input
+            type="range"
+            aria-label={zh ? "区间起点" : "Range start"}
+            className="w-20"
+            min="0"
+            max="99"
+            value={zoom[0] * 100}
+            onChange={(event) =>
+              setZoom([
+                Math.min(Number(event.target.value) / 100, zoom[1] - 0.01),
+                zoom[1],
+              ])
+            }
           />
-        );
-      })}
+        </label>
+        <label className="flex items-center gap-2">
+          {zh ? "区间终点" : "Range end"}
+          <input
+            type="range"
+            aria-label={zh ? "区间终点" : "Range end"}
+            className="w-20"
+            min="1"
+            max="100"
+            value={zoom[1] * 100}
+            onChange={(event) =>
+              setZoom([
+                zoom[0],
+                Math.max(Number(event.target.value) / 100, zoom[0] + 0.01),
+              ])
+            }
+          />
+        </label>
+        <button
+          type="button"
+          className="underline"
+          onClick={() => {
+            setZoom([0, 1]);
+            setSelected([]);
+          }}
+        >
+          {zh ? "重置图表" : "Reset charts"}
+        </button>
+        <span aria-live="polite">
+          {zh ? "当前显示的所选点" : "Selected displayed points"}:{" "}
+          {selected.length}
+        </span>
+      </div>
+      <div className="process-plot-pair">
+        {(["prediction", "residual"] as const).map((type) => {
+          const chart: ProcessChart = {
+            chart_schema_version: 1,
+            chart_id: `${decision.experiment_id}_${points.scope}_${type}`,
+            run_id: sid,
+            attempt_id: decision.experiment_id!,
+            step_execution_id: decision.decision_id,
+            evidence_status: "available",
+            type,
+            scope: points.scope,
+            x_label: "reference",
+            y_label: type,
+            x_unit: points.unit,
+            y_unit: points.unit,
+            x: points.observed,
+            y: type === "prediction" ? points.predicted : points.residual,
+            sample_ids: points.sample_ids,
+            n_total: points.n_total,
+            n_returned: points.n_returned,
+            sampling: points.sampling,
+          };
+          return (
+            <ProcessChartView
+              key={type}
+              chart={chart}
+              compact
+              zh={zh}
+              zoom={zoom}
+              onZoom={setZoom}
+              selected={selected}
+              onSelect={setSelected}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -85,7 +159,9 @@ export function RoundDiagnostics({
   summary,
   decision,
   zh,
+  comparison,
 }: {
+  comparison?: ReactNode;
   threadId: string;
   summary: AutonomousSummary;
   decision: DecisionView;
@@ -117,6 +193,8 @@ export function RoundDiagnostics({
     options.find((item) => item[0] === scope) ?? options[0] ?? scopes[0];
   const selectedScope = currentScope;
   const points = charts?.[currentScope[0]];
+  const selectedMetrics = record(metrics[selectedScope[1]]);
+  const validMetrics = completed && selectedMetrics.scope === selectedScope[0];
   return (
     <section
       className="min-w-0 space-y-4"
@@ -136,12 +214,45 @@ export function RoundDiagnostics({
           ))}
         </select>
       </label>
-      <Metrics
-        value={{
-          metrics: { [selectedScope[1]]: metrics[selectedScope[1]] },
-          stage: "searching",
-        }}
-      />
+      <p className="text-muted-foreground text-xs">
+        {zh ? "样本数：" : "Samples: "}
+        {validMetrics ? fmt(selectedMetrics.n) : "—"}
+      </p>
+      {selectedScope[0] === "validation" && comparison ? (
+        comparison
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {["RMSE", "R2"].map((key) => (
+            <div key={key} className="bg-muted/30 rounded-lg p-3">
+              <p className="text-muted-foreground text-xs">
+                {key === "R2" ? "R² ↑" : "RMSE ↓"}
+              </p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums">
+                {validMetrics ? fmt(selectedMetrics[key]) : "—"}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+      {validMetrics && (
+        <details className="text-xs">
+          <summary className="cursor-pointer">
+            {zh ? "更多指标" : "More metrics"}
+          </summary>
+          <dl className="mt-2 flex flex-wrap gap-5">
+            {["RPD", "MAE", "bias"]
+              .filter((key) => typeof selectedMetrics[key] === "number")
+              .map((key) => (
+                <div key={key}>
+                  <dt className="text-muted-foreground">
+                    {key === "bias" && zh ? "平均偏差" : key}
+                  </dt>
+                  <dd>{fmt(selectedMetrics[key])}</dd>
+                </div>
+              ))}
+          </dl>
+        </details>
+      )}
       {!Object.keys(record(metrics[selectedScope[1]])).length && (
         <p className="text-muted-foreground text-sm">
           {zh

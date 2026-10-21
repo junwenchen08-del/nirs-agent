@@ -431,6 +431,21 @@ export interface CalSpectra {
   decision_id: string;
   before: ProcessChart;
   after: ProcessChart;
+  steps:
+    | { index: number; method: string; params: Facts; chart: ProcessChart }[]
+    | null;
+}
+export function sameRecordedValue(a: unknown, b: unknown): boolean {
+  const canonical = (value: unknown): string =>
+    Array.isArray(value)
+      ? `[${value.map(canonical).join(",")}]`
+      : value && typeof value === "object"
+        ? `{${Object.entries(value)
+            .sort(([x], [y]) => x.localeCompare(y))
+            .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+            .join(",")}}`
+        : (JSON.stringify(value) ?? "null");
+  return canonical(a) === canonical(b);
 }
 export function parseCalSpectra(
   raw: unknown,
@@ -439,7 +454,7 @@ export function parseCalSpectra(
 ): CalSpectra | null {
   const value = record(raw);
   if (
-    value.schema_version !== 1 ||
+    (value.schema_version !== 1 && value.schema_version !== 2) ||
     value.evidence_status !== "available" ||
     value.scope !== "calibration" ||
     value.session_id !== sessionId ||
@@ -464,6 +479,8 @@ export function parseCalSpectra(
       return null;
     const series = chart.series.map((item) => record(item));
     if (
+      series.some((item) => !text(item.id, 24)) ||
+      new Set(series.map((item) => text(item.id, 24))).size !== series.length ||
       !Number.isInteger(chart.n_total) ||
       Number(chart.n_total) < series.length ||
       chart.n_returned !== series.length ||
@@ -490,7 +507,15 @@ export function parseCalSpectra(
       type: "spectra",
       scope,
       x_label: chart.x_label === "wavelength" ? "wavelength" : "variable",
-      y_label: "spectral_value",
+      y_label: [
+        "standardized_spectral_value",
+        "normalized_spectral_value",
+        "centered_spectral_value",
+        "first_derivative_value",
+        "second_derivative_value",
+      ].includes(String(chart.y_label))
+        ? String(chart.y_label)
+        : "spectral_value",
       x_unit: ["nm", "cm^-1"].includes(String(chart.x_unit))
         ? String(chart.x_unit)
         : null,
@@ -519,11 +544,54 @@ export function parseCalSpectra(
       JSON.stringify(after.series?.map((item) => item.id))
   )
     return null;
+  let steps: CalSpectra["steps"] = null;
+  if (value.schema_version === 2) {
+    const configured = record(value.configuration).steps;
+    if (
+      !Array.isArray(value.steps) ||
+      !Array.isArray(configured) ||
+      value.steps.length !== configured.length ||
+      value.steps.length > 32
+    )
+      return null;
+    steps = [];
+    for (let i = 0; i < value.steps.length; i++) {
+      const step = record(value.steps[i]);
+      const config = record(configured[i]);
+      const chart = decode(step.chart, `calibration_step_${i}`);
+      if (
+        step.index !== i ||
+        !text(step.method) ||
+        step.method !== config.method ||
+        !sameRecordedValue(step.params, config.params ?? {}) ||
+        chart?.n_total !== before.n_total ||
+        chart.axis_total !== before.axis_total ||
+        chart.x_unit !== before.x_unit ||
+        !sameRecordedValue(chart.x, before.x) ||
+        !sameRecordedValue(
+          chart.series?.map((item) => item.id),
+          before.series?.map((item) => item.id),
+        )
+      )
+        return null;
+      steps.push({
+        index: i,
+        method: text(step.method),
+        params: safeFacts(step.params),
+        chart,
+      });
+    }
+    if (
+      !sameRecordedValue((steps.at(-1)?.chart ?? before).series, after.series)
+    )
+      return null;
+  }
   return {
     configuration: safeFacts(value.configuration),
     decision_id: text(value.decision_id),
     before,
     after,
+    steps,
   };
 }
 export function validationSeries(

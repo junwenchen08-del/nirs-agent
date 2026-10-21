@@ -1,19 +1,19 @@
 import {
   actionLabel,
-  decisionPipelineLabel,
   executionLabel,
   record,
-  text,
+  type AutonomousSummary,
   type DecisionView,
 } from "@/core/nir/autonomous";
-import { methodLabel } from "@/core/nir/presentation";
+import { decisionPipelineLabel } from "@/core/nir/autonomous";
+import { formatProcessNumber as fmt } from "@/core/nir/process-display";
 
 import { RecordedNarrative } from "./autonomous-evidence";
-import { ProcessFacts } from "./process-facts";
 
 export function RoundNextRecommendation({
   current,
   next,
+  summary,
   terminal,
   loading,
   failed,
@@ -22,6 +22,7 @@ export function RoundNextRecommendation({
 }: {
   current: DecisionView;
   next: DecisionView | null | undefined;
+  summary: AutonomousSummary;
   terminal: boolean;
   loading: boolean;
   failed: boolean;
@@ -29,129 +30,65 @@ export function RoundNextRecommendation({
   onSelect: (decision: DecisionView) => void;
 }) {
   const ended = ["STOP", "RETAIN"].includes(current.action);
-  const stop = next && ["STOP", "RETAIN"].includes(next.action);
-  // Suggestions always come from the model's pre-execution proposal. Fitted
-  // parameters and later scores belong to the next round's execution detail.
-  const pipeline = record(next?.selected.pipeline);
-  const optimization = record(next?.selected.optimization);
-  const parameters = record(pipeline.fixed_params);
-  const steps = Array.isArray(pipeline.preprocessing)
-    ? pipeline.preprocessing
-    : [];
+  const decision = ended ? current : next;
+  const stop = decision && ["STOP", "RETAIN"].includes(decision.action);
+  const retained = summary.trends.find(
+    (row) => row.experiment_id === decision?.retained_experiment_id,
+  );
   return (
     <section
-      className="border-primary/30 bg-accent/20 space-y-3 rounded-xl border p-4"
+      className="space-y-3 text-sm"
       data-testid="round-next-recommendation"
     >
-      <h4 className="font-medium">
-        {ended
-          ? zh
-            ? "搜索结束"
-            : "Search ended"
-          : zh
-            ? "下一步优化建议"
-            : "Next optimization recommendation"}
-      </h4>
-      {!ended && next ? (
+      {decision ? (
         <>
-          <p className="text-muted-foreground text-xs">
-            {zh
-              ? "以下方案、理由和预期由大模型在下一轮执行前提交。"
-              : "The model submitted this plan, rationale and expectation before the next execution."}
-          </p>
           <p className="font-medium">
-            {zh ? "建议动作：" : "Recommended action: "}
-            {actionLabel(next.action, zh)}
+            {zh ? "后续行动：" : "Next action: "}
+            {actionLabel(decision.action, zh)}
+            {stop && retained
+              ? zh
+                ? `，保留第 ${fmt(retained.round_index)} 轮`
+                : `; retain round ${fmt(retained.round_index)}`
+              : ""}
           </p>
           {!stop && (
-            <dl className="space-y-3 rounded-lg border p-3">
-              <div>
-                <dt className="text-muted-foreground mb-1 text-xs">
-                  {zh ? "建议方案" : "Recommended pipeline"}
-                </dt>
-                <dd>{decisionPipelineLabel(next.selected, zh)}</dd>
-              </div>
-              {steps.some(
-                (step) => Object.keys(record(record(step).params)).length,
-              ) && (
-                <div>
-                  <dt className="text-muted-foreground mb-1 text-xs">
-                    {zh
-                      ? "建议预处理参数"
-                      : "Proposed preprocessing parameters"}
-                  </dt>
-                  <dd className="space-y-2">
-                    {steps.map((step, index) =>
-                      Object.keys(record(record(step).params)).length ? (
-                        <div key={index}>
-                          <p>{methodLabel(text(record(step).method), zh)}</p>
-                          <ProcessFacts value={record(step).params} zh={zh} />
-                        </div>
-                      ) : null,
-                    )}
-                  </dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-muted-foreground mb-1 text-xs">
-                  {zh ? "建议模型参数" : "Proposed model parameters"}
-                </dt>
-                <dd>
-                  {Object.keys(parameters).length ? (
-                    <ProcessFacts value={parameters} zh={zh} />
-                  ) : (
-                    <span className="text-muted-foreground">
-                      {Object.hasOwn(pipeline, "fixed_params")
-                        ? zh
-                          ? "建议未指定固定参数，参数候选见搜索计划。"
-                          : "No fixed parameters specified; see the proposed search plan."
-                        : zh
-                          ? "未记录建议模型参数。"
-                          : "Proposed model parameters were not recorded."}
-                    </span>
-                  )}
-                </dd>
-              </div>
-              {Object.keys(optimization).length > 0 && (
-                <div>
-                  <dt className="text-muted-foreground mb-1 text-xs">
-                    {zh ? "参数搜索计划" : "Proposed parameter search"}
-                  </dt>
-                  <dd>
-                    <ProcessFacts value={optimization} zh={zh} />
-                  </dd>
-                </div>
-              )}
-            </dl>
+            <p>
+              {zh ? "调整方案：" : "Proposed pipeline: "}
+              {decisionPipelineLabel(decision.selected, zh)}
+            </p>
           )}
-          <div>
-            <h5 className="mb-1 font-medium">
-              {zh ? "建议依据" : "Rationale"}
-            </h5>
-            <RecordedNarrative value={next.rationale} zh={zh} />
-          </div>
-          {next.expected_outcome && (
+          {decision.rationale && (
             <div>
-              <h5 className="mb-1 font-medium">
-                {zh ? "预期改善" : "Expected outcome"}
-              </h5>
-              <RecordedNarrative value={next.expected_outcome} zh={zh} />
+              <h4 className="text-muted-foreground mb-1 text-xs">
+                {zh ? "智能体记录的理由" : "Recorded agent rationale"}
+              </h4>
+              <div className="line-clamp-3 whitespace-pre-wrap">
+                <RecordedNarrative value={decision.rationale} zh={zh} />
+              </div>
+              {decision.rationale.length > 180 && (
+                <details className="mt-2 text-xs">
+                  <summary className="cursor-pointer">
+                    {zh ? "完整理由" : "Full rationale"}
+                  </summary>
+                  <RecordedNarrative value={decision.rationale} zh={zh} />
+                </details>
+              )}
             </div>
           )}
-          <div className="space-y-2 border-t pt-3">
-            <p className="text-muted-foreground text-xs">
-              {zh ? "后续执行状态：" : "Subsequent execution: "}
-              {next.status === "accepted"
-                ? zh
-                  ? "建议已提交，等待执行"
-                  : "Submitted, awaiting execution"
-                : executionLabel(next.status, zh) ||
-                  (zh ? "未记录" : "Not recorded")}
-            </p>
+          <p className="text-muted-foreground text-xs">
+            {zh ? "执行状态：" : "Execution: "}
+            {decision.status === "accepted"
+              ? zh
+                ? "已提交，等待执行"
+                : "Submitted, awaiting execution"
+              : executionLabel(decision.status, zh) ||
+                (zh ? "未记录" : "Not recorded")}
+          </p>
+          {!ended && (
             <button
               type="button"
-              className="rounded-md border px-3 py-2"
-              onClick={() => onSelect(next)}
+              className="text-primary underline"
+              onClick={() => onSelect(decision)}
             >
               {stop
                 ? zh
@@ -159,31 +96,48 @@ export function RoundNextRecommendation({
                   : "View stop decision"
                 : zh
                   ? "查看下一轮执行记录"
-                  : "View next round record"}
+                  : "View next round"}
             </button>
-          </div>
+          )}
+          {ended && (
+            <p className="text-muted-foreground text-xs">
+              {zh
+                ? "这是搜索停止／保留事件，没有新的模型拟合。最终评价与审批状态请查看左侧对应阶段。"
+                : "Search stop/retention event; no new fit. Final evaluation and approval are shown in their respective stages."}
+            </p>
+          )}
+          {stop && !retained && decision.retained_experiment_id && (
+            <p className="text-muted-foreground text-xs">
+              {zh
+                ? "已记录保留实验，关联轮次暂未加载。"
+                : "Retention recorded; the linked round is not loaded."}
+            </p>
+          )}
         </>
       ) : (
         <p className="text-muted-foreground">
-          {ended
+          {loading
             ? zh
-              ? "搜索已结束，最终评价与模型状态见“最终结果与交付”。"
-              : "Search has ended; see the final model and delivery view."
-            : loading
+              ? "正在读取后续决策…"
+              : "Reading next decision…"
+            : failed
               ? zh
-                ? "正在读取下一轮建议…"
-                : "Reading the next recommendation…"
-              : failed
+                ? "后续决策暂时无法读取。"
+                : "Next decision unavailable."
+              : terminal
                 ? zh
-                  ? "下一轮建议暂时无法读取，请重试。"
-                  : "Could not read the next recommendation; please retry."
-                : terminal
-                  ? zh
-                    ? "本次搜索已结束，没有后续建议。已有结果保留。"
-                    : "This search has ended with no further recommendation; existing results are preserved."
-                  : zh
-                    ? "大模型尚未提交下一轮建议。"
-                    : "The model has not submitted the next recommendation yet."}
+                  ? "搜索已结束，没有记录后续决策。"
+                  : "Search ended; no further decision recorded."
+                : zh
+                  ? "智能体尚未提交后续决策。"
+                  : "No next decision submitted yet."}
+        </p>
+      )}
+      {!stop && decision && record(decision.selected).pipeline == null && (
+        <p className="text-muted-foreground text-xs">
+          {zh
+            ? "未记录后续管线，未补写方案。"
+            : "No subsequent pipeline recorded."}
         </p>
       )}
     </section>

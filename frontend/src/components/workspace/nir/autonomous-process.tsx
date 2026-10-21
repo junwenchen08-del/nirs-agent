@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { urlOfArtifact } from "@/core/artifacts/utils";
 import { useI18n } from "@/core/i18n/hooks";
@@ -90,60 +90,87 @@ function Rejections({
   poll: boolean;
 }) {
   const [offset, setOffset] = useState(0);
+  const [open, setOpen] = useState(false);
   const query = useProcessResource<{
     data: unknown[];
     next_offset: number | null;
   }>(threadId, `autonomous/${sid}/rejections?offset=${offset}`, poll);
   const page = parseRejectionPage(query.data, offset);
+  if (
+    query.isPending ||
+    (!query.isError &&
+      !offset &&
+      Array.isArray(query.data?.data) &&
+      !page.data.length)
+  )
+    return null;
   return (
-    <section className="rounded border p-3 text-sm">
-      <h4 className="font-medium">
-        {zh ? "被拒绝的提案（未执行）" : "Rejected proposals (not executed)"}
-      </h4>
-      {query.isError ? (
-        <p role="alert">
-          {zh
-            ? "提案校验记录读取失败，请关闭后重新读取。"
-            : "Proposal validation records failed to load; reopen to retry."}
-        </p>
-      ) : query.isPending ? (
-        <p>
-          {zh
-            ? "正在读取提案校验记录…"
-            : "Reading proposal validation records…"}
-        </p>
-      ) : page.data.length ? (
-        page.data.map((raw, index) => (
-          <div key={index} className="mt-2 border-t pt-2">
-            <ProcessFacts zh={zh} value={record(raw)} />
-          </div>
-        ))
-      ) : (
-        <p className="text-muted-foreground mt-2">
-          {zh
-            ? "未记录提案拒绝事件。旧运行不补造记录。"
-            : "No recorded rejection events. Old runs are not reconstructed."}
-        </p>
-      )}
-      <div className="mt-2 flex justify-between">
-        <button
-          type="button"
-          disabled={!offset}
-          onClick={() => setOffset(Math.max(0, offset - 10))}
-        >
-          {zh ? "上一页" : "Previous"}
-        </button>
-        <button
-          type="button"
-          disabled={page.next_offset == null}
-          onClick={() => {
-            if (page.next_offset !== null) setOffset(page.next_offset);
-          }}
-        >
-          {zh ? "下一页" : "Next"}
-        </button>
+    <details
+      className="rounded border p-3 text-sm"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="cursor-pointer text-xs">
+        {zh
+          ? "提案校验记录（未执行的方案）"
+          : "Proposal validation records (not executed)"}
+      </summary>
+      <div className="mt-3">
+        <h4 className="font-medium">
+          {zh ? "被拒绝的提案（未执行）" : "Rejected proposals (not executed)"}
+        </h4>
+        {query.isError ? (
+          <p role="alert">
+            {zh
+              ? "提案校验记录读取失败。"
+              : "Proposal validation records failed to load."}
+            <button
+              type="button"
+              className="ml-2 underline"
+              onClick={() => void query.refetch()}
+            >
+              {zh ? "重新读取" : "Retry"}
+            </button>
+          </p>
+        ) : query.isPending ? (
+          <p>
+            {zh
+              ? "正在读取提案校验记录…"
+              : "Reading proposal validation records…"}
+          </p>
+        ) : page.data.length ? (
+          page.data.map((raw, index) => (
+            <div key={index} className="mt-2 border-t pt-2">
+              <ProcessFacts zh={zh} value={record(raw)} />
+            </div>
+          ))
+        ) : (
+          <p className="text-muted-foreground mt-2">
+            {zh
+              ? "未记录提案拒绝事件。旧运行不补造记录。"
+              : "No recorded rejection events. Old runs are not reconstructed."}
+          </p>
+        )}
+        <div className="mt-2 flex justify-between">
+          <button
+            type="button"
+            disabled={!offset}
+            onClick={() => setOffset(Math.max(0, offset - 10))}
+          >
+            {zh ? "上一页" : "Previous"}
+          </button>
+          <button
+            type="button"
+            disabled={page.next_offset == null}
+            onClick={() => {
+              if (page.next_offset !== null) setOffset(page.next_offset);
+            }}
+          >
+            {zh ? "下一页" : "Next"}
+          </button>
+        </div>
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -171,11 +198,6 @@ export function AutonomousProcess({
     true,
   );
   const summary = parseSummary(summaryQuery.data);
-  const [showRejections, setShowRejections] = useState(false);
-  useEffect(() => {
-    setShowRejections(false);
-  }, [threadId, sid]);
-  const [tab, setTab] = useState<"timeline" | "delivery">("timeline");
   if (summaryQuery.isError || sessions.isError)
     return (
       <div className="p-4" role="alert">
@@ -425,144 +447,114 @@ export function AutonomousProcess({
           </details>
         )}
       </section>
-      <nav
-        className="flex gap-2"
-        aria-label={zh ? "自主建模视图" : "Autonomous views"}
-      >
-        {(["timeline", "delivery"] as const).map((key) => (
-          <button
-            type="button"
-            key={key}
-            className={`rounded-lg border px-3 py-2 text-sm ${tab === key ? "bg-accent font-semibold" : ""}`}
-            aria-pressed={tab === key}
-            onClick={() => setTab(key)}
-          >
-            {
-              {
-                timeline: ["建模过程", "Modeling process"],
-                delivery: ["最终结果与交付", "Final results and delivery"],
-              }[key][zh ? 0 : 1]
-            }
-          </button>
-        ))}
-      </nav>
-      {tab === "timeline" && (
-        <section className="space-y-3">
-          <details
-            open={showRejections}
-            onToggle={(event) => setShowRejections(event.currentTarget.open)}
-          >
-            <summary className="cursor-pointer text-sm">
-              {zh
-                ? "查看提案校验错误与修正"
-                : "Proposal validation errors and corrections"}
-            </summary>
-            {showRejections && (
-              <Rejections
-                threadId={threadId}
-                sid={sid}
-                zh={zh}
-                poll={!isAutonomousTerminal(summary.stage)}
-              />
-            )}
-          </details>
-          <AutonomousRoundExplorer
+      <AutonomousRoundExplorer
+        key={`${threadId}:${sid}`}
+        threadId={threadId}
+        summary={summary}
+        workflow={workflow}
+        zh={zh}
+        searchNotes={
+          <Rejections
             key={`${threadId}:${sid}`}
             threadId={threadId}
-            summary={summary}
-            workflow={workflow}
+            sid={sid}
             zh={zh}
+            poll={!isAutonomousTerminal(summary.stage)}
           />
-        </section>
-      )}
-      {tab === "delivery" && (
-        <section className="space-y-4 rounded-xl border p-4">
-          <h3 className="font-medium">
-            {zh ? "最终保留模型" : "Final retained model"}
-          </h3>
-          <p className="text-sm">{stopExplanation(summary, zh)}</p>
-          {!summary.freeze ? (
-            <p>
-              {zh
-                ? "尚无冻结模型；成功实验并不自动成为最终模型。"
-                : "No frozen model; success does not automatically select the final model."}
-            </p>
-          ) : (
-            <ProcessFacts zh={zh} value={summary.freeze} />
-          )}
-          <Metrics value={summary} />
-          <FinalCharts threadId={threadId} summary={summary} zh={zh} />
-          <section className="bg-muted/20 space-y-2 rounded-lg border p-4">
-            <h4 className="font-medium">
-              {zh ? "验证范围与局限" : "Validation scope and limitations"}
-            </h4>
-            <p className="text-muted-foreground text-sm">
-              {zh
-                ? "Cal 用于拟合，Cal CV / Val 用于搜索和选择。最终 Test 是本次固定划分的留出评价，不代表已经完成外部验证。未保存的图表不补算。"
-                : "Cal fits the model; Cal CV / Val support search and selection. Final Test evaluates this fixed holdout and does not establish external validation. Missing charts are not recomputed."}
-            </p>
+        }
+        finalContent={
+          <section className="space-y-4 rounded-xl border p-4">
+            <h3 className="font-medium">
+              {zh ? "最终保留模型" : "Final retained model"}
+            </h3>
+            <p className="text-sm">{stopExplanation(summary, zh)}</p>
+            {!summary.freeze ? (
+              <p>
+                {zh
+                  ? "尚无冻结模型；成功实验并不自动成为最终模型。"
+                  : "No frozen model; success does not automatically select the final model."}
+              </p>
+            ) : (
+              <ProcessFacts zh={zh} value={summary.freeze} />
+            )}
+            <Metrics value={summary} />
+            <FinalCharts threadId={threadId} summary={summary} zh={zh} />
+            <section className="bg-muted/20 space-y-2 rounded-lg border p-4">
+              <h4 className="font-medium">
+                {zh ? "验证范围与局限" : "Validation scope and limitations"}
+              </h4>
+              <p className="text-muted-foreground text-sm">
+                {zh
+                  ? "Cal 用于拟合，Cal CV / Val 用于搜索和选择。最终 Test 是本次固定划分的留出评价，不代表已经完成外部验证。未保存的图表不补算。"
+                  : "Cal fits the model; Cal CV / Val support search and selection. Final Test evaluates this fixed holdout and does not establish external validation. Missing charts are not recomputed."}
+              </p>
+            </section>
           </section>
-          <h4 className="font-medium">
-            {zh ? "交付、审批与入库" : "Delivery, approval and registration"}
-          </h4>
-          <p className="text-sm">
-            {zh
-              ? "科学协议、性能门禁、用户审批与注册分别记录。"
-              : "Scientific protocol, quality, user approval and registration are separate."}
-          </p>
-          <ProcessFacts
-            zh={zh}
-            value={autonomousLifecycleFacts(summary, workflow)}
-          />
-          {summary.downloads.length ? (
-            <div className="flex flex-wrap gap-2">
-              {summary.downloads.map((file) => (
-                <a
-                  key={file.path}
-                  href={urlOfArtifact({
-                    threadId,
-                    filepath: `/${file.path}`,
-                    download: true,
-                  })}
-                  className="rounded-lg border px-3 py-2 text-sm"
-                  download
-                >
-                  {zh
-                    ? ({
-                        "model.joblib": "预测模型（model.joblib）",
-                        "report.md": "中文图文报告（Markdown）",
-                        "report.html": "离线图文报告（HTML）",
-                        "delivery.zip": "完整下载包（ZIP）",
-                        "metrics.json": "完整指标证据（JSON）",
-                        "decisions.json": "原始决策证据（JSON）",
-                      }[file.name] ?? file.name)
-                    : file.name}
-                </a>
-              ))}
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">
+        }
+        deliveryContent={
+          <section className="space-y-4 rounded-xl border p-4">
+            <h4 className="font-medium">
+              {zh ? "交付、审批与入库" : "Delivery, approval and registration"}
+            </h4>
+            <p className="text-sm">
               {zh
-                ? "尚无已发布的模型与报告文件。导出失败不自动重新运行 Test。"
-                : "No published model/report files. Export failure never automatically reruns Test."}
+                ? "科学协议、性能门禁、用户审批与注册分别记录。"
+                : "Scientific protocol, quality, user approval and registration are separate."}
             </p>
-          )}
-          <details>
-            <summary className="cursor-pointer text-xs">
-              {zh ? "任务与交付身份" : "Task and delivery identity"}
-            </summary>
             <ProcessFacts
               zh={zh}
-              value={{
-                session_id: sid,
-                task: summary.task,
-                retained_experiment_id: summary.retained_experiment_id,
-                best_val_experiment_id: summary.best_val_experiment_id,
-              }}
+              value={autonomousLifecycleFacts(summary, workflow)}
             />
-          </details>
-        </section>
-      )}
+            {summary.downloads.length ? (
+              <div className="flex flex-wrap gap-2">
+                {summary.downloads.map((file) => (
+                  <a
+                    key={file.path}
+                    href={urlOfArtifact({
+                      threadId,
+                      filepath: `/${file.path}`,
+                      download: true,
+                    })}
+                    className="rounded-lg border px-3 py-2 text-sm"
+                    download
+                  >
+                    {zh
+                      ? ({
+                          "model.joblib": "预测模型（model.joblib）",
+                          "report.md": "中文图文报告（Markdown）",
+                          "report.html": "离线图文报告（HTML）",
+                          "delivery.zip": "完整下载包（ZIP）",
+                          "metrics.json": "完整指标证据（JSON）",
+                          "decisions.json": "原始决策证据（JSON）",
+                        }[file.name] ?? file.name)
+                      : file.name}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                {zh
+                  ? "尚无已发布的模型与报告文件。导出失败不自动重新运行 Test。"
+                  : "No published model/report files. Export failure never automatically reruns Test."}
+              </p>
+            )}
+            <details>
+              <summary className="cursor-pointer text-xs">
+                {zh ? "任务与交付身份" : "Task and delivery identity"}
+              </summary>
+              <ProcessFacts
+                zh={zh}
+                value={{
+                  session_id: sid,
+                  task: summary.task,
+                  retained_experiment_id: summary.retained_experiment_id,
+                  best_val_experiment_id: summary.best_val_experiment_id,
+                }}
+              />
+            </details>
+          </section>
+        }
+      />
       <button
         type="button"
         className="rounded border px-3 py-2 text-sm"

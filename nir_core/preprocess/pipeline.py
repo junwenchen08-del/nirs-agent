@@ -17,6 +17,7 @@ Defines:
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 
 import numpy as np
 
@@ -164,7 +165,13 @@ class PreprocessingPipeline:
                 out = self._apply_stateless(i, step, out, wv)
         return self
 
-    def transform(self, X: np.ndarray, wv: np.ndarray | None = None) -> np.ndarray:
+    def transform(
+        self,
+        X: np.ndarray,
+        wv: np.ndarray | None = None,
+        *,
+        on_step: Callable[[int, PreprocessingStep, np.ndarray], None] | None = None,
+    ) -> np.ndarray:
         """Apply fitted steps to ``X`` using stored training statistics.
 
         If the pipeline contains stateful steps but has not been fitted, this
@@ -176,6 +183,10 @@ class PreprocessingPipeline:
             X: Spectra to transform ``(n_samples, n_wavelengths)``.
             wv: Optional wavelength axis forwarded to wavelength-aware
                 methods such as ``detrend`` and ``emsc``.
+            on_step: Optional read-only observer called with the zero-based
+                index, configured step and cumulative output after each step.
+                Intended for bounded execution-time display evidence; never
+                stored in the pipeline or used during model fitting.
 
         Returns:
             Transformed spectra with the same number of columns as ``X``.
@@ -183,6 +194,8 @@ class PreprocessingPipeline:
         has_stateful = any(s.method in _STATEFUL_METHODS for s in self.steps)
         fit_state = getattr(self, "_fit_state", {})
         if has_stateful and not fit_state:
+            if on_step is not None:
+                raise ValueError("Step evidence requires the original fitted preprocessing state")
             import warnings
 
             warnings.warn(
@@ -198,6 +211,8 @@ class PreprocessingPipeline:
                 out = self._apply_stateful(i, step, out, fit_state[i], wv)
             else:
                 out = self._apply_stateless(i, step, out, wv)
+            if on_step is not None:
+                on_step(i, step, out)
         return out
 
     # ------------------------------------------------------------------

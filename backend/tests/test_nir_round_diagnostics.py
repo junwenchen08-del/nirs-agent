@@ -136,7 +136,7 @@ def test_real_round_browser_fixture_and_shared_contract(tmp_path):
     view = AutonomousView(service.search.process)
     initial = {"summary": view.summary(sid), "decisions": view.decisions(sid, limit=20), "details": {first["decision_id"]: view.decision(sid, first["decision_id"])}}
     following_context = service.context(sid, workflow, "Tune the existing model")
-    second = execute(service, submit(service, following_context, next_plan(following_context), "second"), "execute-second")
+    second = execute(service, submit(service, following_context, next_plan(following_context, "EXPLORE", steps=[{"method": "snv", "params": {}}, {"method": "mean_center", "params": {}}]), "second"), "execute-second")
     stop_context = service.context(sid, workflow, "Stop and retain the first model")
     submit(service, stop_context, stop_plan(stop_context, first["experiment_id"]), "stop")
     service.search.freeze(sid, first["experiment_id"])

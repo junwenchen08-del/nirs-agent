@@ -116,8 +116,8 @@ test("historical missing source metadata stays missing even when finalized", () 
 
 test("matching execution and CV identities permit scoped deltas", () => {
   const html = compare(previous);
-  expect(html).toContain("-0.2");
-  expect(html).toContain("反馈来源");
+  expect(html).toContain("降低 0.2");
+  expect(html).toContain("智能体参考");
   expect(html).not.toContain("不计算改善幅度");
 });
 
@@ -151,5 +151,5 @@ test("historical missing preprocessing is not described as an executed raw pipel
       actual_configuration: { method: "ridge" },
     },
   });
-  expect(html).toContain("预处理未记录");
+  expect(html).not.toContain("原始光谱 · 无预处理");
 });

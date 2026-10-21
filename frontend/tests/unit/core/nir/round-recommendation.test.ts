@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { RoundNextRecommendation } from "@/components/workspace/nir/round-next-recommendation";
-import { parseDecision } from "@/core/nir/autonomous";
+import { parseDecision, parseSummary } from "@/core/nir/autonomous";
 
 const current = parseDecision({
   decision_id: "d_current",
@@ -32,6 +32,11 @@ function render(next: unknown, overrides: Record<string, unknown> = {}) {
   return renderToStaticMarkup(
     createElement(RoundNextRecommendation, {
       current,
+      summary: parseSummary({
+        schema_version: 1,
+        session_id: "search_a",
+        data_context: {},
+      })!,
       next: parseDecision(next),
       terminal: false,
       loading: false,
@@ -43,18 +48,14 @@ function render(next: unknown, overrides: Record<string, unknown> = {}) {
   );
 }
 
-test("a pending model proposal shows its plan, search range, rationale and expectation before execution", () => {
+test("pending decisions show the action and rationale without duplicating parameter detail", () => {
   const html = render(proposed);
-  expect(html).toContain("下一步优化建议");
-  expect(html).toContain("建议方案");
+  expect(html).toContain("后续行动");
   expect(html).toContain("支持向量回归");
-  expect(html).toContain("建议模型参数");
-  expect(html).toContain("径向基核");
-  expect(html).toContain("参数搜索计划");
   expect(html).toContain("保留 SNV，尝试非线性模型");
-  expect(html).toContain("验证误差有望降低，仍需实际评价");
-  expect(html).toContain("建议已提交，等待执行");
-  expect(html).not.toContain("实际执行配置");
+  expect(html).toContain("已提交，等待执行");
+  expect(html).not.toContain("建议模型参数");
+  expect(html).not.toContain("参数搜索计划");
 });
 
 test("completed execution does not replace proposed parameters with fitted parameters or scores", () => {
@@ -66,8 +67,7 @@ test("completed execution does not replace proposed parameters with fitted param
       metrics: { val: { RMSE: 777 } },
     },
   });
-  expect(html).toContain("预期改善");
-  expect(html).toContain("后续执行状态");
+  expect(html).toContain("执行状态");
   expect(html).toContain("实际执行成功");
   expect(html).not.toContain("999");
   expect(html).not.toContain("777");
@@ -89,18 +89,18 @@ test("stop recommendations contain the recorded reason and no invented training 
 });
 
 test("missing recommendations remain missing for both live and ended searches", () => {
-  expect(render(null)).toContain("大模型尚未提交下一轮建议");
+  expect(render(null)).toContain("智能体尚未提交后续决策");
   expect(render(null, { terminal: true })).toContain(
-    "本次搜索已结束，没有后续建议",
+    "搜索已结束，没有记录后续决策",
   );
-  expect(render(null, { failed: true })).toContain("下一轮建议暂时无法读取");
-  expect(render(null, { loading: true })).toContain("正在读取下一轮建议");
+  expect(render(null, { failed: true })).toContain("后续决策暂时无法读取");
+  expect(render(null, { loading: true })).toContain("正在读取后续决策");
 });
 
 test("missing old plan fields are not presented as raw preprocessing or default parameters", () => {
   const html = render({ decision_id: "d_old", action: "SWITCH_MODEL" });
   expect(html).toContain("方案未记录");
-  expect(html).toContain("未记录建议模型参数");
+  expect(html).toContain("未记录后续管线");
   expect(html).not.toContain("原始光谱");
   expect(html).not.toContain("使用算法默认参数");
 });

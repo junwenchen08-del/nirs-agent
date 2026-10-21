@@ -188,11 +188,20 @@ async function setup(
   return state;
 }
 
+async function expandGroups(page: Page) {
+  await expect(page.getByTestId("model-dataset-group").first()).toBeVisible();
+  for (const group of await page.getByTestId("model-dataset-group").all()) {
+    const button = group.getByRole("button", { expanded: false });
+    if (await button.count()) await button.click();
+  }
+}
+
 test("user-approved below-threshold models remain visible and usable with truthful notice", async ({
   page,
 }) => {
   const state = await setup(page, "below_threshold_user_approved");
   await page.goto("/workspace/nir/models");
+  await expandGroups(page);
   await expect(page.getByTestId("model-quality-notice")).toContainText(
     "未达质量门槛，已由用户确认保存",
   );
@@ -215,6 +224,7 @@ test("Chinese model cards open data, methods and scientific charts, then mount i
 }) => {
   const state = await setup(page);
   await page.goto("/workspace/nir/models");
+  await expandGroups(page);
   await expect(
     page.getByRole("heading", { name: "模型库", exact: true }),
   ).toBeVisible();
@@ -413,6 +423,13 @@ test("groups by verified dataset identity and filters targets without changing m
   );
   await page.goto("/workspace/nir/models");
   await expect(page.getByTestId("model-dataset-group")).toHaveCount(4);
+  await expect(page.getByTestId("nir-model-card")).toHaveCount(0);
+  await expect(
+    page
+      .getByTestId("model-dataset-group")
+      .getByRole("button", { expanded: false }),
+  ).toHaveCount(4);
+  await expandGroups(page);
   await expect(page.getByTestId("nir-model-card")).toHaveCount(5);
   const corn = page.locator(
     '[data-testid="model-dataset-group"][data-dataset-id="ds_corn"]',
@@ -454,6 +471,7 @@ test("groups by verified dataset identity and filters targets without changing m
     "数据集名称暂不可用",
   );
   await page.goto("/workspace/nir/models?dataset=ds_other");
+  await expandGroups(page);
   await expect(page.getByTestId("nir-model-card")).toHaveCount(1);
   await expect(page.getByTestId("nir-model-card")).toContainText("other_corn");
   await page.getByRole("link", { name: "清除数据集筛选" }).click();
@@ -476,6 +494,7 @@ test("historical verified report lineage also drives dataset model counts", asyn
     }),
   );
   await page.goto("/workspace/nir/models");
+  await expandGroups(page);
   await expect(page.getByTestId("model-dataset-group")).toHaveCount(1);
   await expect(page.getByTestId("model-dataset-group")).toContainText(
     dataset.name,
@@ -491,6 +510,7 @@ test("historical verified report lineage also drives dataset model counts", asyn
     .getByRole("link", { name: "已保存模型 1 个", exact: true })
     .click();
   await expect(page).toHaveURL(/models\?dataset=ds_corn/);
+  await expandGroups(page);
   await expect(page.getByTestId("nir-model-card")).toHaveCount(1);
   expect(state.runs).toBe(0);
   expect(state.attachments).toBe(0);
@@ -515,6 +535,7 @@ test("historical recovery rejects a different model artifact", async ({
     }),
   );
   await page.goto("/workspace/nir/models");
+  await expandGroups(page);
   await expect(page.getByTestId("model-dataset-group")).toContainText(
     "训练数据来源待确认",
   );
@@ -522,4 +543,63 @@ test("historical recovery rejects a different model artifact", async ({
   await expect(
     page.getByRole("link", { name: "查看数据集", exact: true }),
   ).toHaveCount(0);
+});
+
+test("legacy model cards recover the same scoped R2 shown by their verified report", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.route("**/api/nir/models?include_archived=true", (route) =>
+    route.fulfill({
+      json: {
+        models: [
+          {
+            ...model,
+            source_dataset_id: null,
+            source_profile_id: null,
+            report_summary: null,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/workspace/nir/models");
+  await expandGroups(page);
+  const card = page.getByTestId("nir-model-card");
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText("R² 0.95");
+  await expect(card).toContainText("RMSE 0.28");
+  await card.getByRole("link", { name: "查看详情", exact: true }).click();
+  await expect(page.getByText("0.95", { exact: true })).toBeVisible();
+});
+
+test("known dataset lineage still recovers missing final R2 without borrowing tuning R2", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.route("**/api/nir/models?include_archived=true", (route) =>
+    route.fulfill({
+      json: {
+        models: [
+          {
+            ...model,
+            report_summary: {
+              ...model.report_summary,
+              metrics: metrics.map((metric) =>
+                metric.scope === "final_test"
+                  ? { ...metric, R2: null }
+                  : metric,
+              ),
+            },
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/workspace/nir/models");
+  await expandGroups(page);
+  const card = page.getByTestId("nir-model-card");
+  await expect(card).toContainText("R² 0.95");
+  await expect(card).not.toContainText("R² 0.96");
+  await expect(card).toContainText("测试数据");
 });

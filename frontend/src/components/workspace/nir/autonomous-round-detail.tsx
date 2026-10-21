@@ -1,31 +1,34 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 import {
-  actionLabel,
-  decisionPipelineLabel,
   executionLabel,
   isAutonomousTerminal,
   parseDecision,
   record,
+  sameRecordedValue,
   text,
   type AutonomousSummary,
+  type CalSpectra,
   type DecisionView,
 } from "@/core/nir/autonomous";
 import { methodLabel } from "@/core/nir/presentation";
 import { formatProcessNumber as fmt } from "@/core/nir/process-display";
 import { useProcessResource } from "@/core/nir/process-hooks";
+import {
+  hasRecordedContent,
+  recordedStatements,
+} from "@/core/nir/round-content";
 import { roundConfiguration } from "@/core/nir/round-process";
 
 import { ParameterTrials, RecordedNarrative } from "./autonomous-evidence";
-import { Trends } from "./autonomous-final-views";
-import { CalSpectraComparison } from "./cal-spectra";
-import { NodeDetailTabs, type NodeDetailTab } from "./node-detail-tabs";
-import { ProcessFacts } from "./process-facts";
+import { type NodeDetailTab } from "./node-detail-tabs";
 import { RoundComparison } from "./round-comparison";
 import { RoundDiagnostics } from "./round-diagnostics";
 import { RoundNextRecommendation } from "./round-next-recommendation";
+import { RecordedStatements, RoundParameters } from "./round-recorded-content";
+import { RoundStepSpectra, type SpectraStatus } from "./round-step-spectra";
 
 export function AutonomousRoundDetail({
   threadId,
@@ -35,18 +38,24 @@ export function AutonomousRoundDetail({
   onSelect,
   tab,
   onTabChange,
+  focusStep = null,
+  spectra = null,
+  spectraStatus,
+  onRetrySpectra,
 }: {
   threadId: string;
   summary: AutonomousSummary;
   decision: DecisionView;
   zh: boolean;
-  onSelect: (decision: DecisionView) => void;
+  onSelect: (decision: DecisionView, focus?: string) => void;
   tab: NodeDetailTab;
   onTabChange: (tab: NodeDetailTab) => void;
+  focusStep?: string | null;
+  embedded?: boolean;
+  spectra?: CalSpectra | null;
+  spectraStatus?: SpectraStatus;
+  onRetrySpectra?: () => void;
 }) {
-  const [chartGroup, setChartGroup] = useState<
-    "prediction" | "spectra" | "search" | "trend"
-  >("prediction");
   const query = useProcessResource<unknown>(
     threadId,
     `autonomous/${summary.session_id}/decisions/${decision.decision_id}`,
@@ -69,84 +78,82 @@ export function AutonomousRoundDetail({
   const feedback = details.feedback ?? {};
   const next =
     parsed?.decision_id === decision.decision_id ? parsed.next_decision : null;
-  const pipeline = configuration.actual
-    ? [
-        ...configuration.steps.map((step) =>
-          methodLabel(text(record(step).method), zh),
-        ),
-        methodLabel(configuration.method, zh),
-      ].join(" → ")
-    : decisionPipelineLabel(details.selected, zh);
-  const id = `round-detail-${decision.decision_id}`;
-  const metrics = record(record(feedback.metrics).val);
+  const step = stopping
+    ? "decision"
+    : (focusStep ??
+      (tab === "reason"
+        ? "decision"
+        : tab === "config"
+          ? "model"
+          : "validation"));
+  const index = step.startsWith("preprocess-")
+    ? Number(step.split("-")[1])
+    : -1;
+  const preprocessing =
+    index >= 0 && index < configuration.steps.length
+      ? record(configuration.steps[index])
+      : null;
+  const spectralStep = step === "raw" || Boolean(preprocessing);
+  const validSpectra =
+    spectra &&
+    configuration.actual &&
+    spectra.decision_id === details.decision_id &&
+    spectra.configuration.method === configuration.method &&
+    sameRecordedValue(spectra.configuration.steps, configuration.steps)
+      ? spectra
+      : null;
+  const title =
+    step === "decision"
+      ? zh
+        ? "决策与下一步"
+        : "Decision and next step"
+      : step === "model"
+        ? methodLabel(configuration.method, zh)
+        : step === "validation"
+          ? zh
+            ? "验证结果"
+            : "Validation results"
+          : step === "raw"
+            ? zh
+              ? "原始输入"
+              : "Raw input"
+            : preprocessing
+              ? methodLabel(text(preprocessing.method), zh)
+              : zh
+                ? "预处理记录"
+                : "Preprocessing record";
+  const source = record(summary.data_context.source_file);
+  const noteGroups = [
+    [zh ? "主要观察" : "Observations", proposal.observations],
+    [zh ? "待验证假设" : "Hypotheses", proposal.hypotheses],
+    [zh ? "问题与不确定性" : "Uncertainties", proposal.uncertainties],
+  ] as const;
+  const hasNotes =
+    details.rationale ||
+    details.expected_outcome ||
+    noteGroups.some(([, value]) => recordedStatements(value).length);
   return (
     <section
       className="process-detail-pane bg-card rounded-xl border"
-      aria-label={zh ? "轮次详情" : "Round detail"}
+      aria-label={zh ? "步骤详情" : "Step detail"}
       data-testid="round-detail"
       data-decision-id={decision.decision_id}
+      data-focus-step={step}
     >
-      <header className="shrink-0 space-y-2 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <h3 className="text-lg font-semibold">
-            {stopping
-              ? actionLabel(details.action, zh)
-              : zh
-                ? `第 ${fmt(details.round_index)} 轮 · ${actionLabel(details.action, zh)}`
-                : `Round ${fmt(details.round_index)} · ${actionLabel(details.action, zh)}`}
-          </h3>
-          <span className="text-muted-foreground bg-muted rounded px-2 py-1 text-xs">
-            {executionLabel(details.status, zh)}
-          </span>
-        </div>
-        {!stopping && (
-          <p className="text-sm break-words">
-            {configuration.actual
-              ? zh
-                ? "实际方案："
-                : "Executed: "
-              : zh
-                ? "计划方案："
-                : "Planned: "}
-            {pipeline}
-          </p>
-        )}
-        {!stopping && Object.keys(metrics).length > 0 && (
-          <div>
-            <p className="text-muted-foreground text-xs">
-              {zh ? "验证集（Val）" : "Validation (Val)"}
-              {typeof metrics.n === "number"
-                ? ` · ${metrics.n} ${zh ? "个样本" : "samples"}`
-                : ""}
-            </p>
-            <dl className="mt-2 flex flex-wrap gap-6">
-              {["RMSE", "R2", "RPD"].map((key) => (
-                <div key={key}>
-                  <dt className="text-muted-foreground text-xs">
-                    {key === "R2" ? "R²" : key}
-                  </dt>
-                  <dd className="text-2xl font-semibold tabular-nums">
-                    {fmt(metrics[key])}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        )}
+      <header className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
+        <h3 className="font-semibold">
+          {title || (zh ? "方法未记录" : "Method not recorded")}
+        </h3>
+        <span className="text-muted-foreground text-xs">
+          {executionLabel(details.status, zh)}
+        </span>
       </header>
-      <NodeDetailTabs value={tab} onChange={onTabChange} id={id} zh={zh} />
-      <div
-        className="process-detail-body space-y-4 p-4"
-        id={`${id}-panel`}
-        role="tabpanel"
-        aria-labelledby={`${id}-${tab}`}
-        tabIndex={0}
-      >
+      <div className="process-detail-body space-y-4 p-4">
         {query.isError && (
           <p role="alert" className="text-sm">
             {zh
-              ? "详细记录读取失败，当前显示轮次摘要。"
-              : "Detail read failed; showing the loaded summary."}
+              ? "详细记录读取失败，当前显示已加载摘要。"
+              : "Detail unavailable; showing the loaded summary."}
             <button
               type="button"
               className="ml-2 underline"
@@ -156,290 +163,262 @@ export function AutonomousRoundDetail({
             </button>
           </p>
         )}
-        {tab === "overview" && (
-          <>
-            {!stopping && (
-              <RoundComparison
-                key={details.decision_id}
-                threadId={threadId}
-                summary={summary}
-                decision={details}
-                zh={zh}
-                onSelect={onSelect}
-              />
-            )}
-            <h4 className="text-sm font-semibold">
-              {zh ? "使用的方法与动作" : "Methods and action"}
-            </h4>
-            <p className="text-sm">
-              {stopping ? actionLabel(details.action, zh) : pipeline}
+        {details.status === "failed" && (
+          <div
+            role="alert"
+            className="rounded border border-amber-500/40 p-3 text-sm"
+          >
+            <p>
+              {zh
+                ? "本轮执行失败，没有成功模型结果。"
+                : "Execution failed; no successful model result."}
             </p>
-            <ProcessFacts
-              value={{
-                elapsed_seconds: feedback.elapsed_seconds,
-                failure_reason: feedback.failure_reason,
-                comparisons: feedback.comparisons,
-                retained_experiment_id: details.retained_experiment_id,
-              }}
+            <RecordedStatements value={feedback.failure_reason} zh={zh} />
+          </div>
+        )}
+        {spectralStep && (
+          <>
+            <p className="text-sm">
+              {step === "raw"
+                ? zh
+                  ? "输入：本轮建模使用的原始 Cal 光谱。"
+                  : "Input: original Cal spectra used by this round."
+                : configuration.actual
+                  ? zh
+                    ? `行动：执行${methodLabel(text(preprocessing?.method), zh)}；下图为累计处理到本步的输出。`
+                    : `Action: apply ${methodLabel(text(preprocessing?.method), zh)}; the plot shows cumulative output.`
+                  : zh
+                    ? "以下为计划步骤，尚无成功执行的处理结果。"
+                    : "Planned step; no successful processing output."}
+            </p>
+            {step === "raw" && (
+              <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-muted-foreground text-xs">
+                    {zh ? "文件" : "File"}
+                  </dt>
+                  <dd>
+                    {source.evidence_status === "recorded"
+                      ? text(source.name, 255) ||
+                        (zh ? "未记录名称" : "Name not recorded")
+                      : zh
+                        ? "来源记录未保存文件名"
+                        : "Source filename not recorded"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-xs">
+                    {zh ? "预测目标" : "Target"}
+                  </dt>
+                  <dd>
+                    {text(summary.task.target_name) ||
+                      text(summary.data_context.target_name) ||
+                      text(summary.task.analyte) ||
+                      (zh ? "未记录目标名称" : "Target name not recorded")}
+                  </dd>
+                </div>
+              </dl>
+            )}
+            <RoundStepSpectra
+              decision={details}
+              summary={summary}
               zh={zh}
+              selectedStep={step}
+              spectra={validSpectra}
+              spectraStatus={
+                spectra && !validSpectra ? "mismatch" : spectraStatus
+              }
+              onRetrySpectra={onRetrySpectra}
             />
           </>
         )}
-        {tab === "config" && (
+        {step.startsWith("preprocess-") && !preprocessing && (
+          <p className="text-muted-foreground text-sm">
+            {zh
+              ? "该处理步骤未记录，请选择管线中已有的步骤。"
+              : "This processing step was not recorded; select an available pipeline step."}
+          </p>
+        )}
+        {step === "preprocessing" && (
+          <p className="text-sm">
+            {Array.isArray(record(feedback.actual_configuration).steps) &&
+            configuration.actual
+              ? zh
+                ? "本轮使用原始光谱，没有预处理步骤。"
+                : "Raw spectra used without preprocessing."
+              : zh
+                ? "未保存可核对的预处理执行记录。"
+                : "No verifiable preprocessing execution recorded."}
+          </p>
+        )}
+        {step === "model" && (
           <>
-            <p className="text-sm font-medium">
+            <p className="text-sm">
               {configuration.actual
                 ? zh
-                  ? "实际执行配置"
-                  : "Executed configuration"
+                  ? `行动：使用${methodLabel(configuration.method, zh)}完成本轮拟合。`
+                  : `Action: fitted ${methodLabel(configuration.method, zh)}.`
                 : zh
-                  ? "已接受的计划配置（尚未成功执行）"
-                  : "Accepted plan (not successfully executed)"}
+                  ? `计划：使用${methodLabel(configuration.method, zh)}建模；尚无成功执行配置。`
+                  : `Plan: ${methodLabel(configuration.method, zh)}; no successful configuration.`}
             </p>
-            <dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-3 text-sm">
-              <dt className="text-muted-foreground border-b py-2">
-                {zh ? "数据范围" : "Data scope"}
-              </dt>
-              <dd className="border-b py-2">
-                <ProcessFacts value={summary.data_context} zh={zh} />
-              </dd>
-              <dt className="text-muted-foreground border-b py-2">
-                {zh ? "预处理顺序" : "Preprocessing"}
-              </dt>
-              <dd className="border-b py-2">
-                {configuration.steps.length ? (
-                  <ol className="space-y-2">
-                    {configuration.steps.map((step, index) => (
-                      <li key={index}>
-                        <span className="font-medium">
-                          {index + 1}.{" "}
-                          {methodLabel(text(record(step).method), zh)}
-                        </span>
-                        <ProcessFacts value={record(step).params} zh={zh} />
-                      </li>
-                    ))}
-                  </ol>
-                ) : Array.isArray(
-                    record(details.selected.pipeline).preprocessing,
-                  ) ? (
-                  zh ? (
-                    "原始光谱，无预处理"
-                  ) : (
-                    "Raw spectra, no preprocessing"
-                  )
-                ) : zh ? (
-                  "未记录"
-                ) : (
-                  "Not recorded"
-                )}
-              </dd>
-              <dt className="text-muted-foreground border-b py-2">
-                {zh ? "建模算法" : "Model"}
-              </dt>
-              <dd className="border-b py-2">
-                {methodLabel(configuration.method, zh) || "—"}
-              </dd>
-              <dt className="text-muted-foreground border-b py-2">
-                {zh ? "波长选择" : "Wavelength selection"}
-              </dt>
-              <dd className="border-b py-2">
-                {zh
-                  ? "本轮未记录波长筛选操作"
-                  : "No wavelength selection operation recorded for this round"}
-              </dd>
-              <dt className="text-muted-foreground border-b py-2">
-                {zh ? "参数" : "Parameters"}
-              </dt>
-              <dd className="min-w-0 border-b py-2">
-                <ProcessFacts value={configuration.parameters} zh={zh} />
-              </dd>
-              <dt className="text-muted-foreground border-b py-2">
-                {zh ? "搜索设置" : "Search plan"}
-              </dt>
-              <dd className="min-w-0 border-b py-2">
-                <ProcessFacts value={configuration.optimization} zh={zh} />
-              </dd>
-            </dl>
-
-            <h4 className="text-sm font-semibold">
-              {zh
-                ? "固定模型参数（执行前）"
-                : "Fixed model parameters (before execution)"}
-            </h4>
-            <ProcessFacts
-              value={record(details.selected.pipeline).fixed_params}
-              zh={zh}
-            />
-            <h4 className="text-sm font-semibold">
-              {zh ? "最终拟合参数" : "Final fitted parameters"}
-            </h4>
-            {configuration.actual ? (
-              <ProcessFacts value={configuration.parameters} zh={zh} />
-            ) : (
-              <p className="text-muted-foreground text-sm">
-                {zh
-                  ? "本轮尚无成功执行的最终参数。"
-                  : "No successful fitted parameters recorded."}
-              </p>
-            )}
-          </>
-        )}
-        {tab === "evaluation" && (
-          <>
-            {!stopping && (
-              <div
-                className="flex flex-wrap gap-2"
-                role="group"
-                aria-label={zh ? "图表分组" : "Chart groups"}
-              >
-                {(["prediction", "spectra", "search", "trend"] as const).map(
-                  (key) => (
-                    <button
-                      key={key}
-                      type="button"
-                      aria-pressed={chartGroup === key}
-                      className={`rounded-md border px-3 py-2 text-xs ${chartGroup === key ? "bg-accent text-accent-foreground border-primary" : ""}`}
-                      onClick={() => setChartGroup(key)}
-                    >
-                      {
-                        {
-                          prediction: ["预测诊断", "Prediction"],
-                          spectra: ["光谱对照", "Spectra"],
-                          search: ["参数搜索", "Parameter search"],
-                          trend: ["轮次比较", "Round comparison"],
-                        }[key][zh ? 0 : 1]
-                      }
-                    </button>
-                  ),
-                )}
-              </div>
-            )}
-            {stopping || chartGroup === "trend" ? (
-              <Trends summary={summary} zh={zh} />
-            ) : chartGroup === "prediction" ? (
-              <RoundDiagnostics
-                key={details.decision_id}
-                threadId={threadId}
-                summary={summary}
-                decision={details}
-                zh={zh}
-              />
-            ) : chartGroup === "spectra" ? (
-              details.experiment_id ? (
-                <CalSpectraComparison
-                  threadId={threadId}
-                  summary={summary}
-                  experimentId={details.experiment_id}
-                  zh={zh}
-                />
-              ) : (
-                <p className="text-sm">
-                  {zh
-                    ? "本轮尚无实验光谱记录。"
-                    : "No experiment spectra recorded for this round."}
-                </p>
-              )
-            ) : (
-              <ParameterTrials value={feedback.trials} zh={zh} />
-            )}
-          </>
-        )}
-        {tab === "reason" && (
-          <>
-            <section>
-              <h4 className="mb-2 text-sm font-medium">
-                {zh
-                  ? "执行前记录的选择依据"
-                  : "Recorded rationale before execution"}
-              </h4>
-              <div className="text-sm">
-                <RecordedNarrative value={details.rationale} zh={zh} />
-              </div>
-            </section>
-            {!stopping && (
-              <section>
-                <h4 className="mb-2 text-sm font-medium">
-                  {zh ? "执行前的预期" : "Expected outcome before execution"}
-                </h4>
-                <div className="text-sm">
-                  <RecordedNarrative value={details.expected_outcome} zh={zh} />
-                </div>
-              </section>
-            )}
-            <ProcessFacts
-              value={
-                stopping
-                  ? {
-                      stop_evidence: proposal.stop_evidence,
-                      retained_experiment_id: details.retained_experiment_id,
-                      stop_source: summary.stop_source,
-                    }
-                  : {
-                      observations: proposal.observations,
-                      uncertainties: proposal.uncertainties,
-                      hypotheses: proposal.hypotheses,
-                      expected_improvement: feedback.expected_improvement,
-                      failure_reason: feedback.failure_reason,
-                    }
-              }
-              zh={zh}
-            />
             <details>
               <summary className="cursor-pointer text-sm">
-                {zh
-                  ? "其他备选方案与未采用原因"
-                  : "Alternatives and recorded rejection reasons"}
+                {configuration.actual
+                  ? zh
+                    ? "查看实际模型参数"
+                    : "Fitted model parameters"
+                  : zh
+                    ? "查看计划模型参数"
+                    : "Planned model parameters"}
               </summary>
-              <p className="text-muted-foreground my-2 text-xs">
-                {zh
-                  ? "提出备选方案不表示已经训练或完成验证。"
-                  : "A proposed alternative is not a trained or validated experiment."}
-              </p>
-              <ProcessFacts
-                value={{
-                  alternatives: proposal.alternatives,
-                  not_selected_reasons: proposal.not_selected_reasons,
-                }}
-                zh={zh}
-              />
+              <div className="mt-3">
+                <RoundParameters value={configuration.parameters} zh={zh} />
+              </div>
             </details>
+            {Array.isArray(feedback.trials) && feedback.trials.length > 0 && (
+              <details data-testid="model-parameter-search">
+                <summary className="cursor-pointer text-sm">
+                  {zh
+                    ? "参数评价记录（Cal CV）"
+                    : "Recorded parameter evaluations (Cal CV)"}
+                </summary>
+                <ParameterTrials value={feedback.trials} zh={zh} />
+              </details>
+            )}
+            {hasRecordedContent(configuration.optimization) && (
+              <details>
+                <summary className="cursor-pointer text-sm">
+                  {zh
+                    ? "执行前的参数搜索计划"
+                    : "Parameter search plan before execution"}
+                </summary>
+                <div className="mt-3">
+                  <RoundParameters value={configuration.optimization} zh={zh} />
+                </div>
+              </details>
+            )}
+            <button
+              type="button"
+              className="text-primary text-sm underline"
+              onClick={() => onTabChange("evaluation")}
+            >
+              {zh ? "查看本轮验证结果" : "View validation results"}
+            </button>
+          </>
+        )}
+        {step === "validation" && (
+          <>
+            <RoundDiagnostics
+              key={details.decision_id}
+              threadId={threadId}
+              summary={summary}
+              decision={details}
+              zh={zh}
+              comparison={
+                <RoundComparison
+                  key={details.decision_id}
+                  threadId={threadId}
+                  summary={summary}
+                  decision={details}
+                  zh={zh}
+                  onSelect={onSelect}
+                />
+              }
+            />
+          </>
+        )}
+        {step === "decision" && (
+          <>
             <RoundNextRecommendation
               current={details}
               next={next}
+              summary={summary}
               terminal={isAutonomousTerminal(summary.stage)}
               loading={query.isPending}
               failed={query.isError}
               zh={zh}
               onSelect={onSelect}
             />
+            {!stopping && hasNotes && (
+              <details data-testid="recorded-pre-execution-reasons">
+                <summary className="cursor-pointer text-sm">
+                  {zh
+                    ? "本轮执行前的判断与预期"
+                    : "This round's recorded reasoning and expectations"}
+                </summary>
+                <div className="mt-3 space-y-4 text-sm">
+                  <p className="text-muted-foreground text-xs">
+                    {zh
+                      ? "以下是智能体当时的判断与预期，不代表执行后已经验证的结论。"
+                      : "Recorded pre-execution reasoning and expectations, not verified outcomes."}
+                  </p>
+                  {details.rationale && (
+                    <div>
+                      <h4 className="mb-1 font-medium">
+                        {zh ? "选择理由" : "Rationale"}
+                      </h4>
+                      <RecordedNarrative value={details.rationale} zh={zh} />
+                    </div>
+                  )}
+                  {noteGroups
+                    .filter(([, value]) => recordedStatements(value).length > 0)
+                    .map(([label, value]) => (
+                      <div key={label}>
+                        <h4 className="mb-1 font-medium">{label}</h4>
+                        <RecordedStatements value={value} zh={zh} />
+                      </div>
+                    ))}
+                  {details.expected_outcome && !stopping && (
+                    <div>
+                      <h4 className="mb-1 font-medium">
+                        {zh
+                          ? "执行前预期"
+                          : "Expected outcome before execution"}
+                      </h4>
+                      <RecordedNarrative
+                        value={details.expected_outcome}
+                        zh={zh}
+                      />
+                    </div>
+                  )}
+                </div>
+              </details>
+            )}
           </>
         )}
-        <details className="border-t pt-3 text-xs">
+        <details
+          className="border-t pt-3 text-xs"
+          data-testid="round-run-record"
+        >
           <summary className="cursor-pointer">
-            {zh
-              ? "追溯信息与完整配置"
-              : "Provenance and accepted configuration"}
+            {zh ? "运行记录" : "Run record"}
           </summary>
-          <ProcessFacts
-            value={{
-              decision_id: details.decision_id,
-              experiment_id: details.experiment_id,
-              base_experiment_id: details.base_experiment_id,
-              origin: details.origin,
-              accepted_spec: details.accepted_spec,
-              cv_settings: feedback.cv_settings,
-            }}
-            zh={zh}
-          />
+          {typeof feedback.elapsed_seconds === "number" && (
+            <p className="mt-3">
+              {zh ? "实际耗时：约 " : "Elapsed: about "}
+              {fmt(Math.round(feedback.elapsed_seconds * 10) / 10)}{" "}
+              {zh ? "秒" : "s"}
+            </p>
+          )}
+          <pre className="mt-3 max-h-80 overflow-auto break-all whitespace-pre-wrap">
+            {JSON.stringify(
+              {
+                decision_id: details.decision_id,
+                experiment_id: details.experiment_id,
+                base_experiment_id: details.base_experiment_id,
+                retained_experiment_id: details.retained_experiment_id,
+                origin: details.origin,
+                proposal: details.proposal,
+                accepted_spec: details.accepted_spec,
+                feedback: details.feedback,
+              },
+              null,
+              2,
+            )}
+          </pre>
         </details>
       </div>
-      <footer className="text-muted-foreground flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-4 py-2 text-xs">
-        <span>
-          {zh
-            ? "方法、参数、结果与建议均来自本节点记录"
-            : "Methods, parameters, results and advice use this node's records"}
-        </span>
-      </footer>
     </section>
   );
 }

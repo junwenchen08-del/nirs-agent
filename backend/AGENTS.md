@@ -1,5 +1,15 @@
 # AGENTS.md
 
+New autonomous Cal spectra caches use schema v2 with ordered cumulative step
+outputs observed during a bounded transform by the original Cal-fitted pipeline.
+The optional transform observer never refits, participates in CV or persists in
+model artifacts. The trusted search executor keeps stable Cal rows/channels and
+bounds the whole hash-bound cache; display failures preserve model/fit success.
+AutonomousView verifies execution/configuration, step order/parameters, Cal sample
+and axis alignment, finite values and final-output equality before returning v2.
+V1 before/after caches remain readable without intermediate backfill. No GET
+opens data/estimators or Test. See cal_spectra.py and test_nir_cal_spectra.py.
+
 Autonomous provider projection removes invalid-only assistant calls together
 with their batch-local recovery ToolMessages. DanglingToolCallMiddleware runs
 earlier and may have inserted those failures; pruning only the call produces a

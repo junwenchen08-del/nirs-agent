@@ -582,7 +582,7 @@ test("runtime custom requests still allowlist the four user budget fields", () =
   ).toEqual({ max_fits: 8 });
 });
 
-test("default timeline loads the selected round and excludes rejection and Test chart requests", () => {
+test("default vertical process opens one round detail while keeping Test charts lazy", () => {
   rs.mocked(useRoundHistory).mockReturnValue({
     rows: [parseDecision({ ...decision, round_index: 1 })!],
     total: 25,
@@ -616,10 +616,16 @@ test("default timeline loads the selected round and excludes rejection and Test 
   expect(mocked.mock.calls.map((call) => call[1])).toEqual([
     null,
     "autonomous/search_a",
+    null,
     "autonomous/search_a/decisions/d_a",
     null,
+    null,
+    "autonomous/search_a/rejections?offset=0",
   ]);
-  expect(mocked.mock.calls[2]?.[2]).toBe(false);
+  expect(mocked.mock.calls.at(-1)?.[2]).toBe(false);
+  expect(
+    mocked.mock.calls.every((call) => !String(call[1]).includes("/charts/")),
+  ).toBe(true);
   expect(html).toContain("已加载 1 / 25 次决策");
   expect(html).not.toContain("已注册");
 });
